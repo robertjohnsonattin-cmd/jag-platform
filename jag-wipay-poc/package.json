@@ -1,0 +1,27 @@
+{
+  "name": "jag-wipay-poc",
+  "version": "1.0.0",
+  "description": "JAG Platform WiPay webhook sandbox POC — HMAC verification middleware + webhook handler + test harness",
+  "private": true,
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "build": "tsc",
+    "start": "node dist/src/index.js",
+    "test-webhook": "tsx scripts/send-test-webhook.ts"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "pg": "^8.12.0"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.14.0",
+    "@types/pg": "^8.11.6",
+    "tsx": "^4.16.2",
+    "typescript": "^5.5.2"
+  }
+}

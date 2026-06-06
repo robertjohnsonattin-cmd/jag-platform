@@ -1,0 +1,25 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(docker port *)",
+      "Bash(curl -s http://localhost:3000/health/ready)",
+      "Bash(docker exec jag-api node -e ' *)",
+      "Bash(DATABASE_URL_CORE=postgres://jag_app:jag_password_change_me@localhost:5432/jag_core DATABASE_URL_COMMERCIAL=postgres://jag_app:jag_password_change_me@localhost:5432/jag_commercial DATABASE_URL_ENTERTAINMENT=postgres://jag_app:jag_password_change_me@localhost:5432/jag_entertainment DATABASE_URL_FAMILY=postgres://jag_app:jag_password_change_me@localhost:5432/jag_family DATABASE_URL_PROPERTIES=postgres://jag_app:jag_password_change_me@localhost:5432/jag_properties npm run migrate:all)",
+      "Bash(npm run *)",
+      "Bash(docker compose *)",
+      "Bash(extract-text \"C:\\\\Users\\\\rober\\\\Documents\\\\Claude\\\\Projects\\\\JAG Holdings\\\\JAG_AI_Context_Summary_v2.1.docx\")",
+      "Bash(python C:/Users/rober/AppData/Roaming/Claude/local-agent-mode-sessions/skills-plugin/4ff8a72a-0c68-4c22-9811-012d07624241/800c4995-06ab-4aff-ba1d-35e82e0faa60/skills/docx/scripts/office/unpack.py 'C:/Users/rober/Documents/Claude/Projects/JAG Holdings/JAG_AI_Context_Summary_v2.1.docx' /tmp/jag_context_unpacked/)",
+      "Bash(pandoc \"C:/Users/rober/Documents/Claude/Projects/JAG Holdings/JAG_AI_Context_Summary_v2.1.docx\" -t markdown)",
+      "PowerShell(pandoc \"C:\\\\Users\\\\rober\\\\Documents\\\\Claude\\\\Projects\\\\JAG Holdings\\\\JAG_AI_Context_Summary_v2.1.docx\" -t markdown 2>&1)",
+      "Bash(DATABASE_URL_CORE=postgres://jag_app:jag_password_change_me@localhost:5432/jag_core npm run migrate:core)",
+      "Bash(python3 -m json.tool)",
+      "Bash(curl -s http://127.0.0.1:3000/api/v1/me -w \"HTTP:%{http_code}\")",
+      "Bash(curl -s http://127.0.0.1:3000/health/ready)",
+      "Bash(pandoc \"C:\\\\Users\\\\rober\\\\Documents\\\\Claude\\\\Projects\\\\JAG Holdings\\\\JAG_AI_Context_Summary_v2.1.docx\" -t plain)",
+      "Bash(pandoc \"C:\\\\Users\\\\rober\\\\Documents\\\\Claude\\\\Projects\\\\JAG Holdings\\\\JAG_Engineering_Standards_v1.1.docx\" -t plain)",
+      "Read(//c/Users/rober/AppData/Roaming/Claude/local-agent-mode-sessions/skills-plugin/4ff8a72a-0c68-4c22-9811-012d07624241/800c4995-06ab-4aff-ba1d-35e82e0faa60/skills/docx/**)",
+      "Bash(python scripts/office/unpack.py \"C:\\\\Users\\\\rober\\\\Documents\\\\Claude\\\\Projects\\\\JAG Holdings\\\\JAG_AI_Context_Summary_v2.1.docx\" unpacked_context/)",
+      "Bash(python scripts/office/unpack.py \"C:\\\\Users\\\\rober\\\\Documents\\\\Claude\\\\Projects\\\\JAG Holdings\\\\JAG_Engineering_Standards_v1.1.docx\" unpacked_standards/)"
+    ]
+  }
+}

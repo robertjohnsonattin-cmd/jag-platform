@@ -1,0 +1,36 @@
+import { Router } from 'express';
+import { requireAuth } from '../../middleware/auth';
+import { brianPortalGate } from '../../middleware/brian';
+import { auditorGate }      from '../../middleware/auditor';
+import { accountsRouter }     from './accounts';
+import { transactionsRouter } from './transactions';
+import { netWorthRouter }     from './net-worth';
+import { fxRatesRouter }        from './fx-rates';
+import { investmentsRouter }    from './investments';
+import { loansRouter }          from './loans';
+import { bankStatementsRouter } from './bank-statements';
+import { pendingReviewRouter }  from './pending-review';
+import { glRouter }             from './gl';
+import { expensesRouter }       from './expenses';
+import { intercompanyRouter }   from './intercompany';
+import { insuranceRouter }      from './insurance';
+import { exportRouter }         from './export';
+
+export const financeRouter = Router();
+financeRouter.use(requireAuth());
+financeRouter.use(brianPortalGate('FINANCE'));
+financeRouter.use(auditorGate());
+
+financeRouter.use('/gl',           glRouter);
+financeRouter.use('/expenses',     expensesRouter);
+financeRouter.use('/intercompany', intercompanyRouter);
+financeRouter.use('/insurance',   insuranceRouter);
+financeRouter.use('/export',      exportRouter);
+financeRouter.use('/accounts',     accountsRouter);
+financeRouter.use('/transactions', transactionsRouter);
+financeRouter.use('/net-worth',    netWorthRouter);
+financeRouter.use('/fx-rates',        fxRatesRouter);
+financeRouter.use('/investments',     investmentsRouter);
+financeRouter.use('/loans',           loansRouter);
+financeRouter.use('/bank-statements', bankStatementsRouter);
+financeRouter.use('/pending-review',  pendingReviewRouter);

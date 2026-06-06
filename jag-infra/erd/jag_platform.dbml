@@ -1,0 +1,1491 @@
+// JAG Integrated Business Platform — Entity Relationship Diagram (DBML)
+// Generated: 2026-06-05  |  Architecture v1.9  |  Reflects all migrations through Phase 3
+// Five logical databases:
+//   jag_core         — SSO, users, tenants, audit, Brian portal config
+//   jag_commercial   — IMS, JABCO, CRM, NLCB, DragonBridge
+//   jag_entertainment— BAR + Members Club (single module, separate financial entities)
+//   jag_family       — Family registry, docvault, succession, loyalty, lifestyle
+//   jag_properties   — Property portfolio, tenants, leases, mortgages, pipeline
+//
+// RLS strategy:
+//   jag_core         — superuser migrations only; no app-layer RLS (auth-time data)
+//   jag_commercial   — withTenantRLS  (app.current_tenant_id)
+//   jag_entertainment— withTenantRLS  (app.current_tenant_id)
+//   jag_family       — withOwnerRLS   (app.current_owner_id)
+//   jag_properties   — withOwnerRLS   (app.current_owner_id)
+//
+// Cross-DB references are logical only (no FK enforcement across databases).
+// postgres_fdw may be used in Phase 5 (JAG Holdings) for read-only cross-DB queries.
+//
+// Pending Finance schema (Phase 4): fin_* tables will be added to jag_family in
+// migration 002_finance_schema.sql.
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// DATABASE: jag_core
+// ═══════════════════════════════════════════════════════════════════════════════
+
+Table users [note: 'jag_core — platform user registry; one row per authenticated human'] {
+  id               uuid [pk, not null, default: `gen_random_uuid()`]
+  keycloak_id      text [not null, unique, note: 'Keycloak subject claim (sub)']
+  email            text [not null, unique]
+  display_name     varchar(200) [not null]
+  jag_user_id      uuid [note: 'Self-referential shorthand; same as id. Written back to Keycloak as user attribute']
+  is_active        boolean [not null, default: true]
+  created_at       timestamptz [not null, default: `now()`]
+  updated_at       timestamptz [not null, default: `now()`]
+}
+
+Table tenants [note: 'jag_core — business entity registry'] {
+  id         uuid        [pk, not null, default: `gen_random_uuid()`]
+  code       varchar(50) [not null, unique, note: 'Short code e.g. JABCO, NLCB, DRAGONBRIDGE']
+  name       varchar(200)[not null]
+  is_active  boolean     [not null, default: true]
+  created_at timestamptz [not null, default: `now()`]
+
+  note: 'Seed data: JAG_HOLDINGS / JABCO / PROPERTIES / ENTERTAINMENT / FAMILY / NLCB / DRAGONBRIDGE'
+}
+
+Table roles [note: 'jag_core — role definitions; enforced via Keycloak JWT claims'] {
+  id          uuid        [pk, not null, default: `gen_random_uuid()`]
+  code        varchar(50) [not null, unique, note: 'OWNER / DOMAIN_ADMIN / OPERATOR / AUDITOR / EXTERNAL_ADVISOR / FAMILY_EMERGENCY / BRIAN / SYSTEM']
+  description text
+  created_at  timestamptz [not null, default: `now()`]
+}
+
+Table user_tenant_roles [note: 'jag_core — maps users to tenants with a role; many-to-many bridge'] {
+  id         uuid        [pk, not null, default: `gen_random_uuid()`]
+  user_id    uuid        [not null, ref: > users.id]
+  tenant_id  uuid        [not null, ref: > tenants.id]
+  role_id    uuid        [not null, ref: > roles.id]
+  is_active  boolean     [not null, default: true]
+  granted_by uuid        [ref: > users.id]
+  granted_at timestamptz [not null, default: `now()`]
+  expires_at timestamptz [note: 'NULL = never expires. Used for External Advisor time-limited access']
+
+  indexes {
+    (user_id, tenant_id, role_id) [unique]
+  }
+}
+
+Table audit_log [note: 'jag_core — append-only audit trail; written from all modules'] {
+  id          uuid        [pk, not null, default: `gen_random_uuid()`]
+  tenant_id   uuid        [not null, ref: > tenants.id]
+  user_id     uuid        [ref: > users.id]
+  entity      varchar(50) [not null, note: 'Module tag e.g. IMS, JABCO, PROPS']
+  action      varchar(100)[not null]
+  record_id   uuid
+  old_values  jsonb
+  new_values  jsonb
+  source      varchar(50) [note: 'API, IMPORT, SYSTEM, MIGRATION']
+  created_at  timestamptz [not null, default: `now()`]
+}
+
+Table notifications [note: 'jag_core — notification centre; Tier 1/2/3 delivery log'] {
+  id             uuid        [pk, not null, default: `gen_random_uuid()`]
+  user_id        uuid        [not null, ref: > users.id]
+  tenant_id      uuid        [ref: > tenants.id]
+  tier           smallint    [not null, note: '1=immediate, 2=daily digest, 3=weekly digest']
+  event_code     varchar(100)[not null]
+  title          text        [not null]
+  body           text        [not null]
+  locale         varchar(5)  [not null, default: 'en']
+  is_read        boolean     [not null, default: false]
+  delivered_at   timestamptz
+  created_at     timestamptz [not null, default: `now()`]
+}
+
+Table pending_events_core [note: 'jag_core — outbox table; polled by jag-event-dispatcher every 5 seconds'] {
+  id              uuid        [pk, not null, default: `gen_random_uuid()`]
+  event_type      varchar(100)[not null]
+  payload         jsonb       [not null]
+  idempotency_key uuid        [not null, unique]
+  status          varchar(20) [not null, default: 'PENDING', note: 'PENDING / DISPATCHED / FAILED']
+  retry_count     smallint    [not null, default: 0]
+  created_at      timestamptz [not null, default: `now()`]
+  dispatched_at   timestamptz
+}
+
+Table brian_portal_config [note: 'jag_core — single-row: resolves Brian user ID without querying RLS tables'] {
+  brian_user_id     uuid [not null, ref: > users.id]
+  default_tenant_id uuid [not null, ref: > tenants.id]
+  created_at        timestamptz [not null, default: `now()`]
+}
+
+Table brian_module_permissions [note: 'jag_core — Robert controls which modules Brian can access'] {
+  module       varchar(50) [pk, not null, note: 'PROPERTIES / JABCO / IMS / CRM / FAMILY / NLCB / DRAGONBRIDGE / ENTERTAINMENT / etc.']
+  access_level varchar(5)  [not null, default: 'NONE', note: 'NONE / READ / WRITE']
+  granted_by   uuid        [ref: > users.id]
+  granted_at   timestamptz
+  notes        text
+  updated_at   timestamptz [not null, default: `now()`]
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// DATABASE: jag_commercial — IMS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+Table ims_locations [note: 'jag_commercial — physical storage locations (warehouses, site cribs, vehicles)'] {
+  id               uuid        [pk, not null, default: `gen_random_uuid()`]
+  tenant_id        uuid        [not null, note: 'RLS: app.current_tenant_id']
+  code             varchar(20) [not null]
+  name             varchar(200)[not null]
+  address          text
+  is_active        boolean     [not null, default: true]
+  last_modified_at timestamptz [not null, default: `now()`]
+  created_at       timestamptz [not null, default: `now()`]
+}
+
+Table ims_categories [note: 'jag_commercial — item category hierarchy'] {
+  id               uuid        [pk, not null, default: `gen_random_uuid()`]
+  tenant_id        uuid        [not null]
+  parent_category_id uuid      [ref: > ims_categories.id]
+  name             varchar(100)[not null]
+  description      text
+  last_modified_at timestamptz [not null, default: `now()`]
+  created_at       timestamptz [not null, default: `now()`]
+}
+
+Table ims_tags [note: 'jag_commercial — colour-coded tags for filtering items'] {
+  id        uuid        [pk, not null, default: `gen_random_uuid()`]
+  tenant_id uuid        [not null]
+  name      varchar(50) [not null]
+  color     varchar(7)  [note: 'Hex colour #RRGGBB']
+}
+
+Table ims_items [note: 'jag_commercial — inventory master catalogue'] {
+  id               uuid          [pk, not null, default: `gen_random_uuid()`]
+  tenant_id        uuid          [not null]
+  location_id      uuid          [not null, ref: > ims_locations.id]
+  category_id      uuid          [ref: > ims_categories.id]
+  name             varchar(200)  [not null]
+  sku              varchar(100)
+  description      text
+  unit_of_measure  varchar(20)   [not null, default: 'EACH']
+  qty_on_hand      numeric(12,3) [not null, default: 0]
+  qty_reserved     numeric(12,3) [not null, default: 0]
+  reorder_point    numeric(12,3)
+  unit_cost        numeric(12,2)
+  vat_code         varchar(10)   [not null, default: 'STANDARD', note: 'STANDARD / ZERO / EXEMPT']
+  is_active        boolean       [not null, default: true]
+  last_modified_at timestamptz   [not null, default: `now()`]
+  created_at       timestamptz   [not null, default: `now()`]
+  updated_at       timestamptz   [not null, default: `now()`]
+}
+
+Table ims_item_tags [note: 'jag_commercial — item ↔ tag many-to-many'] {
+  item_id uuid [not null, ref: > ims_items.id]
+  tag_id  uuid [not null, ref: > ims_tags.id]
+
+  indexes {
+    (item_id, tag_id) [pk]
+  }
+}
+
+Table ims_barcodes [note: 'jag_commercial — barcodes / QR codes per item'] {
+  id             uuid       [pk, not null, default: `gen_random_uuid()`]
+  item_id        uuid       [not null, ref: > ims_items.id]
+  barcode_value  text       [not null]
+  barcode_type   varchar(20)[not null, note: 'CODE128 / QR / EAN13 / etc.']
+  is_primary     boolean    [not null, default: false]
+  created_at     timestamptz[not null, default: `now()`]
+}
+
+Table ims_vehicles [note: 'jag_commercial — vehicle metadata attached to fleet items'] {
+  id              uuid        [pk, not null, default: `gen_random_uuid()`]
+  item_id         uuid        [not null, unique, ref: > ims_items.id]
+  make            varchar(100)
+  model           varchar(100)
+  year            smallint
+  plate_number    varchar(20)
+  vin             varchar(50)
+  engine_number   varchar(50)
+  colour          varchar(50)
+  last_modified_at timestamptz[not null, default: `now()`]
+}
+
+Table ims_stock_movements [note: 'jag_commercial — stock ledger; every qty change is a row (STD-11)'] {
+  id               uuid          [pk, not null, default: `gen_random_uuid()`]
+  tenant_id        uuid          [not null]
+  item_id          uuid          [not null, ref: > ims_items.id]
+  from_location_id uuid          [ref: > ims_locations.id]
+  to_location_id   uuid          [ref: > ims_locations.id]
+  movement_type    varchar(20)   [not null, note: 'RECEIVE / ISSUE / TRANSFER / ADJUSTMENT / SALE / RETURN / WRITE_OFF']
+  quantity         numeric(12,3) [not null]
+  unit_cost        numeric(12,2)
+  sale_price       numeric(12,2) [note: 'SALE movements only']
+  vat_amount       numeric(12,2) [note: 'SALE movements only']
+  customer_name    varchar(200)  [note: 'SALE movements only']
+  internal_entity  uuid          [note: 'Optional: which JAG entity received the goods']
+  reference        varchar(200)
+  notes            text
+  idempotency_key  uuid          [not null, unique]
+  created_by       uuid          [not null]
+  created_at       timestamptz   [not null, default: `now()`]
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// DATABASE: jag_commercial — JABCO Construction
+// ═══════════════════════════════════════════════════════════════════════════════
+
+Table jabco_projects [note: 'jag_commercial — construction project register'] {
+  id               uuid          [pk, not null, default: `gen_random_uuid()`]
+  tenant_id        uuid          [not null]
+  project_code     varchar(20)   [not null, unique]
+  name             varchar(200)  [not null]
+  client_name      varchar(200)  [not null]
+  client_type      varchar(20)   [not null, note: 'GOVERNMENT / PRIVATE']
+  contract_value   numeric(14,2) [not null]
+  currency         char(3)       [not null, default: 'TTD']
+  vat_inclusive    boolean       [not null, default: false]
+  vat_pct          numeric(5,2)  [not null, default: 12.5]
+  status           varchar(20)   [not null, note: 'TENDER / ACTIVE / PRACTICAL_COMPLETION / DEFECTS_LIABILITY / COMPLETED / CANCELLED']
+  start_date       date
+  end_date         date
+  notes            text
+  idempotency_key  text          [not null, unique]
+  last_modified_at timestamptz   [not null, default: `now()`]
+  created_at       timestamptz   [not null, default: `now()`]
+  updated_at       timestamptz   [not null, default: `now()`]
+}
+
+Table jabco_boq_items [note: 'jag_commercial — bill of quantities; budget vs actual tracking'] {
+  id               uuid          [pk, not null, default: `gen_random_uuid()`]
+  tenant_id        uuid          [not null]
+  project_id       uuid          [not null, ref: > jabco_projects.id]
+  section          varchar(100)  [not null]
+  item_number      varchar(20)
+  description      text          [not null]
+  unit             varchar(20)   [not null]
+  qty_budgeted     numeric(12,3) [not null]
+  rate             numeric(12,2) [not null]
+  amount_budgeted  numeric(14,2) [not null]
+  amount_actual    numeric(14,2) [not null, default: 0]
+  notes            text
+  created_at       timestamptz   [not null, default: `now()`]
+  updated_at       timestamptz   [not null, default: `now()`]
+}
+
+Table jabco_variation_orders [note: 'jag_commercial — approved scope changes to a contract'] {
+  id              uuid          [pk, not null, default: `gen_random_uuid()`]
+  tenant_id       uuid          [not null]
+  project_id      uuid          [not null, ref: > jabco_projects.id]
+  vo_number       varchar(20)   [not null]
+  description     text          [not null]
+  amount          numeric(14,2) [not null]
+  currency        char(3)       [not null, default: 'TTD']
+  status          varchar(20)   [not null, note: 'DRAFT / SUBMITTED / APPROVED / REJECTED']
+  submitted_date  date
+  approved_date   date
+  notes           text
+  idempotency_key text          [not null, unique]
+  created_at      timestamptz   [not null, default: `now()`]
+  updated_at      timestamptz   [not null, default: `now()`]
+}
+
+Table jabco_progress_claims [note: 'jag_commercial — interim payment applications'] {
+  id                uuid          [pk, not null, default: `gen_random_uuid()`]
+  tenant_id         uuid          [not null]
+  project_id        uuid          [not null, ref: > jabco_projects.id]
+  claim_number      smallint      [not null]
+  period_from       date          [not null]
+  period_to         date          [not null]
+  amount_claimed    numeric(14,2) [not null]
+  notes             text
+  idempotency_key   text          [not null, unique]
+  created_at        timestamptz   [not null, default: `now()`]
+  updated_at        timestamptz   [not null, default: `now()`]
+}
+
+Table jabco_payment_certificates [note: 'jag_commercial — certified payment against a progress claim'] {
+  id               uuid          [pk, not null, default: `gen_random_uuid()`]
+  tenant_id        uuid          [not null]
+  project_id       uuid          [not null, ref: > jabco_projects.id]
+  claim_id         uuid          [ref: > jabco_progress_claims.id]
+  cert_number      smallint      [not null]
+  amount_certified numeric(14,2) [not null]
+  vat_pct          numeric(5,2)  [not null, default: 12.5]
+  vat_amount       numeric(14,2) [not null, default: 0]
+  gross_certified  numeric(14,2) [not null, default: 0]
+  retention_pct    numeric(5,2)  [not null, default: 0]
+  retention_amount numeric(14,2) [not null, default: 0]
+  net_payable      numeric(14,2) [not null, default: 0]
+  status           varchar(20)   [not null, note: 'DRAFT / ISSUED / PAID']
+  issued_date      date
+  paid_date        date
+  notes            text
+  idempotency_key  text          [not null, unique]
+  created_at       timestamptz   [not null, default: `now()`]
+  updated_at       timestamptz   [not null, default: `now()`]
+}
+
+Table jabco_retention_releases [note: 'jag_commercial — retention money released on PC / defects expiry'] {
+  id              uuid          [pk, not null, default: `gen_random_uuid()`]
+  tenant_id       uuid          [not null]
+  project_id      uuid          [not null, ref: > jabco_projects.id]
+  release_type    varchar(20)   [not null, note: 'PRACTICAL_COMPLETION / DEFECTS_LIABILITY']
+  amount          numeric(14,2) [not null]
+  release_date    date          [not null]
+  notes           text
+  idempotency_key text          [not null, unique]
+  created_at      timestamptz   [not null, default: `now()`]
+}
+
+Table jabco_site_diary [note: 'jag_commercial — foreman daily site diary (offline-critical)'] {
+  id               uuid        [pk, not null, default: `gen_random_uuid()`]
+  tenant_id        uuid        [not null]
+  project_id       uuid        [not null, ref: > jabco_projects.id]
+  entry_date       date        [not null]
+  weather          varchar(50)
+  workers_on_site  smallint
+  activities       text        [not null]
+  materials_used   text
+  issues           text
+  photos           jsonb       [note: 'Array of MinIO object paths']
+  created_by       uuid        [not null]
+  idempotency_key  text        [not null, unique]
+  last_modified_at timestamptz [not null, default: `now()`]
+  created_at       timestamptz [not null, default: `now()`]
+}
+
+Table jabco_gantt_tasks [note: 'jag_commercial — Gantt programme vs actuals'] {
+  id               uuid        [pk, not null, default: `gen_random_uuid()`]
+  tenant_id        uuid        [not null]
+  project_id       uuid        [not null, ref: > jabco_projects.id]
+  parent_task_id   uuid        [ref: > jabco_gantt_tasks.id]
+  task_name        varchar(200)[not null]
+  planned_start    date
+  planned_end      date
+  actual_start     date
+  actual_end       date
+  pct_complete     numeric(5,2)[not null, default: 0]
+  sort_order       integer     [not null, default: 0]
+  last_modified_at timestamptz [not null, default: `now()`]
+  created_at       timestamptz [not null, default: `now()`]
+}
+
+Table jabco_vendor_invoices [note: 'jag_commercial — supplier and subcontractor invoices per project'] {
+  id              uuid         [pk, not null, default: `gen_random_uuid()`]
+  tenant_id       uuid         [not null]
+  project_id      uuid         [not null, ref: > jabco_projects.id]
+  vendor_name     varchar(200) [not null]
+  vendor_type     varchar(50)  [not null, default: 'SUPPLIER', note: 'SUPPLIER / SUBCONTRACTOR']
+  invoice_ref     varchar(100)
+  invoice_date    date         [not null]
+  due_date        date
+  amount          numeric(12,2)[not null]
+  vat_code        varchar(10)  [not null, default: 'STANDARD']
+  vat_amount      numeric(12,2)[not null, default: 0]
+  status          varchar(20)  [not null, default: 'RECEIVED', note: 'RECEIVED / APPROVED / PAID']
+  approved_by     uuid
+  approved_at     timestamptz
+  paid_date       date
+  payment_reference varchar(200)
+  notes           text
+  idempotency_key uuid         [not null, unique]
+  created_by      uuid         [not null]
+  created_at      timestamptz  [not null, default: `now()`]
+  updated_at      timestamptz  [not null, default: `now()`]
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// DATABASE: jag_commercial — CRM
+// ═══════════════════════════════════════════════════════════════════════════════
+
+Table crm_companies [note: 'jag_commercial — company / organisation master'] {
+  id               uuid         [pk, not null, default: `gen_random_uuid()`]
+  tenant_id        uuid         [not null]
+  name             varchar(200) [not null]
+  industry         varchar(100)
+  country          varchar(100) [not null, default: 'Trinidad and Tobago']
+  phone            varchar(30)
+  email            text
+  website          text
+  notes            text
+  is_active        boolean      [not null, default: true]
+  last_modified_at timestamptz  [not null, default: `now()`]
+  created_at       timestamptz  [not null, default: `now()`]
+  updated_at       timestamptz  [not null, default: `now()`]
+}
+
+Table crm_contacts [note: 'jag_commercial — individual contact master'] {
+  id               uuid         [pk, not null, default: `gen_random_uuid()`]
+  tenant_id        uuid         [not null]
+  company_id       uuid         [ref: > crm_companies.id]
+  first_name       varchar(100) [not null]
+  last_name        varchar(100)
+  email            text
+  phone            varchar(30)
+  role             varchar(100)
+  is_active        boolean      [not null, default: true]
+  last_modified_at timestamptz  [not null, default: `now()`]
+  created_at       timestamptz  [not null, default: `now()`]
+  updated_at       timestamptz  [not null, default: `now()`]
+}
+
+Table crm_opportunities [note: 'jag_commercial — JABCO sales pipeline deals'] {
+  id               uuid          [pk, not null, default: `gen_random_uuid()`]
+  tenant_id        uuid          [not null]
+  company_id       uuid          [ref: > crm_companies.id]
+  contact_id       uuid          [ref: > crm_contacts.id]
+  name             varchar(200)  [not null]
+  stage            varchar(50)   [not null, note: 'LEAD / QUALIFIED / PROPOSAL / NEGOTIATION / WON / LOST']
+  estimated_value  numeric(14,2)
+  currency         char(3)       [not null, default: 'TTD']
+  expected_close   date
+  notes            text
+  last_modified_at timestamptz   [not null, default: `now()`]
+  created_at       timestamptz   [not null, default: `now()`]
+  updated_at       timestamptz   [not null, default: `now()`]
+}
+
+Table crm_interactions [note: 'jag_commercial — logged touchpoints against a contact'] {
+  id               uuid         [pk, not null, default: `gen_random_uuid()`]
+  tenant_id        uuid         [not null]
+  contact_id       uuid         [not null, ref: > crm_contacts.id]
+  opportunity_id   uuid         [ref: > crm_opportunities.id]
+  interaction_type varchar(30)  [not null, note: 'CALL / EMAIL / MEETING / SITE_VISIT / NOTE']
+  summary          text         [not null]
+  occurred_at      timestamptz  [not null]
+  created_by       uuid         [not null]
+  created_at       timestamptz  [not null, default: `now()`]
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// DATABASE: jag_commercial — NLCB Lottery Booth
+// ═══════════════════════════════════════════════════════════════════════════════
+
+Table nlcb_games [note: 'jag_commercial — draw game master (Play Whe, Cash Pot, etc.)'] {
+  id                      uuid         [pk, not null, default: `gen_random_uuid()`]
+  tenant_id               uuid         [not null]
+  name                    varchar(100) [not null]
+  draw_frequency          varchar(20)  [not null]
+  commission_rate         numeric(5,2) [not null]
+  max_agent_payout        numeric(12,2)[not null, default: 5600.00]
+  cashing_commission_rate numeric(5,2) [not null, default: 1.00]
+  is_active               boolean      [not null, default: true]
+  last_modified_at        timestamptz  [not null, default: `now()`]
+  created_at              timestamptz  [not null, default: `now()`]
+}
+
+Table nlcb_scratch_games [note: 'jag_commercial — scratch ticket game master'] {
+  id                      uuid         [pk, not null, default: `gen_random_uuid()`]
+  tenant_id               uuid         [not null]
+  name                    varchar(100) [not null]
+  face_value              numeric(8,2) [not null]
+  commission_rate         numeric(5,2) [not null]
+  max_agent_payout        numeric(12,2)[not null, default: 12000.00]
+  cashing_commission_rate numeric(5,2) [not null, default: 1.00]
+  is_active               boolean      [not null, default: true]
+  last_modified_at        timestamptz  [not null, default: `now()`]
+  created_at              timestamptz  [not null, default: `now()`]
+}
+
+Table nlcb_daily_sessions [note: 'jag_commercial — one trading session per day'] {
+  id               uuid         [pk, not null, default: `gen_random_uuid()`]
+  tenant_id        uuid         [not null]
+  session_date     date         [not null]
+  opened_by        uuid         [not null]
+  cash_float_open  numeric(12,2)[not null]
+  cash_float_close numeric(12,2)
+  status           varchar(10)  [not null, default: 'OPEN', note: 'OPEN / CLOSED']
+  notes            text
+  opened_at        timestamptz  [not null, default: `now()`]
+  closed_at        timestamptz
+  last_modified_at timestamptz  [not null, default: `now()`]
+  created_at       timestamptz  [not null, default: `now()`]
+
+  indexes {
+    (tenant_id, session_date) [unique]
+  }
+}
+
+Table nlcb_sales [note: 'jag_commercial — draw game sales per session (STD-11)'] {
+  id                uuid         [pk, not null, default: `gen_random_uuid()`]
+  tenant_id         uuid         [not null]
+  session_id        uuid         [not null, ref: > nlcb_daily_sessions.id]
+  game_id           uuid         [not null, ref: > nlcb_games.id]
+  gross_sales       numeric(12,2)[not null]
+  commission_rate   numeric(5,2) [not null]
+  commission_amount numeric(12,2)[not null]
+  idempotency_key   uuid         [not null, unique]
+  created_by        uuid         [not null]
+  created_at        timestamptz  [not null, default: `now()`]
+}
+
+Table nlcb_payouts [note: 'jag_commercial — prize payments at booth (draw games, STD-11)'] {
+  id                      uuid         [pk, not null, default: `gen_random_uuid()`]
+  tenant_id               uuid         [not null]
+  session_id              uuid         [not null, ref: > nlcb_daily_sessions.id]
+  game_id                 uuid         [not null, ref: > nlcb_games.id]
+  payout_amount           numeric(12,2)[not null]
+  is_large_win            boolean      [not null, default: false, note: 'true = winner goes to NLCB office']
+  cashing_commission_rate numeric(5,2) [not null, default: 1.00]
+  cashing_commission_amount numeric(12,2)[not null, default: 0]
+  ticket_ref              varchar(100)
+  notes                   text
+  idempotency_key         uuid         [not null, unique]
+  created_by              uuid         [not null]
+  created_at              timestamptz  [not null, default: `now()`]
+}
+
+Table nlcb_scratch_pack_purchases [note: 'jag_commercial — presold packs; cash paid to NLCB upfront'] {
+  id                    uuid         [pk, not null, default: `gen_random_uuid()`]
+  tenant_id             uuid         [not null]
+  game_id               uuid         [not null, ref: > nlcb_scratch_games.id]
+  purchase_date         date         [not null]
+  packs_purchased       int          [not null]
+  tickets_per_pack      int          [not null, default: 50]
+  total_tickets         int          [note: 'Computed: packs × tickets_per_pack']
+  face_value_per_ticket numeric(8,2) [not null]
+  total_face_value      numeric(12,2)[not null]
+  commission_rate       numeric(5,2) [not null]
+  commission_amount     numeric(12,2)[not null, note: 'Profit locked in at purchase']
+  purchase_price        numeric(12,2)[not null, note: 'Cash paid = total_face_value − commission_amount']
+  delivery_ref          varchar(100)
+  received_by           uuid         [not null]
+  notes                 text
+  created_at            timestamptz  [not null, default: `now()`]
+}
+
+Table nlcb_scratch_sales [note: 'jag_commercial — scratch ticket sales per session (cash-flow reconciliation)'] {
+  id               uuid         [pk, not null, default: `gen_random_uuid()`]
+  tenant_id        uuid         [not null]
+  session_id       uuid         [not null, ref: > nlcb_daily_sessions.id]
+  game_id          uuid         [not null, ref: > nlcb_scratch_games.id]
+  pack_purchase_id uuid         [ref: > nlcb_scratch_pack_purchases.id]
+  tickets_sold     int          [not null]
+  gross_value      numeric(12,2)[not null]
+  idempotency_key  uuid         [not null, unique]
+  created_by       uuid         [not null]
+  created_at       timestamptz  [not null, default: `now()`]
+}
+
+Table nlcb_scratch_winnings [note: 'jag_commercial — scratch ticket prize payouts at booth (STD-11)'] {
+  id                       uuid         [pk, not null, default: `gen_random_uuid()`]
+  tenant_id                uuid         [not null]
+  session_id               uuid         [not null, ref: > nlcb_daily_sessions.id]
+  game_id                  uuid         [not null, ref: > nlcb_scratch_games.id]
+  payout_amount            numeric(12,2)[not null]
+  is_large_win             boolean      [not null, default: false]
+  cashing_commission_rate  numeric(5,2) [not null, default: 1.00]
+  cashing_commission_amount numeric(12,2)[not null, default: 0]
+  ticket_ref               varchar(100)
+  idempotency_key          uuid         [not null, unique]
+  created_by               uuid         [not null]
+  created_at               timestamptz  [not null, default: `now()`]
+}
+
+Table nlcb_weekly_settlements [note: 'jag_commercial — weekly net remittance to NLCB (STD-11)'] {
+  id                              uuid         [pk, not null, default: `gen_random_uuid()`]
+  tenant_id                       uuid         [not null]
+  week_start                      date         [not null]
+  week_end                        date         [not null]
+  total_sales                     numeric(12,2)[not null, default: 0]
+  total_payouts                   numeric(12,2)[not null, default: 0]
+  total_commission                numeric(12,2)[not null, default: 0]
+  total_draw_cashing_commission   numeric(12,2)[not null, default: 0]
+  total_scratch_cashing_commission numeric(12,2)[not null, default: 0]
+  net_owed                        numeric(12,2)[not null, default: 0]
+  status                          varchar(10)  [not null, default: 'PENDING', note: 'PENDING / PAID']
+  paid_at                         timestamptz
+  paid_amount                     numeric(12,2)
+  reference_number                varchar(100)
+  notes                           text
+  idempotency_key                 uuid         [not null, unique]
+  created_by                      uuid         [not null]
+  created_at                      timestamptz  [not null, default: `now()`]
+
+  indexes {
+    (tenant_id, week_start) [unique]
+  }
+}
+
+Table nlcb_expenses [note: 'jag_commercial — booth operating expenses (STD-11)'] {
+  id              uuid         [pk, not null, default: `gen_random_uuid()`]
+  tenant_id       uuid         [not null]
+  expense_date    date         [not null]
+  category        varchar(50)  [not null, note: 'RENT / UTILITY / SUPPLIES / STAFF / OTHER']
+  description     text         [not null]
+  amount          numeric(12,2)[not null]
+  vat_amount      numeric(12,2)[not null, default: 0]
+  vendor_name     varchar(200)
+  status          varchar(10)  [not null, default: 'PENDING', note: 'PENDING / PAID']
+  paid_at         timestamptz
+  notes           text
+  idempotency_key uuid         [not null, unique]
+  created_by      uuid         [not null]
+  created_at      timestamptz  [not null, default: `now()`]
+}
+
+Table nlcb_biller_types [note: 'jag_commercial — utility/service biller master for bill payment service'] {
+  id          uuid         [pk, not null, default: `gen_random_uuid()`]
+  tenant_id   uuid         [not null]
+  name        varchar(200) [not null]
+  category    varchar(50)  [not null]
+  flat_fee    numeric(8,2) [not null, default: 0]
+  is_active   boolean      [not null, default: true]
+  created_at  timestamptz  [not null, default: `now()`]
+}
+
+Table nlcb_bill_collections [note: 'jag_commercial — bill payment collections at booth (STD-11)'] {
+  id              uuid         [pk, not null, default: `gen_random_uuid()`]
+  tenant_id       uuid         [not null]
+  session_id      uuid         [not null, ref: > nlcb_daily_sessions.id]
+  biller_id       uuid         [not null, ref: > nlcb_biller_types.id]
+  amount_collected numeric(12,2)[not null]
+  flat_fee        numeric(8,2) [not null]
+  idempotency_key uuid         [not null, unique]
+  created_by      uuid         [not null]
+  created_at      timestamptz  [not null, default: `now()`]
+}
+
+Table nlcb_config [note: 'jag_commercial — one-row NLCB config per tenant'] {
+  id         uuid         [pk, not null, default: `gen_random_uuid()`]
+  tenant_id  uuid         [not null, unique]
+  updated_at timestamptz  [not null, default: `now()`]
+  updated_by uuid
+}
+
+Table pending_events_commercial [note: 'jag_commercial — outbox table for jag-event-dispatcher'] {
+  id              uuid        [pk, not null, default: `gen_random_uuid()`]
+  event_type      varchar(100)[not null]
+  payload         jsonb       [not null]
+  idempotency_key uuid        [not null, unique]
+  status          varchar(20) [not null, default: 'PENDING']
+  retry_count     smallint    [not null, default: 0]
+  created_at      timestamptz [not null, default: `now()`]
+  dispatched_at   timestamptz
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// DATABASE: jag_commercial — DragonBridge
+// ═══════════════════════════════════════════════════════════════════════════════
+
+Table db_config [note: 'jag_commercial — one-row DragonBridge config per tenant'] {
+  id                           uuid         [pk, not null, default: `gen_random_uuid()`]
+  tenant_id                    uuid         [not null, unique]
+  deposit_pct_default          numeric(5,2) [not null, default: 30.00]
+  balance_trigger              varchar(15)  [not null, default: 'PRE_DELIVERY']
+  variance_threshold_pct       numeric(5,2) [not null, default: 5.00]
+  default_vat_pct              numeric(5,2) [not null, default: 12.50]
+  agency_fee_pct               numeric(5,2) [not null, default: 5.00]
+  freight_apportionment_method varchar(10)  [not null, default: 'CBM', note: 'CBM / VALUE / EQUAL']
+  updated_at                   timestamptz  [not null, default: `now()`]
+  updated_by                   uuid
+}
+
+Table db_pricing_tiers [note: 'jag_commercial — DragonBridge client pricing tiers'] {
+  id                 uuid         [pk, not null, default: `gen_random_uuid()`]
+  tenant_id          uuid         [not null]
+  name               varchar(50)  [not null]
+  default_margin_pct numeric(5,2) [not null]
+  description        text
+  is_active          boolean      [not null, default: true]
+  created_at         timestamptz  [not null, default: `now()`]
+  updated_at         timestamptz  [not null, default: `now()`]
+
+  indexes {
+    (tenant_id, name) [unique]
+  }
+}
+
+Table db_suppliers [note: 'jag_commercial — China-based supply partners'] {
+  id               uuid         [pk, not null, default: `gen_random_uuid()`]
+  tenant_id        uuid         [not null]
+  name             varchar(200) [not null]
+  contact_name     varchar(100)
+  contact_email    varchar(200)
+  contact_phone    varchar(50)
+  address          text
+  currency         char(3)      [not null, default: 'CNY']
+  payment_terms    text
+  is_active        boolean      [not null, default: true]
+  last_modified_at timestamptz  [not null, default: `now()`]
+  created_at       timestamptz  [not null, default: `now()`]
+  updated_at       timestamptz  [not null, default: `now()`]
+}
+
+Table db_products [note: 'jag_commercial — DragonBridge product catalogue with HS codes'] {
+  id               uuid          [pk, not null, default: `gen_random_uuid()`]
+  tenant_id        uuid          [not null]
+  supplier_id      uuid          [not null, ref: > db_suppliers.id]
+  name             varchar(200)  [not null]
+  description      text
+  hs_code          varchar(10)   [not null]
+  unit_cost_cny    numeric(14,4) [not null]
+  unit             varchar(20)   [not null, default: 'EACH']
+  duty_rate        numeric(6,4)  [not null, default: 0, note: 'T&T customs rate; 0.20 = 20%']
+  is_active        boolean       [not null, default: true]
+  last_modified_at timestamptz   [not null, default: `now()`]
+  created_at       timestamptz   [not null, default: `now()`]
+  updated_at       timestamptz   [not null, default: `now()`]
+}
+
+Table db_clients [note: 'jag_commercial — B2B and B2C clients'] {
+  id               uuid         [pk, not null, default: `gen_random_uuid()`]
+  tenant_id        uuid         [not null]
+  client_type      varchar(5)   [not null, note: 'B2B / B2C']
+  name             varchar(200) [not null]
+  company_name     varchar(200)
+  contact_name     varchar(100)
+  contact_email    varchar(200)
+  contact_phone    varchar(50)
+  address          text
+  pricing_tier_id  uuid         [ref: > db_pricing_tiers.id]
+  is_active        boolean      [not null, default: true]
+  last_modified_at timestamptz  [not null, default: `now()`]
+  created_at       timestamptz  [not null, default: `now()`]
+  updated_at       timestamptz  [not null, default: `now()`]
+}
+
+Table db_quotes [note: 'jag_commercial — landed cost quote with FX snapshot'] {
+  id                     uuid         [pk, not null, default: `gen_random_uuid()`]
+  tenant_id              uuid         [not null]
+  client_id              uuid         [not null, ref: > db_clients.id]
+  jag_role               varchar(10)  [not null, note: 'AGENT / IMPORTER']
+  status                 varchar(10)  [not null, default: 'DRAFT']
+  margin_pct             numeric(5,2) [note: 'IMPORTER mode only']
+  fx_cny_usd             numeric(12,6)[not null]
+  fx_usd_ttd             numeric(12,6)[not null]
+  est_freight_usd        numeric(14,2)[not null, default: 0]
+  est_insurance_usd      numeric(14,2)[not null, default: 0]
+  est_local_delivery_ttd numeric(14,2)[not null, default: 0]
+  agency_fee_pct         numeric(5,2) [note: 'AGENT mode only']
+  est_agency_fee_ttd     numeric(14,2)[not null, default: 0]
+  est_total_ttd          numeric(16,2)[not null, default: 0]
+  valid_until            date
+  notes                  text
+  created_by             uuid         [not null]
+  created_at             timestamptz  [not null, default: `now()`]
+  updated_at             timestamptz  [not null, default: `now()`]
+}
+
+Table db_quote_items [note: 'jag_commercial — per-line items on a quote; all costs snapshotted'] {
+  id                  uuid          [pk, not null, default: `gen_random_uuid()`]
+  quote_id            uuid          [not null, ref: > db_quotes.id]
+  product_id          uuid          [ref: > db_products.id]
+  product_name        varchar(200)  [not null]
+  hs_code             varchar(10)   [not null]
+  unit_cost_cny       numeric(14,4) [not null]
+  duty_rate           numeric(6,4)  [not null]
+  qty                 numeric(12,3) [not null]
+  unit                varchar(20)   [not null]
+  gross_volume_cbm    numeric(10,4)
+  est_duty_ttd        numeric(14,2) [not null, default: 0]
+  est_vat_ttd         numeric(14,2) [not null, default: 0]
+  est_landed_cost_ttd numeric(16,2) [not null, default: 0]
+  notes               text
+}
+
+Table db_orders [note: 'jag_commercial — confirmed order from accepted quote'] {
+  id                      uuid         [pk, not null, default: `gen_random_uuid()`]
+  tenant_id               uuid         [not null]
+  quote_id                uuid         [not null, unique, ref: > db_quotes.id]
+  client_id               uuid         [not null, ref: > db_clients.id]
+  jag_role                varchar(10)  [not null]
+  status                  varchar(20)  [not null, default: 'CONFIRMED']
+  deposit_pct             numeric(5,2) [not null]
+  deposit_amount_ttd      numeric(16,2)[not null]
+  deposit_paid_at         timestamptz
+  deposit_idempotency_key uuid         [unique]
+  quoted_total_ttd        numeric(16,2)[not null]
+  notes                   text
+  created_by              uuid         [not null]
+  created_at              timestamptz  [not null, default: `now()`]
+  updated_at              timestamptz  [not null, default: `now()`]
+}
+
+Table db_shipments [note: 'jag_commercial — container / vessel movement; multiple orders per shipment'] {
+  id                   uuid        [pk, not null, default: `gen_random_uuid()`]
+  tenant_id            uuid        [not null]
+  container_ref        varchar(50)
+  vessel_name          varchar(200)
+  port_of_origin       varchar(100)[not null, default: 'SHANGHAI']
+  port_of_destination  varchar(100)[not null, default: 'PORT OF SPAIN']
+  etd                  date
+  eta                  date
+  atd                  date
+  ata                  date
+  status               varchar(20) [not null, default: 'BOOKING', note: 'BOOKING / LOADING / IN_TRANSIT / ARRIVED / CLEARED']
+  actual_freight_usd   numeric(14,2)
+  actual_insurance_usd numeric(14,2)
+  freight_forwarder    varchar(200)
+  notes                text
+  created_by           uuid        [not null]
+  created_at           timestamptz [not null, default: `now()`]
+  updated_at           timestamptz [not null, default: `now()`]
+}
+
+Table db_order_shipments [note: 'jag_commercial — order ↔ shipment many-to-many; freight share per order'] {
+  id                uuid         [pk, not null, default: `gen_random_uuid()`]
+  order_id          uuid         [not null, ref: > db_orders.id]
+  shipment_id       uuid         [not null, ref: > db_shipments.id]
+  freight_share_pct numeric(7,4) [note: 'Null until freight apportioned on arrival']
+
+  indexes {
+    (order_id, shipment_id) [unique]
+  }
+}
+
+Table db_customs_declarations [note: 'jag_commercial — one declaration per shipment; drives reconciliation'] {
+  id              uuid          [pk, not null, default: `gen_random_uuid()`]
+  tenant_id       uuid          [not null]
+  shipment_id     uuid          [not null, unique, ref: > db_shipments.id]
+  declaration_ref varchar(100)
+  actual_cif_usd  numeric(14,2) [not null]
+  actual_duty_ttd numeric(14,2) [not null]
+  actual_vat_ttd  numeric(14,2) [not null]
+  cleared_at      timestamptz
+  customs_broker  varchar(200)
+  notes           text
+  created_by      uuid          [not null]
+  created_at      timestamptz   [not null, default: `now()`]
+  updated_at      timestamptz   [not null, default: `now()`]
+}
+
+Table db_landed_cost_reconciliations [note: 'jag_commercial — actual vs quoted landed cost per order (STD-11)'] {
+  id                       uuid         [pk, not null, default: `gen_random_uuid()`]
+  tenant_id                uuid         [not null]
+  order_id                 uuid         [not null, unique, ref: > db_orders.id]
+  status                   varchar(20)  [not null, default: 'PENDING', note: 'PENDING / AUTO_CLOSED / PENDING_REVIEW / APPROVED / INVOICED']
+  quoted_total_ttd         numeric(16,2)[not null]
+  actual_supplier_cost_ttd numeric(14,2)[not null, default: 0]
+  actual_freight_ttd       numeric(14,2)[not null, default: 0]
+  actual_insurance_ttd     numeric(14,2)[not null, default: 0]
+  actual_duty_ttd          numeric(14,2)[not null, default: 0]
+  actual_vat_ttd           numeric(14,2)[not null, default: 0]
+  actual_local_delivery_ttd numeric(14,2)[not null, default: 0]
+  actual_margin_ttd        numeric(14,2)[not null, default: 0]
+  actual_agency_fee_ttd    numeric(14,2)[not null, default: 0]
+  actual_total_ttd         numeric(16,2)[not null, default: 0]
+  variance_ttd             numeric(16,2)[not null, default: 0]
+  variance_pct             numeric(8,4) [not null, default: 0]
+  approved_by              uuid
+  approved_at              timestamptz
+  notes                    text
+  idempotency_key          uuid         [not null, unique]
+  created_at               timestamptz  [not null, default: `now()`]
+  updated_at               timestamptz  [not null, default: `now()`]
+}
+
+Table db_local_deliveries [note: 'jag_commercial — TT last-mile delivery scheduling (STD-11)'] {
+  id               uuid        [pk, not null, default: `gen_random_uuid()`]
+  tenant_id        uuid        [not null]
+  order_id         uuid        [not null, ref: > db_orders.id]
+  delivery_address text        [not null]
+  contact_name     varchar(100)
+  contact_phone    varchar(50)
+  cost_ttd         numeric(12,2)[not null, default: 0]
+  status           varchar(20) [not null, default: 'SCHEDULED', note: 'SCHEDULED / OUT_FOR_DELIVERY / DELIVERED / FAILED']
+  scheduled_date   date
+  delivered_at     timestamptz
+  notes            text
+  idempotency_key  uuid        [not null, unique]
+  created_by       uuid        [not null]
+  created_at       timestamptz [not null, default: `now()`]
+  updated_at       timestamptz [not null, default: `now()`]
+}
+
+Table db_invoices [note: 'jag_commercial — DEPOSIT / FINAL / AGENCY_FEE invoices (STD-11)'] {
+  id                 uuid         [pk, not null, default: `gen_random_uuid()`]
+  tenant_id          uuid         [not null]
+  order_id           uuid         [not null, ref: > db_orders.id]
+  invoice_type       varchar(15)  [not null, note: 'DEPOSIT / FINAL / AGENCY_FEE']
+  status             varchar(10)  [not null, default: 'DRAFT', note: 'DRAFT / ISSUED / PAID / VOID']
+  amount_ttd         numeric(16,2)[not null]
+  deposit_offset_ttd numeric(16,2)[not null, default: 0]
+  balance_due_ttd    numeric(16,2)[not null]
+  issued_at          timestamptz
+  due_date           date
+  paid_at            timestamptz
+  payment_method     varchar(50)
+  notes              text
+  idempotency_key    uuid         [not null, unique]
+  created_by         uuid         [not null]
+  created_at         timestamptz  [not null, default: `now()`]
+  updated_at         timestamptz  [not null, default: `now()`]
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// DATABASE: jag_entertainment — BAR + Members Club
+// ═══════════════════════════════════════════════════════════════════════════════
+
+Table ent_config [note: 'jag_entertainment — one-row config per tenant; license expiry dates'] {
+  id                  uuid  [pk, not null, default: `gen_random_uuid()`]
+  tenant_id           uuid  [not null, unique]
+  bar_license_expiry  date
+  club_license_expiry date
+  updated_at          timestamptz [not null, default: `now()`]
+}
+
+Table ent_products [note: 'jag_entertainment — BAR and Club product catalogue'] {
+  id         uuid         [pk, not null, default: `gen_random_uuid()`]
+  tenant_id  uuid         [not null]
+  name       text         [not null]
+  category   varchar(15)  [not null, note: 'DRINK / FOOD / MERCHANDISE / OTHER']
+  price      numeric(10,2)[not null]
+  cost       numeric(10,2)
+  sku        text
+  stock_qty  integer      [note: 'NULL = unlimited']
+  is_active  boolean      [not null, default: true]
+  created_at timestamptz  [not null, default: `now()`]
+  updated_at timestamptz  [not null, default: `now()`]
+}
+
+Table ent_membership_tiers [note: 'jag_entertainment — Members Club tier definitions'] {
+  id                     uuid         [pk, not null, default: `gen_random_uuid()`]
+  tenant_id              uuid         [not null]
+  name                   text         [not null]
+  monthly_fee            numeric(10,2)[not null, default: 0]
+  bar_discount_pct       numeric(5,2) [not null, default: 0]
+  guest_passes_per_month integer      [not null, default: 0]
+  credit_on_join         numeric(10,2)[not null, default: 0]
+  is_active              boolean      [not null, default: true]
+  created_at             timestamptz  [not null, default: `now()`]
+  updated_at             timestamptz  [not null, default: `now()`]
+}
+
+Table ent_members [note: 'jag_entertainment — Members Club member registry'] {
+  id              uuid         [pk, not null, default: `gen_random_uuid()`]
+  tenant_id       uuid         [not null]
+  member_number   text         [not null, unique]
+  first_name      text         [not null]
+  last_name       text         [not null]
+  email           text
+  phone           text
+  date_of_birth   date
+  photo_url       text
+  emergency_contact jsonb
+  credit_balance  numeric(10,2)[not null, default: 0]
+  status          varchar(10)  [not null, default: 'ACTIVE', note: 'ACTIVE / SUSPENDED / EXPIRED']
+  created_at      timestamptz  [not null, default: `now()`]
+  updated_at      timestamptz  [not null, default: `now()`]
+}
+
+Table ent_memberships [note: 'jag_entertainment — active tier subscription per member (STD-11)'] {
+  id              uuid        [pk, not null, default: `gen_random_uuid()`]
+  tenant_id       uuid        [not null]
+  member_id       uuid        [not null, ref: > ent_members.id]
+  tier_id         uuid        [not null, ref: > ent_membership_tiers.id]
+  started_at      date        [not null]
+  expires_at      date
+  status          varchar(10) [not null, default: 'ACTIVE', note: 'ACTIVE / CANCELLED / EXPIRED']
+  idempotency_key text        [not null, unique]
+  created_at      timestamptz [not null, default: `now()`]
+  updated_at      timestamptz [not null, default: `now()`]
+}
+
+Table ent_tabs [note: 'jag_entertainment — BAR or Club tab (offline-critical)'] {
+  id            uuid         [pk, not null, default: `gen_random_uuid()`]
+  tenant_id     uuid         [not null]
+  tab_number    integer      [not null, note: 'GENERATED ALWAYS AS IDENTITY']
+  venue         varchar(10)  [not null, note: 'BAR / CLUB — mandatory entity tag per transaction']
+  customer_name text
+  member_id     uuid         [ref: > ent_members.id]
+  table_ref     text
+  status        varchar(10)  [not null, default: 'OPEN', note: 'OPEN / CLOSED / SETTLED / VOIDED']
+  discount_pct  numeric(5,2) [not null, default: 0]
+  subtotal      numeric(10,2)[not null, default: 0]
+  total         numeric(10,2)[not null, default: 0]
+  staff_user_id text         [not null]
+  opened_at     timestamptz  [not null, default: `now()`]
+  closed_at     timestamptz
+  settled_at    timestamptz
+  created_at    timestamptz  [not null, default: `now()`]
+  updated_at    timestamptz  [not null, default: `now()`]
+}
+
+Table ent_tab_items [note: 'jag_entertainment — line items on a tab; price snapshot at order time'] {
+  id         uuid         [pk, not null, default: `gen_random_uuid()`]
+  tenant_id  uuid         [not null]
+  tab_id     uuid         [not null, ref: > ent_tabs.id]
+  product_id uuid         [not null, ref: > ent_products.id]
+  quantity   integer      [not null]
+  unit_price numeric(10,2)[not null]
+  notes      text
+  voided     boolean      [not null, default: false]
+  created_at timestamptz  [not null, default: `now()`]
+}
+
+Table ent_tab_payments [note: 'jag_entertainment — payment method splits for a tab (STD-11)'] {
+  id              uuid         [pk, not null, default: `gen_random_uuid()`]
+  tenant_id       uuid         [not null]
+  tab_id          uuid         [not null, ref: > ent_tabs.id]
+  method          varchar(20)  [not null, note: 'CASH / CARD / MEMBER_CREDIT / COMPLIMENTARY']
+  amount          numeric(10,2)[not null]
+  reference       text
+  idempotency_key text         [not null, unique]
+  created_at      timestamptz  [not null, default: `now()`]
+}
+
+Table ent_member_credits [note: 'jag_entertainment — member credit ledger (positive = added, negative = spent) (STD-11)'] {
+  id              uuid         [pk, not null, default: `gen_random_uuid()`]
+  tenant_id       uuid         [not null]
+  member_id       uuid         [not null, ref: > ent_members.id]
+  amount          numeric(10,2)[not null]
+  description     text         [not null]
+  tab_payment_id  uuid         [ref: > ent_tab_payments.id]
+  idempotency_key text         [not null, unique]
+  created_at      timestamptz  [not null, default: `now()`]
+}
+
+Table ent_events [note: 'jag_entertainment — club / bar events'] {
+  id           uuid         [pk, not null, default: `gen_random_uuid()`]
+  tenant_id    uuid         [not null]
+  title        text         [not null]
+  description  text
+  venue        text         [not null, note: 'BAR / CLUB / BOTH']
+  starts_at    timestamptz  [not null]
+  ends_at      timestamptz
+  capacity     integer
+  ticket_price numeric(10,2)[not null, default: 0]
+  member_price numeric(10,2)[not null, default: 0]
+  is_active    boolean      [not null, default: true]
+  created_at   timestamptz  [not null, default: `now()`]
+  updated_at   timestamptz  [not null, default: `now()`]
+}
+
+Table ent_event_bookings [note: 'jag_entertainment — event booking by member (STD-11)'] {
+  id              uuid         [pk, not null, default: `gen_random_uuid()`]
+  tenant_id       uuid         [not null]
+  event_id        uuid         [not null, ref: > ent_events.id]
+  member_id       uuid         [not null, ref: > ent_members.id]
+  guests          integer      [not null, default: 0]
+  amount_paid     numeric(10,2)[not null, default: 0]
+  payment_method  varchar(20)  [not null, default: 'CASH']
+  status          varchar(15)  [not null, default: 'CONFIRMED', note: 'CONFIRMED / WAITLISTED / CANCELLED']
+  idempotency_key text         [not null, unique]
+  created_at      timestamptz  [not null, default: `now()`]
+  updated_at      timestamptz  [not null, default: `now()`]
+}
+
+Table ent_utility_bills [note: 'jag_entertainment — utility bills per venue (BAR or CLUB) (STD-11)'] {
+  id              uuid        [pk, not null, default: `gen_random_uuid()`]
+  tenant_id       uuid        [not null]
+  venue           varchar(5)  [not null, note: 'BAR / CLUB']
+  utility_type    varchar(15) [not null, note: 'ELECTRICITY / WATER / GAS / INTERNET / OTHER']
+  provider        varchar(200)[not null]
+  bill_date       date        [not null]
+  paid_date       date
+  amount          numeric(12,2)[not null]
+  vat_code        varchar(10) [not null, default: 'STANDARD']
+  vat_amount      numeric(12,2)[not null, default: 0]
+  notes           text
+  idempotency_key uuid        [not null, unique]
+  created_by      uuid        [not null]
+  created_at      timestamptz [not null, default: `now()`]
+  updated_at      timestamptz [not null, default: `now()`]
+}
+
+Table ent_supplier_invoices [note: 'jag_entertainment — supplier invoices per venue (STD-11)'] {
+  id                uuid        [pk, not null, default: `gen_random_uuid()`]
+  tenant_id         uuid        [not null]
+  venue             varchar(5)  [not null, note: 'BAR / CLUB']
+  supplier_name     varchar(200)[not null]
+  invoice_ref       varchar(100)
+  invoice_date      date        [not null]
+  due_date          date
+  amount            numeric(12,2)[not null]
+  vat_code          varchar(10) [not null, default: 'STANDARD']
+  vat_amount        numeric(12,2)[not null, default: 0]
+  status            varchar(15) [not null, default: 'RECEIVED', note: 'RECEIVED / APPROVED / PAID']
+  approved_by       uuid
+  approved_at       timestamptz
+  paid_date         date
+  payment_reference varchar(200)
+  notes             text
+  idempotency_key   uuid        [not null, unique]
+  created_by        uuid        [not null]
+  created_at        timestamptz [not null, default: `now()`]
+  updated_at        timestamptz [not null, default: `now()`]
+}
+
+Table ent_visitor_log [note: 'jag_entertainment — Members Club visitor sign-in register'] {
+  id           uuid        [pk, not null, default: `gen_random_uuid()`]
+  tenant_id    uuid        [not null]
+  member_id    uuid        [ref: > ent_members.id, note: 'Sponsoring member']
+  visitor_name text        [not null]
+  id_type      text        [not null, note: 'NATIONAL_ID / PASSPORT / DRIVERS_LICENSE / OTHER']
+  id_number    text        [not null]
+  address      text        [not null]
+  admitted_by  uuid        [not null]
+  time_in      timestamptz [not null, default: `now()`]
+  time_out     timestamptz
+  notes        text
+  created_at   timestamptz [not null, default: `now()`]
+  updated_at   timestamptz [not null, default: `now()`]
+}
+
+Table ent_chip_float [note: 'jag_entertainment — Members Club daily chip float reconciliation (STD-11)'] {
+  id              uuid         [pk, not null, default: `gen_random_uuid()`]
+  tenant_id       uuid         [not null]
+  float_date      date         [not null]
+  status          varchar(10)  [not null, default: 'OPEN', note: 'OPEN / CLOSED']
+  opening_cash    numeric(12,2)[not null]
+  opening_chips   numeric(12,2)[not null]
+  closing_cash    numeric(12,2)
+  closing_chips   numeric(12,2)
+  cash_in_ttd     numeric(12,2)[note: 'Sum of CLUB CASH tab payments on float_date; computed on close']
+  cash_variance   numeric(12,2)[note: 'closing_cash − (opening_cash + cash_in_ttd)']
+  chips_variance  numeric(12,2)[note: 'closing_chips − opening_chips']
+  opened_by       uuid         [not null]
+  closed_by       uuid
+  notes           text
+  idempotency_key uuid         [not null, unique]
+  opened_at       timestamptz  [not null, default: `now()`]
+  closed_at       timestamptz
+  created_at      timestamptz  [not null, default: `now()`]
+  updated_at      timestamptz  [not null, default: `now()`]
+
+  indexes {
+    (tenant_id, float_date) [unique]
+  }
+}
+
+Table pending_events_entertainment [note: 'jag_entertainment — outbox table for jag-event-dispatcher'] {
+  id              uuid        [pk, not null, default: `gen_random_uuid()`]
+  event_type      varchar(100)[not null]
+  payload         jsonb       [not null]
+  idempotency_key uuid        [not null, unique]
+  status          varchar(20) [not null, default: 'PENDING']
+  retry_count     smallint    [not null, default: 0]
+  created_at      timestamptz [not null, default: `now()`]
+  dispatched_at   timestamptz
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// DATABASE: jag_family
+// ═══════════════════════════════════════════════════════════════════════════════
+
+Table fam_family_members [note: 'jag_family — family member registry; root table for owner-scoped data'] {
+  id                     uuid         [pk, not null, default: `gen_random_uuid()`]
+  owner_id               uuid         [not null, note: 'RLS: app.current_owner_id']
+  relationship           text         [not null, note: 'SELF / WIFE / DAUGHTER / FATHER / BROTHER / OTHER']
+  first_name             text         [not null]
+  last_name              text         [not null]
+  date_of_birth          date
+  email                  text
+  phone                  varchar(30)
+  preferred_language     text         [not null, default: 'en', note: 'en / zh / es — wife defaults to zh']
+  is_emergency_designate boolean      [not null, default: false]
+  keycloak_user_id       text         [note: 'Set when this family member has platform access']
+  notes                  varchar(2000)
+  last_modified_at       timestamptz  [not null, default: `now()`]
+  created_at             timestamptz  [not null, default: `now()`]
+  updated_at             timestamptz  [not null, default: `now()`]
+}
+
+Table fam_succession_documents [note: 'jag_family — legal / estate document register'] {
+  id                   uuid         [pk, not null, default: `gen_random_uuid()`]
+  owner_id             uuid         [not null]
+  document_type        text         [not null, note: 'WILL / TRUST / POWER_OF_ATTORNEY / INSURANCE_POLICY / TITLE_DEED / SHARE_CERTIFICATE / BANK_MANDATE / COMPANY_RESOLUTION / ADVANCE_DIRECTIVE / OTHER']
+  title                varchar(200) [not null]
+  description          varchar(2000)
+  document_date        date
+  storage_path         varchar(500) [note: 'MinIO object path']
+  is_classified        boolean      [not null, default: true]
+  governing_law        varchar(100)
+  lawyer_firm          varchar(200) [note: 'Firm name only — no individual names (OPSEC)']
+  last_reviewed_date   date
+  review_reminder_date date
+  notes                varchar(2000)
+  last_modified_at     timestamptz  [not null, default: `now()`]
+  created_at           timestamptz  [not null, default: `now()`]
+  updated_at           timestamptz  [not null, default: `now()`]
+}
+
+Table fam_docvault_files [note: 'jag_family — personal document vault (MinIO-backed)'] {
+  id               uuid         [pk, not null, default: `gen_random_uuid()`]
+  owner_id         uuid         [not null]
+  family_member_id uuid         [ref: > fam_family_members.id]
+  title            varchar(200) [not null]
+  document_type    text         [not null, note: 'NATIONAL_ID / PASSPORT / BIRTH_CERTIFICATE / MARRIAGE_CERTIFICATE / MEDICAL_RECORD / ACADEMIC_CERTIFICATE / PROFESSIONAL_LICENCE / FINANCIAL_STATEMENT / TAX_RETURN / INSURANCE_POLICY / PROPERTY_TITLE / LEGAL_AGREEMENT / OTHER']
+  file_name        varchar(200) [not null]
+  storage_path     varchar(500) [not null]
+  mime_type        varchar(100) [not null]
+  file_size_bytes  bigint       [not null]
+  expires_date     date
+  is_data_room     boolean      [not null, default: false]
+  data_room_entity varchar(50)
+  uploaded_by      uuid         [not null]
+  notes            varchar(2000)
+  last_modified_at timestamptz  [not null, default: `now()`]
+  created_at       timestamptz  [not null, default: `now()`]
+}
+
+Table fam_loyalty_programmes [note: 'jag_family — airline, hotel, cruise, credit card reward programme memberships'] {
+  id               uuid          [pk, not null, default: `gen_random_uuid()`]
+  owner_id         uuid          [not null]
+  family_member_id uuid          [ref: > fam_family_members.id]
+  programme_type   text          [not null, note: 'AIRLINE / HOTEL / CRUISE / CREDIT_CARD / RETAIL / DINING / OTHER']
+  provider_name    varchar(200)  [not null]
+  membership_number varchar(100)
+  tier             varchar(50)
+  points_balance   numeric(14,2) [not null, default: 0]
+  miles_balance    numeric(14,2) [not null, default: 0]
+  expiry_date      date
+  notes            varchar(2000)
+  last_modified_at timestamptz   [not null, default: `now()`]
+  created_at       timestamptz   [not null, default: `now()`]
+  updated_at       timestamptz   [not null, default: `now()`]
+}
+
+Table fam_loyalty_transactions [note: 'jag_family — loyalty points / miles transaction ledger (STD-11)'] {
+  id               uuid          [pk, not null, default: `gen_random_uuid()`]
+  owner_id         uuid          [not null]
+  programme_id     uuid          [not null, ref: > fam_loyalty_programmes.id]
+  transaction_date date          [not null]
+  transaction_type text          [not null, note: 'EARN / REDEEM / EXPIRE / TRANSFER_IN / TRANSFER_OUT / BONUS / REINSTATEMENT']
+  points_amount    numeric(14,2) [not null, default: 0]
+  miles_amount     numeric(14,2) [not null, default: 0]
+  description      varchar(300)  [not null]
+  reference_number varchar(100)
+  idempotency_key  text          [not null, unique]
+  created_at       timestamptz   [not null, default: `now()`]
+}
+
+Table fam_lifestyle_tracker [note: 'jag_family — personal health and wellness metrics'] {
+  id               uuid          [pk, not null, default: `gen_random_uuid()`]
+  owner_id         uuid          [not null]
+  family_member_id uuid          [ref: > fam_family_members.id]
+  entry_date       date          [not null]
+  metric_type      text          [not null, note: 'WEIGHT_KG / STEPS / SLEEP_HOURS / CALORIES / EXERCISE_MINUTES / BLOOD_PRESSURE_SYSTOLIC / BLOOD_PRESSURE_DIASTOLIC / RESTING_HEART_RATE / OTHER']
+  value            numeric(10,4) [not null]
+  unit             varchar(20)   [not null]
+  source           varchar(50)
+  notes            varchar(500)
+  created_at       timestamptz   [not null, default: `now()`]
+}
+
+Table pending_events_family [note: 'jag_family — outbox table for jag-event-dispatcher'] {
+  id              uuid        [pk, not null, default: `gen_random_uuid()`]
+  event_type      varchar(100)[not null]
+  payload         jsonb       [not null]
+  idempotency_key uuid        [not null, unique]
+  status          varchar(20) [not null, default: 'PENDING']
+  retry_count     smallint    [not null, default: 0]
+  created_at      timestamptz [not null, default: `now()`]
+  dispatched_at   timestamptz
+}
+
+// ── Phase 4 Finance tables (pending — migration 002_finance_schema.sql) ───────
+// fin_accounts, fin_transactions, fin_fx_rates, fin_investments,
+// fin_mortgages_loans, fin_net_worth_snapshots, fin_bank_statement_jobs,
+// fin_pending_review_queue  →  to be defined at Phase 4 schema design session.
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// DATABASE: jag_properties
+// ═══════════════════════════════════════════════════════════════════════════════
+
+Table prop_properties [note: 'jag_properties — active property portfolio register'] {
+  id                uuid          [pk, not null, default: `gen_random_uuid()`]
+  owner_id          uuid          [not null, note: 'RLS: app.current_owner_id']
+  property_code     varchar(20)   [not null, unique]
+  name              varchar(200)  [not null]
+  address_line1     varchar(300)
+  address_line2     varchar(300)
+  city              varchar(100)
+  country           varchar(100)  [not null, default: 'Trinidad and Tobago']
+  property_type     text          [not null, note: 'RESIDENTIAL / COMMERCIAL / LAND / MIXED / AGRICULTURAL']
+  tenure_type       text          [not null, default: 'FREEHOLD', note: 'FREEHOLD / LEASEHOLD / STATE_LAND']
+  bedrooms          integer
+  bathrooms         numeric(3,1)
+  lot_size_sqm      numeric(10,2)
+  floor_area_sqm    numeric(10,2)
+  is_rented         boolean       [not null, default: false]
+  current_valuation numeric(14,2)
+  valuation_date    date
+  purchase_price    numeric(14,2)
+  purchase_date     date
+  is_active         boolean       [not null, default: true]
+  notes             text
+  last_modified_at  timestamptz   [not null, default: `now()`]
+  created_at        timestamptz   [not null, default: `now()`]
+  updated_at        timestamptz   [not null, default: `now()`]
+}
+
+Table prop_property_tenants [note: 'jag_properties — people / companies who pay rent'] {
+  id                       uuid         [pk, not null, default: `gen_random_uuid()`]
+  owner_id                 uuid         [not null]
+  first_name               varchar(100) [not null]
+  last_name                varchar(100)
+  company_name             varchar(200)
+  is_company               boolean      [not null, default: false]
+  phone                    varchar(30)
+  email                    text
+  identification_type      text         [note: 'TT_NIC / PASSPORT / COMPANY_REG / DRIVERS_LICENCE / OTHER']
+  identification_number    varchar(50)
+  emergency_contact_name   varchar(100)
+  emergency_contact_phone  varchar(30)
+  notes                    text
+  created_at               timestamptz  [not null, default: `now()`]
+  updated_at               timestamptz  [not null, default: `now()`]
+}
+
+Table prop_lease_agreements [note: 'jag_properties — tenancy agreements linking property to tenant'] {
+  id               uuid          [pk, not null, default: `gen_random_uuid()`]
+  owner_id         uuid          [not null]
+  property_id      uuid          [not null, ref: > prop_properties.id]
+  tenant_id        uuid          [not null, ref: > prop_property_tenants.id]
+  lease_type       text          [not null, default: 'RESIDENTIAL', note: 'RESIDENTIAL / COMMERCIAL / SHORT_TERM / OTHER']
+  start_date       date          [not null]
+  end_date         date
+  monthly_rent     numeric(10,2) [not null]
+  currency         char(3)       [not null, default: 'TTD']
+  security_deposit numeric(10,2) [not null, default: 0]
+  payment_due_day  integer       [not null, default: 1]
+  status           text          [not null, default: 'ACTIVE', note: 'ACTIVE / EXPIRED / TERMINATED / PENDING']
+  notes            text
+  last_modified_at timestamptz   [not null, default: `now()`]
+  created_at       timestamptz   [not null, default: `now()`]
+  updated_at       timestamptz   [not null, default: `now()`]
+}
+
+Table prop_rent_payments [note: 'jag_properties — rent payment ledger (STD-11)'] {
+  id               uuid          [pk, not null, default: `gen_random_uuid()`]
+  owner_id         uuid          [not null]
+  lease_id         uuid          [not null, ref: > prop_lease_agreements.id]
+  payment_date     date          [not null]
+  period_month     smallint      [not null]
+  period_year      smallint      [not null]
+  amount_due       numeric(10,2) [not null]
+  amount_paid      numeric(10,2) [not null, default: 0]
+  late_fee_charged numeric(10,2) [not null, default: 0]
+  payment_method   text          [not null, note: 'CASH / BANK_TRANSFER / CHEQUE / WIPAY / OTHER']
+  receipt_number   varchar(100)
+  notes            varchar(1000)
+  idempotency_key  text          [not null, unique]
+  created_at       timestamptz   [not null, default: `now()`]
+}
+
+Table prop_maintenance_requests [note: 'jag_properties — maintenance tracking from report to close (STD-11)'] {
+  id                    uuid          [pk, not null, default: `gen_random_uuid()`]
+  owner_id              uuid          [not null]
+  property_id           uuid          [not null, ref: > prop_properties.id]
+  lease_id              uuid          [ref: > prop_lease_agreements.id]
+  reported_by_tenant_id uuid          [ref: > prop_property_tenants.id]
+  category              text          [not null, note: 'PLUMBING / ELECTRICAL / STRUCTURAL / HVAC / APPLIANCE / PEST_CONTROL / SECURITY / GARDEN / PAINTING / ROOFING / OTHER']
+  description           text          [not null]
+  priority              text          [not null, default: 'MEDIUM', note: 'LOW / MEDIUM / HIGH / URGENT']
+  status                text          [not null, default: 'OPEN', note: 'OPEN / ASSIGNED / IN_PROGRESS / AWAITING_PARTS / COMPLETED / CLOSED / CANNOT_REPRODUCE']
+  assigned_to           varchar(200)
+  estimated_cost        numeric(10,2)
+  actual_cost           numeric(10,2)
+  reported_date         date          [not null]
+  scheduled_date        date
+  completed_date        date
+  completion_notes      varchar(2000)
+  idempotency_key       text          [not null, unique]
+  last_modified_at      timestamptz   [not null, default: `now()`]
+  created_at            timestamptz   [not null, default: `now()`]
+  updated_at            timestamptz   [not null, default: `now()`]
+}
+
+Table prop_mortgage_register [note: 'jag_properties — mortgage register (STD-11); account_reference is partial only (OPSEC)'] {
+  id                    uuid          [pk, not null, default: `gen_random_uuid()`]
+  owner_id              uuid          [not null]
+  property_id           uuid          [not null, ref: > prop_properties.id]
+  lender_name           varchar(200)  [not null]
+  account_reference     varchar(50)   [note: 'Partial only (last 4 digits) — OPSEC']
+  mortgage_type         text          [not null, note: 'FIXED_RATE / VARIABLE_RATE / INTEREST_ONLY']
+  original_amount       numeric(14,2) [not null]
+  currency              char(3)       [not null, default: 'TTD']
+  outstanding_balance   numeric(14,2) [not null, default: 0]
+  interest_rate_percent numeric(6,4)  [not null]
+  start_date            date          [not null]
+  maturity_date         date
+  monthly_payment       numeric(10,2) [not null]
+  payment_due_day       integer       [not null, default: 1]
+  status                text          [not null, default: 'ACTIVE', note: 'ACTIVE / PAID_OFF / REFINANCED / DEFAULTED']
+  notes                 text
+  idempotency_key       text          [not null, unique]
+  created_at            timestamptz   [not null, default: `now()`]
+  updated_at            timestamptz   [not null, default: `now()`]
+}
+
+Table prop_property_pipeline [note: 'jag_properties — acquisition deal pipeline'] {
+  id                     uuid          [pk, not null, default: `gen_random_uuid()`]
+  owner_id               uuid          [not null]
+  name                   varchar(200)  [not null]
+  address                varchar(500)
+  property_type          text          [not null]
+  asking_price           numeric(14,2)
+  estimated_value        numeric(14,2)
+  currency               char(3)       [not null, default: 'TTD']
+  lot_size_sqm           numeric(10,2)
+  floor_area_sqm         numeric(10,2)
+  estimated_monthly_rent numeric(10,2)
+  stage                  text          [not null, default: 'WATCH', note: 'WATCH / INTERESTED / OFFER_MADE / DUE_DILIGENCE / CONTRACT / ACQUIRED / PASSED']
+  source                 text          [note: 'AGENT / PRIVATE_SELLER / AUCTION / ONLINE_LISTING / REFERRAL / OTHER']
+  agent_name             varchar(100)
+  agent_phone            varchar(30)
+  analysis_notes         text
+  last_modified_at       timestamptz   [not null, default: `now()`]
+  created_at             timestamptz   [not null, default: `now()`]
+  updated_at             timestamptz   [not null, default: `now()`]
+}
+
+Table prop_utility_bills [note: 'jag_properties — property utility bills (STD-11)'] {
+  id              uuid         [pk, not null, default: `gen_random_uuid()`]
+  owner_id        uuid         [not null]
+  property_id     uuid         [not null, ref: > prop_properties.id]
+  utility_type    varchar(15)  [not null, note: 'ELECTRICITY / WATER / GAS / INTERNET / OTHER']
+  provider        varchar(200) [not null]
+  bill_date       date         [not null]
+  paid_date       date
+  amount          numeric(12,2)[not null]
+  vat_code        varchar(10)  [not null, default: 'STANDARD']
+  vat_amount      numeric(12,2)[not null, default: 0]
+  notes           text
+  idempotency_key uuid         [not null, unique]
+  created_by      uuid         [not null]
+  created_at      timestamptz  [not null, default: `now()`]
+  updated_at      timestamptz  [not null, default: `now()`]
+}
+
+Table prop_vendor_invoices [note: 'jag_properties — maintenance vendor invoices (STD-11)'] {
+  id                     uuid         [pk, not null, default: `gen_random_uuid()`]
+  owner_id               uuid         [not null]
+  property_id            uuid         [not null, ref: > prop_properties.id]
+  maintenance_request_id uuid         [ref: > prop_maintenance_requests.id]
+  vendor_name            varchar(200) [not null]
+  invoice_ref            varchar(100)
+  invoice_date           date         [not null]
+  due_date               date
+  amount                 numeric(12,2)[not null]
+  vat_code               varchar(10)  [not null, default: 'STANDARD']
+  vat_amount             numeric(12,2)[not null, default: 0]
+  status                 varchar(15)  [not null, default: 'RECEIVED', note: 'RECEIVED / APPROVED / PAID']
+  approved_by            uuid
+  approved_at            timestamptz
+  paid_date              date
+  payment_reference      varchar(200)
+  notes                  text
+  idempotency_key        uuid         [not null, unique]
+  created_by             uuid         [not null]
+  created_at             timestamptz  [not null, default: `now()`]
+  updated_at             timestamptz  [not null, default: `now()`]
+}
+
+Table prop_pending_review_queue [note: 'jag_properties — data quality review queue for records requiring owner attention'] {
+  id               uuid         [pk, not null, default: `gen_random_uuid()`]
+  owner_id         uuid         [not null]
+  source           varchar(100) [not null]
+  raw_payload      jsonb        [not null]
+  status           text         [not null, default: 'PENDING', note: 'PENDING / RESOLVED / DISMISSED']
+  resolution_notes varchar(1000)
+  received_at      timestamptz  [not null, default: `now()`]
+  resolved_at      timestamptz
+  resolved_by      uuid
+}
+
+Table pending_events_properties [note: 'jag_properties — outbox table for jag-event-dispatcher'] {
+  id              uuid        [pk, not null, default: `gen_random_uuid()`]
+  event_type      varchar(100)[not null]
+  payload         jsonb       [not null]
+  idempotency_key uuid        [not null, unique]
+  status          varchar(20) [not null, default: 'PENDING']
+  retry_count     smallint    [not null, default: 0]
+  created_at      timestamptz [not null, default: `now()`]
+  dispatched_at   timestamptz
+}

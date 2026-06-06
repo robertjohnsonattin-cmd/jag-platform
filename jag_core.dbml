@@ -1,0 +1,319 @@
+// ============================================================
+// JAG Platform — jag_core Database Schema
+// ============================================================
+// Version:    PRE-1 | 2026-05-23
+// Author:     Robert Johnson-Attin via Claude Code (PRE-1 session)
+// Tooling:    node-pg-migrate | dbdiagram.io compatible
+//
+// jag_core is the platform-wide hub:
+//   Users, roles, tenants, sessions, audit log,
+//   notification queue, i18n strings, advisor grants
+//
+// RLS policy pattern (all tenant-scoped tables):
+//   SET LOCAL app.current_tenant = '<uuid>';
+//   CREATE POLICY rls_tenant ON <table>
+//     USING (tenant_id = current_setting('app.current_tenant')::uuid);
+//
+// Cross-DB rule: jag_core is the ONLY database permitted to
+//   issue cross-DB queries, and only via postgres_fdw.
+//   Application code never issues direct cross-DB queries.
+//
+// Standards: STD-01 through STD-13 apply to all changes.
+// ============================================================
+
+
+// ------------------------------------------------------------
+// ENUMS
+// ------------------------------------------------------------
+
+Enum notification_tier {
+  "1" [note: 'Immediate — in-app + WhatsApp link']
+  "2" [note: 'Daily 7am digest']
+  "3" [note: 'Weekly Monday digest']
+}
+
+Enum notification_channel {
+  IN_APP
+  WHATSAPP
+  EMAIL
+}
+
+Enum audit_source {
+  API
+  SYSTEM
+  MIGRATION
+  MANUAL
+}
+
+
+// ------------------------------------------------------------
+// OUTBOX: pending_events
+// jag-event-dispatcher polls this table every 5 seconds.
+// 3+ retry failures trigger a Tier 1 immediate alert.
+// ------------------------------------------------------------
+
+Table pending_events {
+  id              uuid         [pk, default: `gen_random_uuid()`]
+  aggregate_type  varchar      [not null, note: 'e.g. User, Tenant, Notification']
+  aggregate_id    uuid         [not null]
+  event_type      varchar      [not null, note: 'e.g. user.created, tenant.suspended']
+  payload         jsonb        [not null]
+  created_at      timestamptz  [not null, default: `now()`]
+  processed_at    timestamptz  [null]
+  retry_count     integer      [not null, default: 0]
+  last_error      text         [null]
+
+  indexes {
+    processed_at                    [name: 'idx_pe_core_processed_at']
+    created_at                      [name: 'idx_pe_core_created_at']
+    (aggregate_type, aggregate_id)  [name: 'idx_pe_core_aggregate']
+  }
+
+  Note: 'Append-only outbox. Never UPDATE or DELETE from application code.'
+}
+
+
+// ------------------------------------------------------------
+// TENANTS — every business entity in the JAG group
+// ------------------------------------------------------------
+
+Table tenants {
+  id               uuid         [pk, default: `gen_random_uuid()`]
+  code             varchar      [not null, unique, note: 'e.g. JABCO, JAG_PROPERTIES, JAG_ENTERTAINMENT, JAG_HOLDINGS']
+  name             varchar      [not null]
+  parent_tenant_id uuid         [null, note: 'JAG Holdings is parent of all operating entities']
+  is_active        boolean      [not null, default: true]
+  created_at       timestamptz  [not null, default: `now()`]
+  updated_at       timestamptz  [not null, default: `now()`]
+
+  indexes {
+    code             [unique, name: 'idx_tenants_code']
+    parent_tenant_id [name: 'idx_tenants_parent']
+  }
+
+  Note: 'No RLS — tenants table is read by all authenticated sessions for lookups. No sensitive data stored here.'
+}
+
+Ref: tenants.parent_tenant_id > tenants.id
+
+
+// ------------------------------------------------------------
+// USERS — application user records; Keycloak is primary auth
+// ------------------------------------------------------------
+
+Table users {
+  id                uuid         [pk, default: `gen_random_uuid()`]
+  keycloak_id       uuid         [not null, unique, note: 'Keycloak sub claim — the authoritative identity identifier']
+  email             varchar      [not null, unique]
+  display_name      varchar      [not null]
+  preferred_language varchar(5)  [not null, default: 'en', note: 'en | zh | es. Wife defaults to zh.']
+  is_active         boolean      [not null, default: true]
+  last_login_at     timestamptz  [null]
+  created_at        timestamptz  [not null, default: `now()`]
+  updated_at        timestamptz  [not null, default: `now()`]
+
+  indexes {
+    keycloak_id [unique, name: 'idx_users_keycloak_id']
+    email       [name: 'idx_users_email']
+  }
+
+  Note: 'No RLS — user records are referenced across all modules. Keycloak manages password, 2FA (TOTP + WebAuthn), and session tokens.'
+}
+
+
+// ------------------------------------------------------------
+// ROLES — platform role definitions (mirrors Keycloak realm roles)
+// ------------------------------------------------------------
+
+Table roles {
+  id          uuid         [pk, default: `gen_random_uuid()`]
+  name        varchar      [not null, unique, note: 'Owner | Domain Admin | Operator | Viewer | External Advisor | Auditor | Emergency Designate | System']
+  description text         [null]
+  created_at  timestamptz  [not null, default: `now()`]
+  updated_at  timestamptz  [not null, default: `now()`]
+
+  Note: 'Seeded at Phase 1A. Changes require written change request from Robert (STD-12).'
+}
+
+
+// ------------------------------------------------------------
+// USER_TENANT_ROLES — which user has which role in which entity
+// ------------------------------------------------------------
+
+Table user_tenant_roles {
+  id          uuid         [pk, default: `gen_random_uuid()`]
+  user_id     uuid         [not null, ref: > users.id]
+  tenant_id   uuid         [not null, ref: > tenants.id]
+  role_id     uuid         [not null, ref: > roles.id]
+  granted_by  uuid         [not null, ref: > users.id]
+  expires_at  timestamptz  [null, note: 'Non-null for External Advisor — auto-revoked by scheduled job']
+  is_active   boolean      [not null, default: true]
+  revoked_at  timestamptz  [null]
+  revoked_by  uuid         [null, ref: > users.id]
+  created_at  timestamptz  [not null, default: `now()`]
+  updated_at  timestamptz  [not null, default: `now()`]
+
+  indexes {
+    (user_id, tenant_id)  [name: 'idx_utr_user_tenant']
+    expires_at            [name: 'idx_utr_expires_at', note: 'Expiry sweep job queries this daily']
+    tenant_id             [name: 'idx_utr_tenant_id']
+  }
+
+  Note: 'RLS: tenant_id. Succession activation adds parallel Owner grant to wife — Robert\'s Owner record is never modified or demoted (v1.9 decision).'
+}
+
+
+// ------------------------------------------------------------
+// SESSIONS — application session tracking (Keycloak is primary)
+// ------------------------------------------------------------
+
+Table sessions {
+  id                  uuid         [pk, default: `gen_random_uuid()`]
+  user_id             uuid         [not null, ref: > users.id]
+  keycloak_session_id varchar      [not null, unique]
+  ip_address          varchar      [null]
+  user_agent          text         [null]
+  expires_at          timestamptz  [not null]
+  created_at          timestamptz  [not null, default: `now()`]
+  updated_at          timestamptz  [not null, default: `now()`]
+
+  indexes {
+    user_id             [name: 'idx_sessions_user_id']
+    keycloak_session_id [unique, name: 'idx_sessions_kc_session']
+    expires_at          [name: 'idx_sessions_expires_at']
+  }
+}
+
+
+// ------------------------------------------------------------
+// AUDIT_LOG — immutable platform-wide event record
+// ------------------------------------------------------------
+
+Table audit_log {
+  id          uuid         [pk, default: `gen_random_uuid()`]
+  tenant_id   uuid         [null, ref: > tenants.id, note: 'Null for system-level platform events']
+  user_id     uuid         [null, ref: > users.id, note: 'Null for automated system events']
+  entity      varchar      [not null, note: 'e.g. User, InventoryItem, RentPayment, BarTransaction']
+  action      varchar      [not null, note: 'e.g. CREATE, UPDATE, DELETE, LOGIN, EXPORT, APPROVE']
+  record_id   uuid         [null]
+  old_values  jsonb        [null]
+  new_values  jsonb        [null]
+  ip_address  varchar      [null]
+  source      audit_source [not null, default: 'API']
+  created_at  timestamptz  [not null, default: `now()`]
+
+  indexes {
+    tenant_id             [name: 'idx_audit_tenant_id']
+    user_id               [name: 'idx_audit_user_id']
+    (entity, record_id)   [name: 'idx_audit_entity_record']
+    created_at            [name: 'idx_audit_created_at']
+  }
+
+  Note: 'RLS: tenant_id. Owner role bypasses filter to see all tenants. Append-only — no UPDATE or DELETE from application role. No updated_at column by design.'
+}
+
+
+// ------------------------------------------------------------
+// NOTIFICATION_QUEUE — tiered unified notification centre
+// ------------------------------------------------------------
+
+Table notification_queue {
+  id             uuid                  [pk, default: `gen_random_uuid()`]
+  user_id        uuid                  [not null, ref: > users.id]
+  tenant_id      uuid                  [null, ref: > tenants.id]
+  tier           integer               [not null, note: '1=Immediate | 2=Daily 7am | 3=Weekly Monday']
+  channel        notification_channel  [not null]
+  title          varchar               [not null]
+  body           text                  [not null]
+  payload        jsonb                 [null, note: 'Structured data for client deep-linking']
+  is_read        boolean               [not null, default: false]
+  is_sent        boolean               [not null, default: false]
+  sent_at        timestamptz           [null]
+  scheduled_for  timestamptz           [null, note: 'Null = send immediately. Dispatcher sets this for Tier 2/3.']
+  created_at     timestamptz           [not null, default: `now()`]
+  updated_at     timestamptz           [not null, default: `now()`]
+
+  indexes {
+    user_id               [name: 'idx_notif_user_id']
+    (is_sent, scheduled_for) [name: 'idx_notif_pending']
+    tier                  [name: 'idx_notif_tier']
+    tenant_id             [name: 'idx_notif_tenant_id']
+  }
+
+  Note: 'RLS: user_id. Quiet hours 22:00-06:00 enforced by dispatcher logic, not schema. Tier 1 = in-app + WhatsApp link.'
+}
+
+
+// ------------------------------------------------------------
+// I18N_TRANSLATIONS — all user-facing strings (en, zh, es)
+// ------------------------------------------------------------
+
+Table i18n_translations {
+  id                   uuid         [pk, default: `gen_random_uuid()`]
+  key                  varchar      [not null, note: 'Pattern: module.semantic_id e.g. finance.bir_threshold_alert | bar.session_open']
+  locale               varchar(5)   [not null, note: 'en | zh | es']
+  value                text         [not null]
+  module               varchar      [null, note: 'e.g. IMS, JABCO, BAR, FINANCE, PROPERTIES']
+  is_machine_translated boolean     [not null, default: false, note: 'Financial, legal, compliance, and alert strings must be manual (never machine-translated)']
+  created_at           timestamptz  [not null, default: `now()`]
+  updated_at           timestamptz  [not null, default: `now()`]
+
+  indexes {
+    (key, locale)  [unique, name: 'idx_i18n_key_locale']
+    locale         [name: 'idx_i18n_locale']
+    module         [name: 'idx_i18n_module']
+  }
+
+  Note: 'No RLS — translations are platform-wide read. Three locales from day one: en (all phases), zh (Phase 1), es framework ready Phase 1 / DragonBridge content Phase 3 / full platform Phase 6.'
+}
+
+
+// ------------------------------------------------------------
+// EXTERNAL_ADVISOR_GRANTS — time-limited scoped read access
+// ------------------------------------------------------------
+
+Table external_advisor_grants {
+  id          uuid         [pk, default: `gen_random_uuid()`]
+  user_id     uuid         [not null, ref: > users.id]
+  tenant_id   uuid         [not null, ref: > tenants.id]
+  granted_by  uuid         [not null, ref: > users.id]
+  scope       jsonb        [not null, note: 'Defines which modules and record IDs are accessible. E.g. {modules: ["DOCVAULT"], record_ids: [...]}']
+  expires_at  timestamptz  [not null, note: 'Mandatory — auto-revoked by scheduler. No perpetual external grants.']
+  is_active   boolean      [not null, default: true]
+  revoked_at  timestamptz  [null]
+  revoked_by  uuid         [null, ref: > users.id]
+  created_at  timestamptz  [not null, default: `now()`]
+  updated_at  timestamptz  [not null, default: `now()`]
+
+  indexes {
+    user_id    [name: 'idx_eag_user_id']
+    tenant_id  [name: 'idx_eag_tenant_id']
+    expires_at [name: 'idx_eag_expires_at']
+  }
+
+  Note: 'RLS: tenant_id. Used for lawyers (estate review) and potential buyers (Data Room mode). scope JSON controls module and record-level access boundaries.'
+}
+
+
+// ------------------------------------------------------------
+// TABLE GROUPS (visual grouping in dbdiagram.io)
+// ------------------------------------------------------------
+
+TableGroup core_identity {
+  tenants
+  users
+  roles
+  user_tenant_roles
+  sessions
+}
+
+TableGroup core_platform {
+  audit_log
+  notification_queue
+  i18n_translations
+  external_advisor_grants
+}
+
+TableGroup outbox {
+  pending_events
+}

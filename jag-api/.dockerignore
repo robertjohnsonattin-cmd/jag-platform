@@ -1,0 +1,17 @@
+# node_modules (dev) excluded — use prod_modules/ for Docker
+node_modules
+# dist/ and prod_modules/ are intentionally included:
+#   dist/         — compiled by npm run build:prod before docker build
+#   prod_modules/ — installed by npm run prod-install before docker build
+.env
+.env.*
+!.env.example
+src/__tests__
+*.test.ts
+*.spec.ts
+coverage
+.nyc_output
+*.log
+.git
+.gitignore
+README.md

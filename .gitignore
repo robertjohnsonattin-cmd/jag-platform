@@ -1,0 +1,7 @@
+﻿.env
+node_modules/
+dist/
+prod_modules/
+*.log
+uploads/
+scripts/ollama-batch/.env.ollama-batch

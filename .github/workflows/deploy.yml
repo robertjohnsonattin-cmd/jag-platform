@@ -1,0 +1,84 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:      # allow manual trigger from GitHub UI
+
+jobs:
+  deploy:
+    name: Deploy — JAG Platform
+    runs-on: ubuntu-latest
+    environment: production   # requires manual approval in GitHub Environments settings
+
+    steps:
+      # ── Checkout ─────────────────────────────────────────────────────────────
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ── Node.js setup ─────────────────────────────────────────────────────────
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: jag-api/package-lock.json
+
+      # ── Build TypeScript + prod modules (Gate 1 + pre-Gate 4) ───────────────
+
+      - name: Install dependencies
+        working-directory: jag-api
+        run: npm ci
+
+      - name: TypeScript build
+        working-directory: jag-api
+        run: npm run build
+
+      - name: Install production modules
+        working-directory: jag-api
+        run: node scripts/prod-install.js
+
+      # ── Tests (Gate 2) ────────────────────────────────────────────────────────
+      # RLS tests require a live database — skip in CI; they pass locally before push.
+      # Unit/integration tests that don't need a DB run here.
+
+      - name: Run tests
+        working-directory: jag-api
+        run: npm test -- --testPathIgnorePatterns=rls-isolation
+        env:
+          NODE_ENV: test
+
+      # ── Copy built artefacts to VM and run deploy script ─────────────────────
+
+      - name: Configure SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.VM_SSH_PRIVATE_KEY }}" > ~/.ssh/jag_deploy_key
+          chmod 600 ~/.ssh/jag_deploy_key
+          ssh-keyscan -H "${{ secrets.VM_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Sync built artefacts to VM
+        run: |
+          # Only sync the compiled output — source stays on the VM (cloned separately)
+          rsync -avz --delete \
+            -e "ssh -i ~/.ssh/jag_deploy_key" \
+            jag-api/dist/ \
+            ubuntu@${{ secrets.VM_HOST }}:/opt/jag/jag-api/dist/
+
+          rsync -avz --delete \
+            -e "ssh -i ~/.ssh/jag_deploy_key" \
+            jag-api/prod_modules/ \
+            ubuntu@${{ secrets.VM_HOST }}:/opt/jag/jag-api/prod_modules/
+
+          rsync -avz \
+            -e "ssh -i ~/.ssh/jag_deploy_key" \
+            jag-infra/ \
+            ubuntu@${{ secrets.VM_HOST }}:/opt/jag/jag-infra/ \
+            --exclude .env --exclude logs/
+
+      - name: Run deploy script on VM
+        run: |
+          ssh -i ~/.ssh/jag_deploy_key ubuntu@${{ secrets.VM_HOST }} \
+            "cd /opt/jag/jag-infra && ./scripts/deploy.sh --env=production --skip-tests"

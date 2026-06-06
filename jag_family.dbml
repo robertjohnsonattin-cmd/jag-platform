@@ -1,0 +1,802 @@
+// ============================================================
+// JAG Platform — jag_family Database Schema
+// ============================================================
+// Version:    PRE-1 | 2026-05-23
+// Author:     Robert Johnson-Attin via Claude Code (PRE-1 session)
+// Tooling:    node-pg-migrate | dbdiagram.io compatible
+//
+// jag_family covers personal and family-level records:
+//   Family Members  — Robert + wife + daughter + father + Brian
+//   Personal FLEET  — vehicles (family admin: insurance, registration)
+//   Lifestyle       — JAG Lifestyle loyalty/rewards tracker
+//   Succession      — estate document references
+//   DocVault        — personal document store
+//
+// RLS: owner_id on all tables (personal/family data, not multi-tenant).
+//   SET LOCAL app.current_owner = '<uuid>';
+//   Wife (Emergency Designate) has full read-only access to all tables.
+//
+// Vehicle note:
+//   jag_commercial.ims_vehicles is the canonical asset-tracking record
+//   for all vehicles (JABCO fleet + personal fleet), held in the IMS.
+//   This database holds the family-admin view: insurance policy details,
+//   family member assignment, registration documents, maintenance log.
+//   Cross-DB reference: fam_personal_vehicles.ims_item_id →
+//   jag_commercial.ims_items.id (logical reference, no DB-level FK).
+//
+// Cross-DB references (logical only — no DB-level FK):
+//   owner_id / user refs → jag_core.users.id
+//
+// Standards: STD-01 through STD-13 apply to all changes.
+// ============================================================
+
+
+// ------------------------------------------------------------
+// ENUMS
+// ------------------------------------------------------------
+
+Enum family_relationship {
+  SELF
+  WIFE
+  DAUGHTER
+  FATHER
+  BROTHER
+  OTHER
+}
+
+Enum vehicle_fuel_type {
+  PETROL
+  DIESEL
+  HYBRID
+  ELECTRIC
+  CNG
+}
+
+Enum personal_vehicle_type {
+  CAR
+  SUV
+  PICKUP_TRUCK
+  VAN
+  MOTORCYCLE
+  OTHER
+}
+
+Enum maintenance_service_type {
+  OIL_CHANGE
+  TYRE_ROTATION
+  BRAKE_SERVICE
+  ANNUAL_SERVICE
+  TRANSMISSION_SERVICE
+  AC_SERVICE
+  WINDSCREEN
+  BODY_REPAIR
+  INSPECTION
+  REPAIR
+  OTHER
+}
+
+Enum lifestyle_metric_type {
+  WEIGHT_KG
+  STEPS
+  SLEEP_HOURS
+  CALORIES
+  EXERCISE_MINUTES
+  BLOOD_PRESSURE_SYSTOLIC
+  BLOOD_PRESSURE_DIASTOLIC
+  RESTING_HEART_RATE
+  OTHER
+}
+
+Enum loyalty_programme_type {
+  AIRLINE
+  HOTEL
+  CRUISE
+  CREDIT_CARD
+  RETAIL
+  DINING
+  OTHER
+}
+
+Enum loyalty_transaction_type {
+  EARN
+  REDEEM
+  EXPIRE
+  TRANSFER_IN
+  TRANSFER_OUT
+  BONUS
+  REINSTATEMENT
+}
+
+Enum succession_document_type {
+  WILL
+  TRUST
+  POWER_OF_ATTORNEY
+  INSURANCE_POLICY
+  TITLE_DEED
+  SHARE_CERTIFICATE
+  BANK_MANDATE
+  COMPANY_RESOLUTION
+  ADVANCE_DIRECTIVE
+  OTHER
+}
+
+Enum docvault_document_type {
+  NATIONAL_ID
+  PASSPORT
+  BIRTH_CERTIFICATE
+  MARRIAGE_CERTIFICATE
+  DEATH_CERTIFICATE
+  MEDICAL_RECORD
+  ACADEMIC_CERTIFICATE
+  PROFESSIONAL_LICENCE
+  FINANCIAL_STATEMENT
+  TAX_RETURN
+  INSURANCE_POLICY
+  PROPERTY_TITLE
+  LEGAL_AGREEMENT
+  OTHER
+}
+
+
+// ------------------------------------------------------------
+// OUTBOX: pending_events
+// ------------------------------------------------------------
+
+Table pending_events {
+  id              uuid         [pk, default: `gen_random_uuid()`]
+  aggregate_type  varchar      [not null, note: 'e.g. PersonalVehicle, SuccessionDocument, DocVaultFile']
+  aggregate_id    uuid         [not null]
+  event_type      varchar      [not null, note: 'e.g. vehicle.insurance_expiring, succession.document_updated']
+  payload         jsonb        [not null]
+  created_at      timestamptz  [not null, default: `now()`]
+  processed_at    timestamptz  [null]
+  retry_count     integer      [not null, default: 0]
+  last_error      text         [null]
+
+  indexes {
+    processed_at                    [name: 'idx_pe_fam_processed_at']
+    created_at                      [name: 'idx_pe_fam_created_at']
+    (aggregate_type, aggregate_id)  [name: 'idx_pe_fam_aggregate']
+  }
+
+  Note: 'Append-only outbox. jag-event-dispatcher polls every 5s.'
+}
+
+
+// ============================================================
+// FAMILY MEMBERS
+// ============================================================
+
+// ------------------------------------------------------------
+// FAM_FAMILY_MEMBERS — household and immediate family records
+// ------------------------------------------------------------
+
+Table fam_family_members {
+  id                      uuid                  [pk, default: `gen_random_uuid()`]
+  owner_id                uuid                  [not null, note: 'cross-db ref: jag_core.users.id — Robert is the owner of all family records']
+  relationship            family_relationship   [not null]
+  first_name              varchar               [not null]
+  last_name               varchar               [not null]
+  date_of_birth           date                  [null]
+  email                   varchar               [null]
+  phone                   varchar               [null]
+  preferred_language      varchar(5)            [not null, default: 'en', note: 'Wife defaults zh. en | zh | es']
+  is_emergency_designate  boolean               [not null, default: false, note: 'Wife = true. Emergency Designate has full read-only access via Keycloak role in jag_core']
+  keycloak_user_id        uuid                  [null, note: 'cross-db ref: jag_core.users.id — non-null when family member has a platform login (wife, Brian)']
+  notes                   text                  [null]
+  created_at              timestamptz           [not null, default: `now()`]
+  updated_at              timestamptz           [not null, default: `now()`]
+
+  indexes {
+    owner_id             [name: 'idx_family_owner']
+    relationship         [name: 'idx_family_relationship']
+    is_emergency_designate [name: 'idx_family_emergency_designate']
+  }
+
+  Note: 'RLS: owner_id. Seed data: Father (DOB 1940-02-16), Wife (DOB 1974-12-22, preferred_language=zh, is_emergency_designate=true), Daughter (DOB 2012-07-18), Brother Brian. Succession activation provisions wife\'s Keycloak account with parallel Owner access — Robert\'s record is never demoted (v1.9 rule).'
+}
+
+
+// ============================================================
+// PERSONAL FLEET
+// ============================================================
+
+// ------------------------------------------------------------
+// FAM_PERSONAL_VEHICLES — family vehicle registry (admin view)
+// ------------------------------------------------------------
+
+Table fam_personal_vehicles {
+  id                      uuid                  [pk, default: `gen_random_uuid()`]
+  owner_id                uuid                  [not null, note: 'cross-db ref: jag_core.users.id']
+  family_member_id        uuid                  [null, ref: > fam_family_members.id, note: 'Primary user of this vehicle']
+  ims_item_id             uuid                  [null, note: 'cross-db ref: jag_commercial.ims_items.id — links to asset-tracking record in IMS']
+  registration_number     varchar               [not null, unique]
+  make                    varchar               [not null]
+  model                   varchar               [not null]
+  year                    integer               [not null]
+  colour                  varchar               [null]
+  vehicle_type            personal_vehicle_type [not null]
+  fuel_type               vehicle_fuel_type     [not null]
+  vin                     varchar               [null]
+  engine_number           varchar               [null]
+  insurance_policy_number varchar               [null]
+  insurance_provider      varchar               [null]
+  insurance_expiry        date                  [null]
+  registration_expiry     date                  [null]
+  purchase_date           date                  [null]
+  purchase_price          numeric               [null]
+  current_mileage_km      integer               [null]
+  notes                   text                  [null]
+  last_modified_at        timestamptz           [not null, default: `now()`]
+  created_at              timestamptz           [not null, default: `now()`]
+  updated_at              timestamptz           [not null, default: `now()`]
+
+  indexes {
+    owner_id            [name: 'idx_pveh_owner']
+    family_member_id    [name: 'idx_pveh_family_member']
+    registration_number [unique, name: 'idx_pveh_rego']
+    insurance_expiry    [name: 'idx_pveh_ins_expiry', note: 'Alert queries for renewal reminders']
+    registration_expiry [name: 'idx_pveh_rego_expiry', note: 'Alert queries']
+    last_modified_at    [name: 'idx_pveh_last_modified']
+  }
+
+  Note: 'RLS: owner_id. This is the family-admin view (insurance, registration, family assignment). jag_commercial.ims_vehicles is the asset-tracking counterpart. ims_item_id is the cross-DB logical link.'
+}
+
+
+// ------------------------------------------------------------
+// FAM_VEHICLE_MAINTENANCE — maintenance history per vehicle
+// ------------------------------------------------------------
+
+Table fam_vehicle_maintenance {
+  id                   uuid                      [pk, default: `gen_random_uuid()`]
+  owner_id             uuid                      [not null, note: 'cross-db ref: jag_core.users.id']
+  vehicle_id           uuid                      [not null, ref: > fam_personal_vehicles.id]
+  service_type         maintenance_service_type  [not null]
+  service_date         date                      [not null]
+  mileage_at_service   integer                   [null]
+  service_provider     varchar                   [null]
+  cost                 numeric                   [null]
+  description          text                      [null]
+  next_service_date    date                      [null]
+  next_service_mileage integer                   [null]
+  receipt_path         varchar                   [null, note: 'MinIO path for receipt/invoice']
+  idempotency_key      uuid                      [not null, unique]
+  created_at           timestamptz               [not null, default: `now()`]
+  updated_at           timestamptz               [not null, default: `now()`]
+
+  indexes {
+    owner_id         [name: 'idx_vmaint_owner']
+    vehicle_id       [name: 'idx_vmaint_vehicle']
+    service_date     [name: 'idx_vmaint_date']
+    next_service_date [name: 'idx_vmaint_next_service', note: 'Alert queries for upcoming service']
+    idempotency_key  [unique, name: 'idx_vmaint_idempotency']
+  }
+
+  Note: 'RLS: owner_id.'
+}
+
+
+// ============================================================
+// JAG LIFESTYLE — HEALTH AND LOYALTY TRACKING
+// ============================================================
+
+// ------------------------------------------------------------
+// FAM_LIFESTYLE_TRACKER — health and fitness metrics
+// ------------------------------------------------------------
+
+Table fam_lifestyle_tracker {
+  id               uuid                 [pk, default: `gen_random_uuid()`]
+  owner_id         uuid                 [not null, note: 'cross-db ref: jag_core.users.id']
+  family_member_id uuid                 [null, ref: > fam_family_members.id]
+  entry_date       date                 [not null]
+  metric_type      lifestyle_metric_type [not null]
+  value            numeric              [not null]
+  unit             varchar              [not null, note: 'e.g. kg, steps, hours, kcal, bpm, mmHg']
+  notes            text                 [null]
+  source           varchar              [null, note: 'e.g. MANUAL, APPLE_HEALTH, GARMIN, FITBIT']
+  created_at       timestamptz          [not null, default: `now()`]
+  updated_at       timestamptz          [not null, default: `now()`]
+
+  indexes {
+    owner_id         [name: 'idx_lifestyle_owner']
+    family_member_id [name: 'idx_lifestyle_member']
+    (family_member_id, metric_type, entry_date) [name: 'idx_lifestyle_query']
+    entry_date       [name: 'idx_lifestyle_date']
+  }
+
+  Note: 'RLS: owner_id.'
+}
+
+
+// ------------------------------------------------------------
+// FAM_LOYALTY_PROGRAMMES — airline, hotel, cruise, credit card points
+// ------------------------------------------------------------
+
+Table fam_loyalty_programmes {
+  id               uuid                  [pk, default: `gen_random_uuid()`]
+  owner_id         uuid                  [not null, note: 'cross-db ref: jag_core.users.id']
+  family_member_id uuid                  [null, ref: > fam_family_members.id, note: 'Which family member holds this membership']
+  programme_type   loyalty_programme_type [not null]
+  provider_name    varchar               [not null, note: 'e.g. Caribbean Airlines, Marriott, Royal Caribbean, Visa Infinite']
+  membership_number varchar              [null]
+  tier             varchar               [null, note: 'e.g. Gold, Platinum, Diamond']
+  points_balance   numeric               [not null, default: 0]
+  miles_balance    numeric               [not null, default: 0]
+  expiry_date      date                  [null, note: 'Points expiry date — alert fires 60 days before']
+  notes            text                  [null]
+  last_modified_at timestamptz           [not null, default: `now()`]
+  created_at       timestamptz           [not null, default: `now()`]
+  updated_at       timestamptz           [not null, default: `now()`]
+
+  indexes {
+    owner_id         [name: 'idx_loyalty_owner']
+    family_member_id [name: 'idx_loyalty_member']
+    programme_type   [name: 'idx_loyalty_type']
+    expiry_date      [name: 'idx_loyalty_expiry', note: 'Alert queries for expiring points']
+    last_modified_at [name: 'idx_loyalty_last_modified']
+  }
+
+  Note: 'RLS: owner_id. crm_contacts.loyalty_member_id in jag_commercial cross-references this table for JAG Lifestyle integration with external contacts/customers.'
+}
+
+
+// ------------------------------------------------------------
+// FAM_LOYALTY_TRANSACTIONS — points/miles earn and redemption log
+// ------------------------------------------------------------
+
+Table fam_loyalty_transactions {
+  id               uuid                    [pk, default: `gen_random_uuid()`]
+  owner_id         uuid                    [not null, note: 'cross-db ref: jag_core.users.id']
+  programme_id     uuid                    [not null, ref: > fam_loyalty_programmes.id]
+  transaction_date date                    [not null]
+  transaction_type loyalty_transaction_type [not null]
+  points_amount    numeric                 [not null, default: 0, note: 'Positive = earn/credit. Negative = redeem/debit.']
+  miles_amount     numeric                 [not null, default: 0]
+  description      varchar                 [not null]
+  reference_number varchar                 [null, note: 'Programme reference or booking number']
+  idempotency_key  uuid                    [not null, unique]
+  created_at       timestamptz             [not null, default: `now()`]
+  updated_at       timestamptz             [not null, default: `now()`]
+
+  indexes {
+    owner_id         [name: 'idx_loyalty_tx_owner']
+    programme_id     [name: 'idx_loyalty_tx_programme']
+    transaction_date [name: 'idx_loyalty_tx_date']
+    idempotency_key  [unique, name: 'idx_loyalty_tx_idempotency']
+  }
+
+  Note: 'RLS: owner_id. idempotency_key prevents duplicate logging of the same transaction.'
+}
+
+
+// ============================================================
+// SUCCESSION AND DOCUMENT VAULT
+// ============================================================
+
+// ------------------------------------------------------------
+// FAM_SUCCESSION_DOCUMENTS — estate planning document registry
+// ------------------------------------------------------------
+
+Table fam_succession_documents {
+  id                  uuid                    [pk, default: `gen_random_uuid()`]
+  owner_id            uuid                    [not null, note: 'cross-db ref: jag_core.users.id']
+  document_type       succession_document_type [not null]
+  title               varchar                 [not null]
+  description         text                    [null]
+  document_date       date                    [null]
+  storage_path        varchar                 [null, note: 'MinIO path — classified documents only accessible via Owner role']
+  is_classified       boolean                 [not null, default: true, note: 'Classified docs accessible only to Owner (Robert). Emergency Designate has guided access per activation protocol.']
+  governing_law       varchar                 [null, note: 'Jurisdiction e.g. Trinidad and Tobago']
+  lawyer_firm         varchar                 [null, note: 'Name of law firm only — no individual lawyer identity per OPSEC']
+  last_reviewed_date  date                    [null]
+  review_reminder_date date                   [null]
+  notes               text                    [null]
+  last_modified_at    timestamptz             [not null, default: `now()`]
+  created_at          timestamptz             [not null, default: `now()`]
+  updated_at          timestamptz             [not null, default: `now()`]
+
+  indexes {
+    owner_id             [name: 'idx_succession_owner']
+    document_type        [name: 'idx_succession_type']
+    review_reminder_date [name: 'idx_succession_reminder', note: 'Alert queries for annual review reminders']
+    last_modified_at     [name: 'idx_succession_last_modified']
+  }
+
+  Note: 'RLS: owner_id. Classified documents do not expose details to External Advisors without explicit external_advisor_grants scope in jag_core. Lawyer identities are NOT stored (OPSEC rule from classified Master Architecture).'
+}
+
+
+// ------------------------------------------------------------
+// FAM_DOCVAULT_FILES — personal and family document storage
+// ------------------------------------------------------------
+
+Table fam_docvault_files {
+  id               uuid                   [pk, default: `gen_random_uuid()`]
+  owner_id         uuid                   [not null, note: 'cross-db ref: jag_core.users.id']
+  family_member_id uuid                   [null, ref: > fam_family_members.id, note: 'Whose document this is']
+  title            varchar                [not null]
+  document_type    docvault_document_type [not null]
+  file_name        varchar                [not null]
+  storage_path     varchar                [not null, note: 'MinIO path']
+  mime_type        varchar                [not null]
+  file_size_bytes  bigint                 [not null]
+  expires_date     date                   [null, note: 'e.g. passport expiry, licence expiry — alert fires 90 days before']
+  is_data_room     boolean                [not null, default: false, note: 'If true, document is available in the sale-readiness Data Room for that entity']
+  data_room_entity varchar                [null, note: 'Which entity\'s Data Room this belongs to — null if not a data room document']
+  uploaded_by      uuid                   [not null, note: 'cross-db ref: jag_core.users.id']
+  notes            text                   [null]
+  last_modified_at timestamptz            [not null, default: `now()`]
+  created_at       timestamptz            [not null, default: `now()`]
+  updated_at       timestamptz            [not null, default: `now()`]
+
+  indexes {
+    owner_id         [name: 'idx_docvault_owner']
+    family_member_id [name: 'idx_docvault_member']
+    document_type    [name: 'idx_docvault_type']
+    expires_date     [name: 'idx_docvault_expiry', note: 'Alert queries for document expiry']
+    is_data_room     [name: 'idx_docvault_data_room']
+    last_modified_at [name: 'idx_docvault_last_modified']
+  }
+
+  Note: 'RLS: owner_id. Data Room documents (is_data_room=true) are accessible to External Advisors with appropriate scope in jag_core.external_advisor_grants. All other documents: Owner only.'
+}
+
+
+// ------------------------------------------------------------
+// TABLE GROUPS (visual grouping in dbdiagram.io)
+// ------------------------------------------------------------
+
+TableGroup outbox {
+  pending_events
+}
+
+TableGroup family {
+  fam_family_members
+}
+
+TableGroup personal_fleet {
+  fam_personal_vehicles
+  fam_vehicle_maintenance
+}
+
+TableGroup lifestyle {
+  fam_lifestyle_tracker
+  fam_loyalty_programmes
+  fam_loyalty_transactions
+}
+
+TableGroup succession_and_documents {
+  fam_succession_documents
+  fam_docvault_files
+}
+
+
+// ============================================================
+// GENERAL LEDGER (Phase 5)
+// ============================================================
+
+Enum gl_account_type {
+  ASSET
+  LIABILITY
+  EQUITY
+  REVENUE
+  EXPENSE
+  OTHER_INCOME
+  OTHER_EXPENSE
+}
+
+Enum gl_normal_balance {
+  DEBIT
+  CREDIT
+}
+
+Enum gl_entry_status {
+  DRAFT
+  POSTED
+  VOID
+}
+
+Enum gl_entry_source {
+  MANUAL
+  BANK_IMPORT
+  TRANSACTION_SYNC
+  INTERCOMPANY
+  PERIOD_CLOSE
+  ADJUSTMENT
+}
+
+// ------------------------------------------------------------
+// FIN_GL_ACCOUNTS — chart of accounts
+// ------------------------------------------------------------
+
+Table fin_gl_accounts {
+  id                   uuid              [pk, default: `gen_random_uuid()`]
+  owner_id             uuid              [not null, note: 'cross-db ref: jag_core.users.id']
+  owner_entity_id      uuid              [not null, note: 'cross-db ref: jag_core.tenants.id. Consolidated = 00000000-0000-0000-0000-000000000000']
+  account_code         varchar(20)       [not null, note: '1xxx=Asset, 2xxx=Liability, 3xxx=Equity, 4xxx=Revenue, 5xxx=Expense']
+  account_name         varchar(200)      [not null]
+  account_type         gl_account_type   [not null]
+  normal_balance       gl_normal_balance [not null]
+  parent_id            uuid              [null, ref: > fin_gl_accounts.id, note: 'Sub-account hierarchy']
+  currency             char(3)           [not null, default: 'TTD']
+  description          text              [null]
+  is_active            boolean           [not null, default: true]
+  allow_direct_posting boolean           [not null, default: true, note: 'false for summary/header accounts']
+  created_at           timestamptz       [not null, default: `now()`]
+  updated_at           timestamptz       [not null, default: `now()`]
+
+  indexes {
+    owner_id                                   [name: 'idx_gl_accounts_owner']
+    owner_entity_id                            [name: 'idx_gl_accounts_entity']
+    account_type                               [name: 'idx_gl_accounts_type']
+    (owner_id, account_code)                   [name: 'idx_gl_accounts_code']
+    parent_id                                  [name: 'idx_gl_accounts_parent']
+    (owner_id, owner_entity_id, account_code)  [unique, name: 'uq_gl_accounts_code_per_entity']
+  }
+
+  Note: 'RLS: owner_id. Standard CoA numbering: 1xxx Asset, 2xxx Liability, 3xxx Equity, 4xxx Revenue, 5xxx Expense, 6xxx Other Income, 7xxx Other Expense.'
+}
+
+// ------------------------------------------------------------
+// FIN_JOURNAL_ENTRIES — double-entry header
+// ------------------------------------------------------------
+
+Table fin_journal_entries {
+  id               uuid              [pk, default: `gen_random_uuid()`]
+  owner_id         uuid              [not null, note: 'cross-db ref: jag_core.users.id']
+  owner_entity_id  uuid              [not null, note: 'cross-db ref: jag_core.tenants.id']
+  entry_date       date              [not null]
+  period_month     smallint          [not null, note: 'GENERATED from entry_date']
+  period_year      smallint          [not null, note: 'GENERATED from entry_date']
+  reference        varchar(100)      [null, note: 'Invoice number, bank ref, etc.']
+  description      text              [not null]
+  status           gl_entry_status   [not null, default: 'DRAFT']
+  source           gl_entry_source   [not null, default: 'MANUAL']
+  source_id        uuid              [null, note: 'Logical FK to fin_transactions, fin_bank_statement_jobs, etc.']
+  currency         char(3)           [not null, default: 'TTD']
+  total_debit_ttd  numeric           [not null, default: 0, note: 'Kept in sync with lines by API']
+  total_credit_ttd numeric           [not null, default: 0]
+  posted_at        timestamptz       [null]
+  posted_by        uuid              [null, note: 'cross-db ref: jag_core.users.id']
+  void_reason      text              [null]
+  idempotency_key  text              [not null, unique]
+  created_at       timestamptz       [not null, default: `now()`]
+  updated_at       timestamptz       [not null, default: `now()`]
+
+  indexes {
+    owner_id                     [name: 'idx_je_owner']
+    owner_entity_id              [name: 'idx_je_entity']
+    entry_date                   [name: 'idx_je_date']
+    (period_year, period_month)  [name: 'idx_je_period']
+    status                       [name: 'idx_je_status']
+    idempotency_key              [unique, name: 'idx_je_idempotency']
+  }
+
+  Note: 'RLS: owner_id. Immutable once POSTED — void and re-post instead. period_month/period_year are PostgreSQL GENERATED STORED columns.'
+}
+
+// ------------------------------------------------------------
+// FIN_JOURNAL_ENTRY_LINES — double-entry lines
+// ------------------------------------------------------------
+
+Table fin_journal_entry_lines {
+  id               uuid        [pk, default: `gen_random_uuid()`]
+  owner_id         uuid        [not null, note: 'cross-db ref: jag_core.users.id']
+  journal_entry_id uuid        [not null, ref: > fin_journal_entries.id]
+  gl_account_id    uuid        [not null, ref: > fin_gl_accounts.id]
+  line_number      smallint    [not null, note: 'Line ordering within the entry']
+  description      text        [null]
+  debit_ttd        numeric     [not null, default: 0]
+  credit_ttd       numeric     [not null, default: 0]
+  currency         char(3)     [not null, default: 'TTD']
+  amount_original  numeric     [null, note: 'Original amount before FX conversion']
+  fx_rate_used     numeric     [null, note: 'Rate applied to convert to TTD']
+  created_at       timestamptz [not null, default: `now()`]
+
+  indexes {
+    journal_entry_id  [name: 'idx_jel_entry']
+    gl_account_id     [name: 'idx_jel_account']
+    owner_id          [name: 'idx_jel_owner']
+  }
+
+  Note: 'RLS: owner_id. Constraints: debit_ttd >= 0, credit_ttd >= 0, exactly one side non-zero. SUM(debit_ttd) = SUM(credit_ttd) per entry enforced by API at post time.'
+}
+
+TableGroup general_ledger {
+  fin_gl_accounts
+  fin_journal_entries
+  fin_journal_entry_lines
+}
+
+
+// ============================================================
+// EXPENSE MANAGEMENT (Phase 5)
+// ============================================================
+
+Enum expense_status {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  REJECTED
+}
+
+Enum expense_payment_method {
+  CASH
+  BANK_TRANSFER
+  CREDIT_CARD
+  CHEQUE
+  DIRECT_DEBIT
+  OTHER
+}
+
+// ------------------------------------------------------------
+// FIN_EXPENSES
+// ------------------------------------------------------------
+
+Table fin_expenses {
+  id                   uuid                   [pk, default: `gen_random_uuid()`]
+  owner_id             uuid                   [not null, note: 'cross-db ref: jag_core.users.id']
+  owner_entity_id      uuid                   [not null, note: 'cross-db ref: jag_core.tenants.id']
+  submitted_by         uuid                   [not null, note: 'cross-db ref: jag_core.users.id']
+  expense_date         date                   [not null]
+  description          text                   [not null]
+  payee_name           varchar(200)           [null]
+  amount               numeric                [not null]
+  currency             char(3)                [not null, default: 'TTD']
+  amount_ttd           numeric                [not null, note: 'Always in TTD']
+  fx_rate_used         numeric                [null, note: 'Null when currency = TTD']
+  payment_method       expense_payment_method [not null, default: 'BANK_TRANSFER']
+  category             text                   [not null, default: 'OPERATING_EXPENSE']
+  gl_debit_account_id  uuid                   [null, ref: > fin_gl_accounts.id, note: 'Expense account (5xxx) — set by submitter, confirmed at approval']
+  gl_credit_account_id uuid                   [null, ref: > fin_gl_accounts.id, note: 'Bank/cash/AP account (1xxx/2xxx) — set at approval']
+  status               expense_status         [not null, default: 'DRAFT']
+  submitted_at         timestamptz            [null]
+  approved_by          uuid                   [null, note: 'Owner only — cross-db ref: jag_core.users.id']
+  approved_at          timestamptz            [null]
+  rejection_reason     text                   [null]
+  journal_entry_id     uuid                   [null, ref: > fin_journal_entries.id, note: 'Populated on approval — links to auto-posted GL entry']
+  receipt_path         varchar(500)           [null, note: 'MinIO path']
+  receipt_filename     varchar(200)           [null]
+  notes                text                   [null]
+  idempotency_key      text                   [not null, unique]
+  created_at           timestamptz            [not null, default: `now()`]
+  updated_at           timestamptz            [not null, default: `now()`]
+
+  indexes {
+    owner_id          [name: 'idx_exp_owner']
+    owner_entity_id   [name: 'idx_exp_entity']
+    status            [name: 'idx_exp_status']
+    expense_date      [name: 'idx_exp_date']
+    submitted_by      [name: 'idx_exp_submitted_by']
+    journal_entry_id  [name: 'idx_exp_journal_entry']
+    idempotency_key   [unique, name: 'idx_exp_idempotency']
+  }
+
+  Note: 'RLS: owner_id. Lifecycle: DRAFT → SUBMITTED → APPROVED/REJECTED. On APPROVED, GL journal entry auto-posted (debit gl_debit_account_id, credit gl_credit_account_id). Approval restricted to Owner (isOwner=true).'
+}
+
+TableGroup expense_management {
+  fin_expenses
+}
+
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Insurance module (Phase 5 — Item 4)
+// ══════════════════════════════════════════════════════════════════════════════
+
+Enum insurance_policy_type {
+  PROPERTY
+  VEHICLE
+  LIABILITY
+  LIFE
+  HEALTH
+  BUSINESS_INTERRUPTION
+  MARINE
+  PROFESSIONAL_INDEMNITY
+  OTHER
+}
+
+Enum insurance_asset_type {
+  VEHICLE
+  PROPERTY
+  BUSINESS
+  PERSON
+  OTHER
+}
+
+Enum premium_frequency {
+  MONTHLY
+  QUARTERLY
+  SEMI_ANNUAL
+  ANNUAL
+  ONE_OFF
+}
+
+Enum premium_status {
+  DUE
+  PAID
+  OVERDUE
+  WAIVED
+}
+
+Enum claim_status {
+  SUBMITTED
+  UNDER_REVIEW
+  APPROVED
+  REJECTED
+  SETTLED
+  WITHDRAWN
+}
+
+Table fin_insurance_policies {
+  id                  uuid                   [pk, default: `gen_random_uuid()`]
+  owner_id            uuid                   [not null]
+  owner_entity_id     uuid                   [not null]
+  policy_number       varchar(100)           [not null]
+  insurer_name        varchar(200)           [not null]
+  broker_name         varchar(200)           [null]
+  policy_type         insurance_policy_type  [not null]
+  insured_asset_type  insurance_asset_type   [not null]
+  insured_asset_ref   uuid                   [null]
+  coverage_amount     numeric(18,2)          [not null]
+  currency            char(3)                [not null, default: 'TTD']
+  coverage_amount_ttd numeric(18,2)          [not null]
+  premium_amount      numeric(18,2)          [not null]
+  premium_amount_ttd  numeric(18,2)          [not null]
+  premium_frequency   premium_frequency      [not null]
+  start_date          date                   [not null]
+  expiry_date         date                   [not null]
+  renewal_alert_days  smallint               [not null, default: 60]
+  gl_expense_account_id uuid                 [null, ref: > fin_gl_accounts.id]
+  is_active           boolean                [not null, default: true]
+  notes               text                   [null]
+  created_at          timestamptz            [not null, default: `now()`]
+  updated_at          timestamptz            [not null, default: `now()`]
+}
+
+Table fin_insurance_premiums {
+  id               uuid           [pk, default: `gen_random_uuid()`]
+  owner_id         uuid           [not null]
+  policy_id        uuid           [not null, ref: > fin_insurance_policies.id]
+  due_date         date           [not null]
+  paid_date        date           [null]
+  amount           numeric(18,2)  [not null]
+  currency         char(3)        [not null, default: 'TTD']
+  amount_ttd       numeric(18,2)  [not null]
+  fx_rate_used     numeric(12,6)  [null]
+  payment_method   text           [not null, default: 'BANK_TRANSFER']
+  status           premium_status [not null, default: 'DUE']
+  gl_entry_id      uuid           [null, ref: > fin_journal_entries.id]
+  receipt_path     varchar(500)   [null]
+  receipt_filename varchar(200)   [null]
+  notes            text           [null]
+  idempotency_key  text           [not null, unique]
+  created_at       timestamptz    [not null, default: `now()`]
+  updated_at       timestamptz    [not null, default: `now()`]
+}
+
+Table fin_insurance_claims {
+  id                  uuid         [pk, default: `gen_random_uuid()`]
+  owner_id            uuid         [not null]
+  policy_id           uuid         [not null, ref: > fin_insurance_policies.id]
+  claim_reference     varchar(100) [null]
+  incident_date       date         [not null]
+  claim_date          date         [not null]
+  description         text         [not null]
+  claimed_amount_ttd  numeric(18,2)[not null]
+  settled_amount_ttd  numeric(18,2)[null]
+  status              claim_status [not null, default: 'SUBMITTED']
+  settlement_date     date         [null]
+  gl_entry_id         uuid         [null, ref: > fin_journal_entries.id]
+  notes               text         [null]
+  idempotency_key     text         [not null, unique]
+  created_at          timestamptz  [not null, default: `now()`]
+  updated_at          timestamptz  [not null, default: `now()`]
+}
+
+TableGroup insurance_module {
+  fin_insurance_policies
+  fin_insurance_premiums
+  fin_insurance_claims
+}

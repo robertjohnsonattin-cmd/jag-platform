@@ -1,0 +1,24 @@
+# JAG Holdings — lines to APPEND to /etc/postgresql/16/main/pg_hba.conf
+#
+# Replace <AMPERE_PRIVATE_IP> with Ampere VM's OCI private IP (e.g. 10.0.0.X)
+# Replace <AMD_PRIVATE_IP> with AMD VM's OCI private IP (for post-failover AMD→standby)
+#
+# After editing: sudo systemctl reload postgresql
+
+# ── Application connections (from Docker containers via host.docker.internal) ─
+host  jag_core           jag_app   127.0.0.1/32          scram-sha-256
+host  jag_commercial     jag_app   127.0.0.1/32          scram-sha-256
+host  jag_entertainment  jag_app   127.0.0.1/32          scram-sha-256
+host  jag_family         jag_app   127.0.0.1/32          scram-sha-256
+host  jag_properties     jag_app   127.0.0.1/32          scram-sha-256
+host  keycloak           keycloak_user 127.0.0.1/32      scram-sha-256
+
+# ── Docker bridge network (host.docker.internal resolves to 172.17.0.1 by default) ─
+host  all                jag_app       172.16.0.0/12     scram-sha-256
+host  keycloak           keycloak_user 172.16.0.0/12     scram-sha-256
+
+# ── Streaming replication ──────────────────────────────────────────────────────
+# AMD primary → Ampere standby
+host  replication        replicator  <AMPERE_PRIVATE_IP>/32  scram-sha-256
+# After failover (Ampere primary → AMD standby):
+# host  replication      replicator  <AMD_PRIVATE_IP>/32     scram-sha-256

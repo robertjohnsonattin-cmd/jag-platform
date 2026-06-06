@@ -1,0 +1,100 @@
+# Promtail configuration — JAG Holdings
+# Scrapes two log sources:
+#   1. Docker container logs  (/var/lib/docker/containers/*/*.log)
+#   2. PostgreSQL 16 server logs  (/var/lib/pgsql/16/data/log/*.log)
+#      (PostgreSQL runs natively on the host — not in Docker)
+
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+
+  # ── Docker container logs ───────────────────────────────────────────────────
+  # Reads the raw JSON log files Docker writes for every container.
+  # Labels: job, host, container_name, compose_service, log_level (parsed).
+  - job_name: docker-containers
+    docker_sd_configs:
+      - host: unix:///var/run/docker.sock
+        refresh_interval: 10s
+        filters:
+          - name:   status
+            values: ["running"]
+
+    relabel_configs:
+      # Use the container name as the primary label.
+      - source_labels: [__meta_docker_container_name]
+        regex:         "/(.*)"
+        target_label:  container_name
+
+      # Expose the Docker Compose service name.
+      - source_labels: [__meta_docker_container_label_com_docker_compose_service]
+        target_label:  compose_service
+
+      # Keep only containers that are part of the jag stack
+      # (all jag-* containers plus any others on this host).
+      - source_labels: [container_name]
+        regex:         "jag-.*"
+        action:        keep
+
+    pipeline_stages:
+      # Docker log driver wraps each line in {"log":"...\n","stream":"stdout","time":"..."}
+      - json:
+          expressions:
+            output: log
+            stream: stream
+      - labels:
+          stream:
+
+      # Parse structured JSON from jag-api / jag-event-dispatcher (pino logger).
+      - match:
+          selector: '{compose_service=~"api|dispatcher"}'
+          stages:
+            - json:
+                expressions:
+                  level:   level
+                  msg:     msg
+                  req_id:  reqId
+                  tenant:  tenantId
+            - labels:
+                level:
+                tenant:
+
+      # Normalise log level label to lowercase.
+      - template:
+          source: level
+          template: "{{ ToLower .Value }}"
+      - labels:
+          level:
+
+      # Drop the wrapper; promote the actual log line as the log entry.
+      - output:
+          source: output
+
+  # ── PostgreSQL 16 server logs (native, not in Docker) ──────────────────────
+  # Oracle Linux path: /var/lib/pgsql/16/data/log/
+  # PostgreSQL log_filename is typically postgresql-%Y-%m-%d_%H%M%S.log
+  - job_name: postgresql
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job:  postgresql
+          host: jag-primary
+          __path__: /var/lib/pgsql/16/data/log/*.log
+
+    pipeline_stages:
+      # PostgreSQL log lines start with a timestamp:
+      #   2026-06-05 12:34:56.789 UTC [12345] LOG:  checkpoint ...
+      # Extract severity for a log_level label.
+      - regex:
+          expression: "^\\S+ \\S+ \\S+ \\[\\d+\\] (?P<pg_severity>[A-Z]+):"
+
+      - labels:
+          pg_severity:

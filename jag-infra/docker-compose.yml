@@ -1,0 +1,217 @@
+version: "3.9"
+
+# JAG Holdings — production service stack
+# PostgreSQL 17 runs natively (not in Docker) — services connect via host.docker.internal.
+#
+# Reverse proxy:   Caddy (replaces nginx) — TLS via Cloudflare DNS-01 wildcard cert
+# Observability:   Loki + Promtail + Grafana (access via SSH tunnel on port 3001)
+#
+# Public ports: 80 and 443 (Caddy only). Everything else is localhost or internal.
+
+services:
+
+  # ── Caddy — reverse proxy + TLS ──────────────────────────────────────────────
+  caddy:
+    build:
+      context: ./caddy
+      dockerfile: Dockerfile
+    image: jag-caddy:latest
+    container_name: jag-caddy
+    restart: unless-stopped
+    environment:
+      CLOUDFLARE_API_TOKEN: ${CLOUDFLARE_API_TOKEN}
+      ACME_EMAIL:           ${ACME_EMAIL}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - /data/caddy/data:/data
+      - /data/caddy/config:/config
+      - /var/www/jabco.tt:/var/www/jabco.tt:ro
+    depends_on:
+      keycloak:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+
+  # ── Keycloak 26.x ────────────────────────────────────────────────────────────
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.2
+    container_name: jag-keycloak
+    restart: unless-stopped
+    command: start
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://host.docker.internal:5432/keycloak
+      KC_DB_USERNAME: ${KC_DB_USERNAME}
+      KC_DB_PASSWORD: ${KC_DB_PASSWORD}
+      KC_HOSTNAME: ${KC_HOSTNAME}
+      KC_HOSTNAME_STRICT: "false"
+      KC_HOSTNAME_STRICT_BACKCHANNEL: "false"
+      KC_PROXY: edge
+      KC_HTTP_ENABLED: "true"
+      KC_HTTP_PORT: "8080"
+      KC_HTTPS_ENABLED: "false"   # TLS terminated by Caddy
+      KC_HEALTH_ENABLED: "true"   # enables /health/ready on management port 9000
+      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN_USER}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
+      KC_LOG_LEVEL: INFO
+    ports:
+      - "127.0.0.1:8080:8080"    # admin console via SSH tunnel only — never exposed publicly
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/9000' 2>/dev/null && exit 0 || exit 1"]
+      interval: 30s
+      timeout: 15s
+      retries: 10
+      start_period: 300s           # Keycloak is slow to start on first boot
+
+  # ── JAG Event Dispatcher ─────────────────────────────────────────────────────
+  dispatcher:
+    build:
+      context: ../jag-event-dispatcher
+      dockerfile: Dockerfile
+    image: jag-event-dispatcher:latest
+    container_name: jag-event-dispatcher
+    restart: unless-stopped
+    environment:
+      DATABASE_URL_CORE:          ${DATABASE_URL_CORE}
+      DATABASE_URL_COMMERCIAL:    ${DATABASE_URL_COMMERCIAL}
+      DATABASE_URL_ENTERTAINMENT: ${DATABASE_URL_ENTERTAINMENT}
+      DATABASE_URL_FAMILY:        ${DATABASE_URL_FAMILY}
+      DATABASE_URL_PROPERTIES:    ${DATABASE_URL_PROPERTIES}
+      ALERT_USER_ID:              ${ALERT_USER_ID}
+      POLL_INTERVAL_MS:           "5000"
+      BATCH_SIZE:                 "10"
+      MAX_RETRIES:                "3"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  # ── JAG API ───────────────────────────────────────────────────────────────────
+  api:
+    build:
+      context: ../jag-api
+      dockerfile: Dockerfile
+    image: jag-api:latest
+    container_name: jag-api
+    restart: unless-stopped
+    environment:
+      DATABASE_URL_CORE:          ${DATABASE_URL_CORE}
+      DATABASE_URL_COMMERCIAL:    ${DATABASE_URL_COMMERCIAL}
+      DATABASE_URL_ENTERTAINMENT: ${DATABASE_URL_ENTERTAINMENT}
+      DATABASE_URL_FAMILY:        ${DATABASE_URL_FAMILY}
+      DATABASE_URL_PROPERTIES:    ${DATABASE_URL_PROPERTIES}
+      KEYCLOAK_URL:               ${KEYCLOAK_URL}
+      KEYCLOAK_ISSUER_URL:        ${KEYCLOAK_ISSUER_URL}
+      KEYCLOAK_REALM:             ${KEYCLOAK_REALM}
+      KEYCLOAK_CLIENT_ID:         ${KEYCLOAK_CLIENT_ID}
+      WIPAY_WEBHOOK_SECRET:       ${WIPAY_WEBHOOK_SECRET}
+      WIPAY_DEFAULT_OWNER_ID:     ${WIPAY_DEFAULT_OWNER_ID}
+      MINIO_ENDPOINT:             ${MINIO_ENDPOINT}
+      MINIO_PORT:                 ${MINIO_PORT}
+      MINIO_USE_SSL:              ${MINIO_USE_SSL}
+      MINIO_ACCESS_KEY:           ${MINIO_ACCESS_KEY}
+      MINIO_SECRET_KEY:           ${MINIO_SECRET_KEY}
+      MINIO_BUCKET_STATEMENTS:    ${MINIO_BUCKET_STATEMENTS}
+      PORT:                       "3000"
+      NODE_ENV:                   "production"
+    ports:
+      - "127.0.0.1:3000:3000"    # nginx proxies; never expose directly
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      keycloak:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/health/ready || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  # ── MinIO Object Storage ──────────────────────────────────────────────────────
+  minio:
+    image: minio/minio:latest
+    container_name: jag-minio
+    restart: unless-stopped
+    command: server /data --console-address :9001
+    environment:
+      MINIO_ROOT_USER:     ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_BROWSER:       "on"
+    ports:
+      - "127.0.0.1:9000:9000"    # S3 API — internal only
+      - "127.0.0.1:9001:9001"    # Admin console — access via SSH tunnel
+    volumes:
+      - /data/minio:/data
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ── Loki — Log Aggregation ────────────────────────────────────────────────────
+  loki:
+    image: grafana/loki:3.4
+    container_name: jag-loki
+    restart: unless-stopped
+    command: -config.file=/etc/loki/loki-config.yml
+    volumes:
+      - ./loki/loki-config.yml:/etc/loki/loki-config.yml:ro
+      - /data/loki:/data/loki
+    ports:
+      - "127.0.0.1:3100:3100"    # internal only — Promtail + Grafana connect here
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3100/ready || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  # ── Promtail — Log Collector ──────────────────────────────────────────────────
+  # Reads Docker container logs and native PostgreSQL logs; ships to Loki.
+  # Needs access to the Docker socket and the PostgreSQL log directory on the host.
+  promtail:
+    image: grafana/promtail:3.4
+    container_name: jag-promtail
+    restart: unless-stopped
+    command: -config.file=/etc/promtail/promtail-config.yml
+    volumes:
+      - ./promtail/promtail-config.yml:/etc/promtail/promtail-config.yml:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/lib/pgsql/16/data/log:/var/lib/pgsql/16/data/log:ro   # native PostgreSQL logs
+    depends_on:
+      loki:
+        condition: service_healthy
+
+  # ── Grafana — Dashboards ──────────────────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:11.6
+    container_name: jag-grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER:     ${GRAFANA_ADMIN_USER}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
+      GF_SERVER_HTTP_PORT:        "3001"
+      GF_AUTH_ANONYMOUS_ENABLED:  "false"
+      GF_USERS_ALLOW_SIGN_UP:     "false"
+      GF_LOG_LEVEL:               "warn"
+    ports:
+      - "127.0.0.1:3001:3001"    # access via SSH tunnel: ssh -L 3001:localhost:3001 user@vm
+    volumes:
+      - /data/grafana:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      loki:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3001/api/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s

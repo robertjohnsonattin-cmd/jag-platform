@@ -1,0 +1,21 @@
+[Unit]
+Description=JAG Holdings Docker Compose Stack
+Documentation=https://github.com/JAG Holdings/jag-infra
+Requires=docker.service postgresql.service
+After=docker.service postgresql.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/jag/jag-infra
+ExecStart=/usr/bin/docker compose up -d --remove-orphans
+ExecStop=/usr/bin/docker compose down
+ExecReload=/usr/bin/docker compose pull && /usr/bin/docker compose up -d --remove-orphans
+TimeoutStartSec=300
+TimeoutStopSec=60
+Restart=on-failure
+RestartSec=10s
+
+[Install]
+WantedBy=multi-user.target

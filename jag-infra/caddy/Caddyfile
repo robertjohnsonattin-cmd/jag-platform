@@ -1,0 +1,97 @@
+# JAG Holdings — Caddyfile
+#
+# Replaces the legacy nginx configuration.
+# Caddy handles TLS automatically via Cloudflare DNS-01 (wildcard cert for *.jagcorporate.com).
+#
+# Env vars required in docker-compose (sourced from .env):
+#   CLOUDFLARE_API_TOKEN  — Cloudflare API token with Zone:DNS:Edit for jagcorporate.com
+#   ACME_EMAIL            — email for Let's Encrypt registration
+
+{
+	email {$ACME_EMAIL}
+
+	# Caddy serves as an edge proxy behind Cloudflare.
+	# Keycloak expects KC_PROXY=edge so it trusts X-Forwarded-Proto from Caddy.
+}
+
+# ── Shared TLS snippet (Cloudflare DNS-01 wildcard) ──────────────────────────
+
+(cloudflare_tls) {
+	tls {
+		dns cloudflare {$CLOUDFLARE_API_TOKEN}
+	}
+}
+
+# ── api.jagcorporate.com — JAG API ───────────────────────────────────────────────────
+
+api.jagcorporate.com {
+	import cloudflare_tls
+
+	# Allow large uploads (bank statements, documents — matches multer 20MB limit)
+	request_body {
+		max_size 25MB
+	}
+
+	# Pass real client IP from Cloudflare header to upstream
+	header_up X-Real-IP {http.request.header.CF-Connecting-IP}
+	header_up X-Forwarded-For {http.request.header.CF-Connecting-IP}
+	header_up X-Forwarded-Proto https
+
+	reverse_proxy api:3000
+
+	# Security headers
+	header {
+		X-Frame-Options DENY
+		X-Content-Type-Options nosniff
+		Referrer-Policy no-referrer
+		-Server
+	}
+}
+
+# ── auth.jagcorporate.com — Keycloak 26.x ────────────────────────────────────────────
+
+auth.jagcorporate.com {
+	import cloudflare_tls
+
+	# Keycloak tokens and admin payloads can be large
+	request_body {
+		max_size 10MB
+	}
+
+	header_up X-Real-IP {http.request.header.CF-Connecting-IP}
+	header_up X-Forwarded-For {http.request.header.CF-Connecting-IP}
+	header_up X-Forwarded-Proto https
+
+	reverse_proxy keycloak:8080 {
+		# Keycloak requires longer timeouts for admin operations and cold start
+		transport http {
+			dial_timeout 10s
+			read_timeout 60s
+			write_timeout 60s
+		}
+	}
+
+	# Keycloak uses iframes for login flows — SAMEORIGIN not DENY
+	header {
+		X-Frame-Options SAMEORIGIN
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+		-Server
+	}
+}
+
+# ── jagcorporate.com / www.jagcorporate.com — static placeholder ─────────────────────────────
+# Replace with reverse_proxy when the React frontend (Phase 7) is deployed.
+
+jagcorporate.com, www.jagcorporate.com {
+	import cloudflare_tls
+
+	root * /var/www/jagcorporate.com
+	file_server
+
+	header {
+		X-Frame-Options SAMEORIGIN
+		X-Content-Type-Options nosniff
+		-Server
+	}
+}

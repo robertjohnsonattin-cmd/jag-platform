@@ -1,0 +1,535 @@
+// ============================================================
+// JAG Platform — jag_properties Database Schema
+// ============================================================
+// Version:    PRE-1 | 2026-05-23
+// Author:     Robert Johnson-Attin via Claude Code (PRE-1 session)
+// Tooling:    node-pg-migrate | dbdiagram.io compatible
+//
+// jag_properties covers the property management portfolio:
+//   Properties       — active rental portfolio + owned properties
+//   Property Tenants — rental tenants (people and companies)
+//   Leases           — rental agreements
+//   Rent Payments    — payment records (WiPay + manual)
+//   Maintenance      — maintenance request lifecycle
+//   Pipeline         — acquisition analysis / watchlist
+//   Mortgage         — mortgage register
+//
+// RLS: owner_id on all tables (personal portfolio, not multi-tenant).
+//   SET LOCAL app.current_owner = '<uuid>';
+//   Auditor role has read-only access to all tables (Auditor scoped
+//   in jag_core.user_tenant_roles).
+//
+// WiPay integration (Phase 1B):
+//   Rent payments via WiPay carry a wipay_reference and
+//   a webhook_payload snapshot for audit. Sandbox POC in Pre-Build.
+//
+// Cross-DB references (logical only — no DB-level FK):
+//   owner_id / user refs → jag_core.users.id
+//
+// Standards: STD-01 through STD-13 apply to all changes.
+// ============================================================
+
+
+// ------------------------------------------------------------
+// ENUMS
+// ------------------------------------------------------------
+
+Enum pending_review_status {
+  PENDING
+  RESOLVED
+  DISMISSED
+}
+
+Enum property_type {
+  RESIDENTIAL
+  COMMERCIAL
+  LAND
+  MIXED
+  AGRICULTURAL
+}
+
+Enum tenure_type {
+  FREEHOLD
+  LEASEHOLD
+  STATE_LAND
+}
+
+Enum property_tenant_id_type {
+  TT_NIC          [note: 'Trinidad and Tobago National ID Card']
+  PASSPORT
+  COMPANY_REG     [note: 'Company registration number']
+  DRIVERS_LICENCE
+  OTHER
+}
+
+Enum lease_type {
+  MONTH_TO_MONTH
+  FIXED_TERM
+}
+
+Enum lease_status {
+  ACTIVE
+  EXPIRED
+  TERMINATED
+  NOTICE_GIVEN
+  PENDING_START
+}
+
+Enum payment_method {
+  CASH
+  BANK_TRANSFER
+  CHEQUE
+  WIPAY
+  OTHER
+}
+
+Enum maintenance_category {
+  PLUMBING
+  ELECTRICAL
+  STRUCTURAL
+  HVAC
+  APPLIANCE
+  PEST_CONTROL
+  SECURITY
+  GARDEN
+  PAINTING
+  ROOFING
+  OTHER
+}
+
+Enum maintenance_priority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+Enum maintenance_status {
+  OPEN
+  ASSIGNED
+  IN_PROGRESS
+  AWAITING_PARTS
+  COMPLETED
+  CLOSED
+  CANNOT_REPRODUCE
+}
+
+Enum pipeline_stage {
+  WATCH
+  INTERESTED
+  OFFER_MADE
+  DUE_DILIGENCE
+  CONTRACT
+  ACQUIRED
+  PASSED
+}
+
+Enum pipeline_source {
+  AGENT
+  PRIVATE_SELLER
+  AUCTION
+  ONLINE_LISTING
+  REFERRAL
+  OTHER
+}
+
+Enum mortgage_type {
+  FIXED_RATE
+  VARIABLE_RATE
+  INTEREST_ONLY
+}
+
+Enum mortgage_status {
+  ACTIVE
+  PAID_OFF
+  IN_ARREARS
+  REFINANCED
+  DISCHARGED
+}
+
+
+// ------------------------------------------------------------
+// OUTBOX: pending_events
+// ------------------------------------------------------------
+
+Table pending_events {
+  id              uuid         [pk, default: `gen_random_uuid()`]
+  aggregate_type  varchar      [not null, note: 'e.g. Property, LeaseAgreement, RentPayment, MaintenanceRequest']
+  aggregate_id    uuid         [not null]
+  event_type      varchar      [not null, note: 'e.g. rent.payment_received, lease.expiry_approaching, maintenance.completed']
+  payload         jsonb        [not null]
+  created_at      timestamptz  [not null, default: `now()`]
+  processed_at    timestamptz  [null]
+  retry_count     integer      [not null, default: 0]
+  last_error      text         [null]
+
+  indexes {
+    processed_at                    [name: 'idx_pe_prop_processed_at']
+    created_at                      [name: 'idx_pe_prop_created_at']
+    (aggregate_type, aggregate_id)  [name: 'idx_pe_prop_aggregate']
+  }
+
+  Note: 'Append-only outbox. jag-event-dispatcher polls every 5s.'
+}
+
+
+// ------------------------------------------------------------
+// PROP_PENDING_REVIEW_QUEUE — unmatched / non-success webhook events
+// ------------------------------------------------------------
+
+Table prop_pending_review_queue {
+  id                uuid                  [pk, default: `gen_random_uuid()`]
+  owner_id          uuid                  [not null, note: 'cross-db ref: jag_core.users.id']
+  idempotency_key   uuid                  [not null, unique]
+  source            varchar               [not null, note: 'e.g. WIPAY_WEBHOOK']
+  raw_payload       jsonb                 [not null]
+  received_at       timestamptz           [not null, default: `now()`]
+  status            pending_review_status [not null, default: 'PENDING']
+  resolution_notes  text                  [null]
+  resolved_at       timestamptz           [null]
+  resolved_by       uuid                  [null, note: 'cross-db ref: jag_core.users.id']
+  created_at        timestamptz           [not null, default: `now()`]
+  updated_at        timestamptz           [not null, default: `now()`]
+
+  indexes {
+    owner_id        [name: 'idx_prq_owner']
+    status          [name: 'idx_prq_status']
+    idempotency_key [unique, name: 'idx_prq_idempotency']
+    received_at     [name: 'idx_prq_received_at']
+  }
+
+  Note: 'Stores inbound webhook events that could not be matched to a booking record. WiPay non-success payments and unmatched success events are queued here for manual review. Handler returns 202 Accepted so WiPay does not retry. Decision locked PRE-5.'
+}
+
+
+// ============================================================
+// PROPERTIES
+// ============================================================
+
+// ------------------------------------------------------------
+// PROP_PROPERTIES — master property record
+// ------------------------------------------------------------
+
+Table prop_properties {
+  id                uuid          [pk, default: `gen_random_uuid()`]
+  owner_id          uuid          [not null, note: 'cross-db ref: jag_core.users.id']
+  property_code     varchar       [not null, unique, note: 'e.g. PROP-BARATARIA-01, PROP-FYZABAD-01']
+  name              varchar       [not null, note: 'e.g. Barataria House 1, Fyzabad Land Parcel']
+  address_line1     varchar       [not null]
+  address_line2     varchar       [null]
+  city              varchar       [not null]
+  region            varchar       [null]
+  country           varchar       [not null, default: 'TT']
+  property_type     property_type [not null]
+  tenure_type       tenure_type   [not null, default: 'FREEHOLD']
+  lot_number        varchar       [null, note: 'Land registry lot/parcel number']
+  lot_size_sqm      numeric       [null]
+  floor_area_sqm    numeric       [null]
+  bedrooms          integer       [null]
+  bathrooms         integer       [null]
+  purchase_date     date          [null]
+  purchase_price    numeric       [null]
+  current_valuation numeric       [null]
+  valuation_date    date          [null]
+  is_rented         boolean       [not null, default: false]
+  is_active         boolean       [not null, default: true]
+  photos            jsonb         [null, note: 'Array of MinIO storage paths']
+  notes             text          [null]
+  last_modified_at  timestamptz   [not null, default: `now()`]
+  created_at        timestamptz   [not null, default: `now()`]
+  updated_at        timestamptz   [not null, default: `now()`]
+
+  indexes {
+    owner_id      [name: 'idx_prop_owner']
+    property_code [unique, name: 'idx_prop_code']
+    property_type [name: 'idx_prop_type']
+    is_rented     [name: 'idx_prop_is_rented']
+    last_modified_at [name: 'idx_prop_last_modified']
+  }
+
+  Note: 'RLS: owner_id. Seed properties: Barataria, Fyzabad + others per classified Master Architecture. purchase_price and valuation are personal financial data — no cross-module write permitted (STD-01).'
+}
+
+
+// ============================================================
+// PROPERTY TENANTS (RENTAL TENANTS)
+// ============================================================
+
+// ------------------------------------------------------------
+// PROP_PROPERTY_TENANTS — people and companies who rent from JAG
+// Note: "property tenants" = rental tenants, distinct from
+// "jag_core tenants" which are JAG business entities.
+// ------------------------------------------------------------
+
+Table prop_property_tenants {
+  id                     uuid                     [pk, default: `gen_random_uuid()`]
+  owner_id               uuid                     [not null, note: 'cross-db ref: jag_core.users.id']
+  first_name             varchar                  [not null]
+  last_name              varchar                  [null, note: 'Null for company tenants']
+  company_name           varchar                  [null]
+  is_company             boolean                  [not null, default: false]
+  phone                  varchar                  [null]
+  email                  varchar                  [null]
+  identification_type    property_tenant_id_type  [null]
+  identification_number  varchar                  [null, note: 'For reference only — not for identity verification']
+  emergency_contact_name varchar                  [null]
+  emergency_contact_phone varchar                 [null]
+  notes                  text                     [null]
+  last_modified_at       timestamptz              [not null, default: `now()`]
+  created_at             timestamptz              [not null, default: `now()`]
+  updated_at             timestamptz              [not null, default: `now()`]
+
+  indexes {
+    owner_id [name: 'idx_prop_tenants_owner']
+    email    [name: 'idx_prop_tenants_email']
+  }
+
+  Note: 'RLS: owner_id. "Property tenants" = rental tenants (people/companies who pay rent). Not to be confused with jag_core.tenants (JAG business entities).'
+}
+
+
+// ============================================================
+// LEASES AND PAYMENTS
+// ============================================================
+
+// ------------------------------------------------------------
+// PROP_LEASE_AGREEMENTS — rental contract terms
+// ------------------------------------------------------------
+
+Table prop_lease_agreements {
+  id               uuid         [pk, default: `gen_random_uuid()`]
+  owner_id         uuid         [not null, note: 'cross-db ref: jag_core.users.id']
+  property_id      uuid         [not null, ref: > prop_properties.id]
+  tenant_id        uuid         [not null, ref: > prop_property_tenants.id]
+  lease_type       lease_type   [not null]
+  start_date       date         [not null]
+  end_date         date         [null, note: 'Null for month-to-month leases']
+  monthly_rent     numeric      [not null]
+  currency         varchar(3)   [not null, default: 'TTD']
+  security_deposit numeric      [not null, default: 0]
+  payment_due_day  integer      [not null, default: 1, note: 'Day of month rent is due (1-28)']
+  status           lease_status [not null, default: 'ACTIVE']
+  termination_date date         [null]
+  notice_given_date date        [null]
+  document_path    varchar      [null, note: 'MinIO path for signed lease document']
+  notes            text         [null]
+  idempotency_key  uuid         [not null, unique]
+  last_modified_at timestamptz  [not null, default: `now()`]
+  created_at       timestamptz  [not null, default: `now()`]
+  updated_at       timestamptz  [not null, default: `now()`]
+
+  indexes {
+    owner_id         [name: 'idx_lease_owner']
+    property_id      [name: 'idx_lease_property']
+    tenant_id        [name: 'idx_lease_tenant']
+    status           [name: 'idx_lease_status']
+    end_date         [name: 'idx_lease_end_date', note: 'Alert queries for expiring leases']
+    idempotency_key  [unique, name: 'idx_lease_idempotency']
+    last_modified_at [name: 'idx_lease_last_modified']
+  }
+
+  Note: 'RLS: owner_id. Financial record — idempotency_key required (STD-11).'
+}
+
+
+// ------------------------------------------------------------
+// PROP_RENT_PAYMENTS — individual rent payment records
+// ------------------------------------------------------------
+
+Table prop_rent_payments {
+  id                uuid           [pk, default: `gen_random_uuid()`]
+  owner_id          uuid           [not null, note: 'cross-db ref: jag_core.users.id']
+  lease_id          uuid           [not null, ref: > prop_lease_agreements.id]
+  payment_date      date           [not null]
+  period_month      integer        [not null, note: '1-12']
+  period_year       integer        [not null]
+  amount_due        numeric        [not null]
+  amount_paid       numeric        [not null]
+  payment_method    payment_method [not null]
+  receipt_number    varchar        [null]
+  wipay_reference   varchar        [null, note: 'WiPay transaction reference for online payments']
+  wipay_webhook_payload jsonb      [null, note: 'Raw WiPay webhook snapshot for audit trail']
+  is_late           boolean        [not null, default: false]
+  late_fee_charged  numeric        [not null, default: 0]
+  notes             text           [null]
+  idempotency_key   uuid           [not null, unique]
+  last_modified_at  timestamptz    [not null, default: `now()`]
+  created_at        timestamptz    [not null, default: `now()`]
+  updated_at        timestamptz    [not null, default: `now()`]
+
+  indexes {
+    owner_id         [name: 'idx_rent_owner']
+    lease_id         [name: 'idx_rent_lease']
+    (period_year, period_month) [name: 'idx_rent_period']
+    payment_method   [name: 'idx_rent_method']
+    wipay_reference  [name: 'idx_rent_wipay', note: 'WiPay webhook correlation']
+    idempotency_key  [unique, name: 'idx_rent_idempotency']
+    last_modified_at [name: 'idx_rent_last_modified']
+  }
+
+  Note: 'RLS: owner_id. Financial write — idempotency_key required (STD-11). WiPay webhooks carry idempotency_key generated by client to prevent double-posting on webhook retry. wipay_webhook_payload stores raw payload for audit and dispute resolution.'
+}
+
+
+// ============================================================
+// MAINTENANCE
+// ============================================================
+
+// ------------------------------------------------------------
+// PROP_MAINTENANCE_REQUESTS — maintenance lifecycle tracking
+// ------------------------------------------------------------
+
+Table prop_maintenance_requests {
+  id                      uuid                  [pk, default: `gen_random_uuid()`]
+  owner_id                uuid                  [not null, note: 'cross-db ref: jag_core.users.id']
+  property_id             uuid                  [not null, ref: > prop_properties.id]
+  lease_id                uuid                  [null, ref: > prop_lease_agreements.id, note: 'Null for vacant property maintenance']
+  reported_by_tenant_id   uuid                  [null, ref: > prop_property_tenants.id, note: 'Null if reported by owner']
+  category                maintenance_category  [not null]
+  description             text                  [not null]
+  priority                maintenance_priority  [not null, default: 'MEDIUM']
+  status                  maintenance_status    [not null, default: 'OPEN']
+  assigned_to             varchar               [null, note: 'Contractor name or internal reference']
+  estimated_cost          numeric               [null]
+  actual_cost             numeric               [null]
+  reported_date           date                  [not null]
+  scheduled_date          date                  [null]
+  completed_date          date                  [null]
+  completion_notes        text                  [null]
+  photos                  jsonb                 [null, note: 'Array of MinIO storage paths — before/after photos']
+  idempotency_key         uuid                  [not null, unique]
+  last_modified_at        timestamptz           [not null, default: `now()`]
+  created_at              timestamptz           [not null, default: `now()`]
+  updated_at              timestamptz           [not null, default: `now()`]
+
+  indexes {
+    owner_id              [name: 'idx_maint_owner']
+    property_id           [name: 'idx_maint_property']
+    status                [name: 'idx_maint_status']
+    priority              [name: 'idx_maint_priority']
+    reported_by_tenant_id [name: 'idx_maint_tenant']
+    idempotency_key       [unique, name: 'idx_maint_idempotency']
+    last_modified_at      [name: 'idx_maint_last_modified']
+  }
+
+  Note: 'RLS: owner_id.'
+}
+
+
+// ============================================================
+// PROPERTY PIPELINE — ACQUISITION ANALYSIS
+// ============================================================
+
+// ------------------------------------------------------------
+// PROP_PROPERTY_PIPELINE — acquisition watchlist and deal tracking
+// ------------------------------------------------------------
+
+Table prop_property_pipeline {
+  id               uuid           [pk, default: `gen_random_uuid()`]
+  owner_id         uuid           [not null, note: 'cross-db ref: jag_core.users.id']
+  name             varchar        [not null, note: 'Descriptive name for the opportunity e.g. "Corner lot Diego Martin"']
+  address          text           [null]
+  property_type    property_type  [not null]
+  asking_price     numeric        [null]
+  estimated_value  numeric        [null]
+  currency         varchar(3)     [not null, default: 'TTD']
+  lot_size_sqm     numeric        [null]
+  floor_area_sqm   numeric        [null]
+  estimated_monthly_rent numeric  [null, note: 'For yield calculation']
+  gross_yield_percent numeric     [null, note: 'Estimated: (annual_rent / purchase_price) × 100']
+  net_yield_percent numeric       [null, note: 'Estimated: after expenses']
+  stage            pipeline_stage [not null, default: 'WATCH']
+  source           pipeline_source [null]
+  agent_name       varchar        [null]
+  agent_phone      varchar        [null]
+  analysis_notes   text           [null]
+  photos           jsonb          [null, note: 'Array of MinIO storage paths']
+  last_modified_at timestamptz    [not null, default: `now()`]
+  created_at       timestamptz    [not null, default: `now()`]
+  updated_at       timestamptz    [not null, default: `now()`]
+
+  indexes {
+    owner_id         [name: 'idx_pipeline_owner']
+    stage            [name: 'idx_pipeline_stage']
+    property_type    [name: 'idx_pipeline_type']
+    last_modified_at [name: 'idx_pipeline_last_modified']
+  }
+
+  Note: 'RLS: owner_id. Financial figures (asking_price, yield) are estimates for decision-making only — not ledger entries. Acquisition completion moves record to prop_properties.'
+}
+
+
+// ============================================================
+// MORTGAGE REGISTER
+// ============================================================
+
+// ------------------------------------------------------------
+// PROP_MORTGAGE_REGISTER — mortgage register for owned properties
+// ------------------------------------------------------------
+
+Table prop_mortgage_register {
+  id                   uuid           [pk, default: `gen_random_uuid()`]
+  owner_id             uuid           [not null, note: 'cross-db ref: jag_core.users.id']
+  property_id          uuid           [not null, ref: > prop_properties.id]
+  lender_name          varchar        [not null]
+  account_reference    varchar        [null, note: 'Partial account reference for identification only — NO full account numbers stored (OPSEC)']
+  mortgage_type        mortgage_type  [not null]
+  original_amount      numeric        [not null]
+  currency             varchar(3)     [not null, default: 'TTD']
+  outstanding_balance  numeric        [not null]
+  interest_rate_percent numeric       [not null]
+  start_date           date           [not null]
+  maturity_date        date           [null]
+  monthly_payment      numeric        [not null]
+  payment_due_day      integer        [not null, default: 1, note: 'Day of month payment is due (1-28)']
+  status               mortgage_status [not null, default: 'ACTIVE']
+  document_path        varchar        [null, note: 'MinIO path for mortgage deed/agreement']
+  notes                text           [null]
+  idempotency_key      uuid           [not null, unique]
+  last_modified_at     timestamptz    [not null, default: `now()`]
+  created_at           timestamptz    [not null, default: `now()`]
+  updated_at           timestamptz    [not null, default: `now()`]
+
+  indexes {
+    owner_id          [name: 'idx_mortgage_owner']
+    property_id       [name: 'idx_mortgage_property']
+    status            [name: 'idx_mortgage_status']
+    maturity_date     [name: 'idx_mortgage_maturity', note: 'Alert queries for refinancing reminders']
+    idempotency_key   [unique, name: 'idx_mortgage_idempotency']
+    last_modified_at  [name: 'idx_mortgage_last_modified']
+  }
+
+  Note: 'RLS: owner_id. OPSEC: account_reference stores a partial reference for identification (e.g. last 4 digits). Full account numbers are never stored in this system. Financial write — idempotency_key required (STD-11).'
+}
+
+
+// ------------------------------------------------------------
+// TABLE GROUPS (visual grouping in dbdiagram.io)
+// ------------------------------------------------------------
+
+TableGroup outbox {
+  pending_events
+}
+
+TableGroup review_queue {
+  prop_pending_review_queue
+}
+
+TableGroup properties {
+  prop_properties
+  prop_property_pipeline
+}
+
+TableGroup tenants_and_leases {
+  prop_property_tenants
+  prop_lease_agreements
+  prop_rent_payments
+}
+
+TableGroup operations {
+  prop_maintenance_requests
+}
+
+TableGroup finance {
+  prop_mortgage_register
+}

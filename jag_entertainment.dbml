@@ -1,0 +1,376 @@
+// ============================================================
+// JAG Platform — jag_entertainment Database Schema
+// ============================================================
+// Version:    PRE-1 | 2026-05-23
+// Author:     Robert Johnson-Attin via Claude Code (PRE-1 session)
+// Tooling:    node-pg-migrate | dbdiagram.io compatible
+//
+// jag_entertainment covers the merged JAG Entertainment Ops module:
+//   BAR         — Food and beverage operations
+//   MEMBERS_CLUB — Private social club (NOT a regulated casino)
+//
+// CRITICAL ARCHITECTURAL RULE:
+//   BAR and MEMBERS_CLUB are ONE module with TWO separate P&Ls.
+//   Every transaction row MUST carry entity_tag (BAR | MEMBERS_CLUB).
+//   This is a NON-NEGOTIABLE reporting requirement — no exceptions.
+//   Independent revenue and accounts in JAG Finance.
+//
+// Members Club spec (simplified):
+//   Visitor log, chip float open/close, cash tracking,
+//   annual license alert, standard audit trail.
+//   NO AML tags, NO Gaming Commission export, NO hash-chain.
+//
+// RLS: tenant_id on all tables.
+//   SET LOCAL app.current_tenant = '<uuid>';
+//
+// Offline-critical: BAR cash logging.
+//   Non-conflicting updates auto-merge on reconnect.
+//   Nothing financial auto-posts on conflict.
+//   Client-side idempotency key prevents double-posting.
+//
+// Cross-DB references (logical only — no DB-level FK):
+//   tenant_id   → jag_core.tenants.id
+//   user refs   → jag_core.users.id
+//
+// Standards: STD-01 through STD-13 apply to all changes.
+// ============================================================
+
+
+// ------------------------------------------------------------
+// ENUMS
+// ------------------------------------------------------------
+
+Enum entity_tag {
+  BAR          [note: 'Food and beverage P&L']
+  MEMBERS_CLUB [note: 'Private social club P&L']
+}
+
+Enum session_status {
+  OPEN
+  CLOSED
+}
+
+Enum transaction_type {
+  SALE
+  REFUND
+  VOID
+  COMP    [note: 'Complimentary — value tracked for P&L even if zero-charge']
+}
+
+Enum payment_method {
+  CASH
+  CARD
+  TAB
+  COMP
+  MEMBER_ACCOUNT  [note: 'Charged to member account for settlement']
+}
+
+Enum membership_type {
+  FULL
+  ASSOCIATE
+  HONORARY
+}
+
+Enum membership_status {
+  ACTIVE
+  SUSPENDED
+  LAPSED
+  RESIGNED
+}
+
+Enum license_status {
+  CURRENT
+  EXPIRING_SOON
+  EXPIRED
+}
+
+
+// ------------------------------------------------------------
+// OUTBOX: pending_events
+// ------------------------------------------------------------
+
+Table pending_events {
+  id              uuid         [pk, default: `gen_random_uuid()`]
+  aggregate_type  varchar      [not null, note: 'e.g. BarSession, BarTransaction, MemberRegistry']
+  aggregate_id    uuid         [not null]
+  event_type      varchar      [not null, note: 'e.g. bar.session_closed, member.suspended, license.expiring']
+  payload         jsonb        [not null]
+  created_at      timestamptz  [not null, default: `now()`]
+  processed_at    timestamptz  [null]
+  retry_count     integer      [not null, default: 0]
+  last_error      text         [null]
+
+  indexes {
+    processed_at                    [name: 'idx_pe_ent_processed_at']
+    created_at                      [name: 'idx_pe_ent_created_at']
+    (aggregate_type, aggregate_id)  [name: 'idx_pe_ent_aggregate']
+  }
+
+  Note: 'Append-only outbox. jag-event-dispatcher polls every 5s.'
+}
+
+
+// ============================================================
+// BAR — FOOD AND BEVERAGE OPERATIONS
+// ============================================================
+
+// ------------------------------------------------------------
+// ENT_BAR_SESSIONS — cash drawer shift open/close
+// Each shift reconciles one entity (BAR or MEMBERS_CLUB)
+// ------------------------------------------------------------
+
+Table ent_bar_sessions {
+  id                   uuid           [pk, default: `gen_random_uuid()`]
+  tenant_id            uuid           [not null, note: 'cross-db ref: jag_core.tenants.id']
+  entity_tag           entity_tag     [not null, note: 'BAR or MEMBERS_CLUB — determines which P&L this session contributes to']
+  session_date         date           [not null]
+  opened_by            uuid           [not null, note: 'cross-db ref: jag_core.users.id']
+  closed_by            uuid           [null, note: 'cross-db ref: jag_core.users.id']
+  opening_float        numeric        [not null]
+  closing_cash_counted numeric        [null, note: 'Null until session is closed']
+  status               session_status [not null, default: 'OPEN']
+  notes                text           [null]
+  idempotency_key      uuid           [not null, unique]
+  last_modified_at     timestamptz    [not null, default: `now()`]
+  created_at           timestamptz    [not null, default: `now()`]
+  updated_at           timestamptz    [not null, default: `now()`]
+
+  indexes {
+    tenant_id       [name: 'idx_sessions_tenant']
+    entity_tag      [name: 'idx_sessions_entity_tag']
+    session_date    [name: 'idx_sessions_date']
+    status          [name: 'idx_sessions_status']
+    idempotency_key [unique, name: 'idx_sessions_idempotency']
+    last_modified_at [name: 'idx_sessions_last_modified']
+  }
+
+  Note: 'RLS: tenant_id. OFFLINE-CRITICAL: cash logging must work without connectivity. idempotency_key prevents duplicate session open on reconnect.'
+}
+
+
+// ------------------------------------------------------------
+// ENT_BAR_TRANSACTIONS — every sale, refund, void, and comp
+// ------------------------------------------------------------
+
+Table ent_bar_transactions {
+  id               uuid             [pk, default: `gen_random_uuid()`]
+  tenant_id        uuid             [not null, note: 'cross-db ref: jag_core.tenants.id']
+  session_id       uuid             [not null, ref: > ent_bar_sessions.id]
+  entity_tag       entity_tag       [not null, note: 'MANDATORY — separates BAR vs MEMBERS_CLUB P&L. Must match parent session entity_tag.']
+  transaction_type transaction_type [not null]
+  payment_method   payment_method   [not null]
+  amount           numeric          [not null]
+  currency         varchar(3)       [not null, default: 'TTD']
+  items            jsonb            [not null, note: 'Snapshot of line items: [{name, qty, unit_price, subtotal}]']
+  served_by        uuid             [not null, note: 'cross-db ref: jag_core.users.id']
+  member_id        uuid             [null, ref: > ent_members_registry.id, note: 'Null for non-member bar customers']
+  notes            text             [null]
+  idempotency_key  uuid             [not null, unique]
+  last_modified_at timestamptz      [not null, default: `now()`]
+  created_at       timestamptz      [not null, default: `now()`]
+  updated_at       timestamptz      [not null, default: `now()`]
+
+  indexes {
+    tenant_id        [name: 'idx_bar_tx_tenant']
+    session_id       [name: 'idx_bar_tx_session']
+    entity_tag       [name: 'idx_bar_tx_entity_tag']
+    transaction_type [name: 'idx_bar_tx_type']
+    member_id        [name: 'idx_bar_tx_member']
+    idempotency_key  [unique, name: 'idx_bar_tx_idempotency']
+    last_modified_at [name: 'idx_bar_tx_last_modified']
+    created_at       [name: 'idx_bar_tx_created_at']
+  }
+
+  Note: 'RLS: tenant_id. entity_tag is MANDATORY on every row — this is the mechanism that produces separate BAR and MEMBERS_CLUB P&Ls in JAG Finance reports. idempotency_key (STD-11) prevents double-posting on offline reconnect.'
+}
+
+
+// ============================================================
+// MEMBERS CLUB — PRIVATE SOCIAL CLUB
+// ============================================================
+
+// ------------------------------------------------------------
+// ENT_MEMBERS_REGISTRY — club member records
+// ------------------------------------------------------------
+
+Table ent_members_registry {
+  id               uuid              [pk, default: `gen_random_uuid()`]
+  tenant_id        uuid              [not null, note: 'cross-db ref: jag_core.tenants.id']
+  member_number    varchar           [not null, unique]
+  first_name       varchar           [not null]
+  last_name        varchar           [not null]
+  phone            varchar           [null]
+  email            varchar           [null]
+  date_of_birth    date              [null]
+  membership_type  membership_type   [not null, default: 'FULL']
+  status           membership_status [not null, default: 'ACTIVE']
+  joined_date      date              [not null]
+  expiry_date      date              [null]
+  photo_path       varchar           [null, note: 'MinIO path for member photo/ID']
+  notes            text              [null]
+  last_modified_at timestamptz       [not null, default: `now()`]
+  created_at       timestamptz       [not null, default: `now()`]
+  updated_at       timestamptz       [not null, default: `now()`]
+
+  indexes {
+    tenant_id     [name: 'idx_members_tenant']
+    member_number [unique, name: 'idx_members_number']
+    status        [name: 'idx_members_status']
+    expiry_date   [name: 'idx_members_expiry']
+  }
+
+  Note: 'RLS: tenant_id. Members Club only — entity_tag context is implicit (MEMBERS_CLUB). member_number is the physical card/key number.'
+}
+
+
+// ------------------------------------------------------------
+// ENT_MEMBER_VISITS — visitor log (required for compliance)
+// ------------------------------------------------------------
+
+Table ent_member_visits {
+  id              uuid        [pk, default: `gen_random_uuid()`]
+  tenant_id       uuid        [not null, note: 'cross-db ref: jag_core.tenants.id']
+  entity_tag      entity_tag  [not null, note: 'MEMBERS_CLUB for formal visitor log; BAR for walk-in tracking if required']
+  member_id       uuid        [null, ref: > ent_members_registry.id, note: 'Null for non-member guests']
+  guest_name      varchar     [null, note: 'Required when member_id is null']
+  signed_in_by    uuid        [not null, note: 'cross-db ref: jag_core.users.id — staff member who logged the visit']
+  visit_date      date        [not null]
+  check_in_time   timestamptz [not null]
+  check_out_time  timestamptz [null]
+  notes           text        [null]
+  created_at      timestamptz [not null, default: `now()`]
+  updated_at      timestamptz [not null, default: `now()`]
+
+  indexes {
+    tenant_id   [name: 'idx_visits_tenant']
+    entity_tag  [name: 'idx_visits_entity_tag']
+    member_id   [name: 'idx_visits_member']
+    visit_date  [name: 'idx_visits_date']
+  }
+
+  Note: 'RLS: tenant_id. Visitor log is a compliance requirement for the Members Club annual license. Standard audit trail — no AML, no Gaming Commission format.'
+}
+
+
+// ------------------------------------------------------------
+// ENT_CHIP_FLOAT_SESSIONS — chip float open/close (Members Club only)
+// ------------------------------------------------------------
+
+Table ent_chip_float_sessions {
+  id                  uuid           [pk, default: `gen_random_uuid()`]
+  tenant_id           uuid           [not null, note: 'cross-db ref: jag_core.tenants.id']
+  entity_tag          entity_tag     [not null, note: 'Always MEMBERS_CLUB']
+  session_date        date           [not null]
+  opened_by           uuid           [not null, note: 'cross-db ref: jag_core.users.id']
+  closed_by           uuid           [null, note: 'cross-db ref: jag_core.users.id']
+  opening_chip_count  jsonb          [not null, note: 'Denomination breakdown: [{denomination: 5, count: 20, subtotal: 100}, ...]']
+  opening_chip_value  numeric        [not null]
+  closing_chip_count  jsonb          [null, note: 'Null until session is closed']
+  closing_chip_value  numeric        [null]
+  variance            numeric        [null, note: 'closing_chip_value - opening_chip_value (computed on close)']
+  status              session_status [not null, default: 'OPEN']
+  idempotency_key     uuid           [not null, unique]
+  last_modified_at    timestamptz    [not null, default: `now()`]
+  created_at          timestamptz    [not null, default: `now()`]
+  updated_at          timestamptz    [not null, default: `now()`]
+
+  indexes {
+    tenant_id       [name: 'idx_chip_tenant']
+    entity_tag      [name: 'idx_chip_entity_tag']
+    session_date    [name: 'idx_chip_date']
+    status          [name: 'idx_chip_status']
+    idempotency_key [unique, name: 'idx_chip_idempotency']
+    last_modified_at [name: 'idx_chip_last_modified']
+  }
+
+  Note: 'RLS: tenant_id. Chip float tracking is a compliance requirement. Members Club is NOT a regulated casino — no AML, no Gaming Commission export format, no hash-chain. Simple reconciliation only.'
+}
+
+
+// ------------------------------------------------------------
+// ENT_CASH_RECONCILIATION — end-of-session cash count
+// ------------------------------------------------------------
+
+Table ent_cash_reconciliation {
+  id                   uuid        [pk, default: `gen_random_uuid()`]
+  tenant_id            uuid        [not null, note: 'cross-db ref: jag_core.tenants.id']
+  entity_tag           entity_tag  [not null, note: 'BAR or MEMBERS_CLUB — determines which P&L receives this reconciliation']
+  session_id           uuid        [not null, ref: > ent_bar_sessions.id]
+  reconciliation_date  date        [not null]
+  expected_cash        numeric     [not null, note: 'System-calculated from transactions in this session']
+  actual_cash_counted  numeric     [not null]
+  variance             numeric     [not null, note: 'actual_cash_counted - expected_cash']
+  reconciled_by        uuid        [not null, note: 'cross-db ref: jag_core.users.id']
+  approved_by          uuid        [null, note: 'cross-db ref: jag_core.users.id — second sign-off']
+  notes                text        [null]
+  idempotency_key      uuid        [not null, unique]
+  last_modified_at     timestamptz [not null, default: `now()`]
+  created_at           timestamptz [not null, default: `now()`]
+  updated_at           timestamptz [not null, default: `now()`]
+
+  indexes {
+    tenant_id           [name: 'idx_cash_recon_tenant']
+    entity_tag          [name: 'idx_cash_recon_entity_tag']
+    session_id          [name: 'idx_cash_recon_session']
+    reconciliation_date [name: 'idx_cash_recon_date']
+    idempotency_key     [unique, name: 'idx_cash_recon_idempotency']
+  }
+
+  Note: 'RLS: tenant_id. Financial write — idempotency_key required (STD-11). Variance reported to JAG Finance via pending_events outbox.'
+}
+
+
+// ------------------------------------------------------------
+// ENT_LICENSE_RENEWALS — annual operating license tracking
+// ------------------------------------------------------------
+
+Table ent_license_renewals {
+  id                      uuid           [pk, default: `gen_random_uuid()`]
+  tenant_id               uuid           [not null, note: 'cross-db ref: jag_core.tenants.id']
+  entity_tag              entity_tag     [not null, note: 'BAR or MEMBERS_CLUB — each entity has its own license']
+  license_type            varchar        [not null, note: 'e.g. FOOD_BEVERAGE, PRIVATE_CLUB, MUSIC, DANCE']
+  license_number          varchar        [null]
+  issuing_authority       varchar        [null, note: 'e.g. Licensing Board, Ministry of Trade']
+  issue_date              date           [not null]
+  expiry_date             date           [not null]
+  renewal_alert_days_before integer      [not null, default: 90, note: 'Tier 1 alert fires when expiry_date - today <= this value']
+  status                  license_status [not null, default: 'CURRENT']
+  document_path           varchar        [null, note: 'MinIO path for license document']
+  notes                   text           [null]
+  created_at              timestamptz    [not null, default: `now()`]
+  updated_at              timestamptz    [not null, default: `now()`]
+
+  indexes {
+    tenant_id   [name: 'idx_license_tenant']
+    entity_tag  [name: 'idx_license_entity_tag']
+    expiry_date [name: 'idx_license_expiry', note: 'Scheduler checks this for renewal alerts']
+    status      [name: 'idx_license_status']
+  }
+
+  Note: 'RLS: tenant_id. Annual license renewal alerts fire at renewal_alert_days_before days before expiry_date as Tier 1 notifications. Both BAR and MEMBERS_CLUB have independent licenses.'
+}
+
+
+// ------------------------------------------------------------
+// TABLE GROUPS (visual grouping in dbdiagram.io)
+// ------------------------------------------------------------
+
+TableGroup outbox {
+  pending_events
+}
+
+TableGroup bar_operations {
+  ent_bar_sessions
+  ent_bar_transactions
+  ent_cash_reconciliation
+}
+
+TableGroup members_club {
+  ent_members_registry
+  ent_member_visits
+  ent_chip_float_sessions
+}
+
+TableGroup compliance {
+  ent_license_renewals
+}

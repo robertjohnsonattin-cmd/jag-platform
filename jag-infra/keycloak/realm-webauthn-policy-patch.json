@@ -1,0 +1,35 @@
+{
+  "_comment": "JAG realm WebAuthn policy patch. Apply via: PATCH /admin/realms/jag (or merge into full realm export).",
+  "_note_rpId": "rpId MUST match the domain used by the browser when authenticating. Change 'localhost' to 'jagcorporate.com' for production BEFORE any user registers a device. The rpId is bound to the credential at registration time and cannot be changed afterwards.",
+
+  "webAuthnPolicyRpEntityName": "JAG Holdings Platform",
+  "webAuthnPolicyRpId": "jagcorporate.com",
+  "webAuthnPolicySignatureAlgorithms": ["ES256", "RS256"],
+  "webAuthnPolicyAttestationConveyancePreference": "none",
+  "webAuthnPolicyAuthenticatorAttachment": "platform",
+  "webAuthnPolicyRequireResidentKey": "No",
+  "webAuthnPolicyUserVerificationRequirement": "required",
+  "webAuthnPolicyCreateTimeout": 0,
+  "webAuthnPolicyAvoidSameAuthenticatorRegister": false,
+  "webAuthnPolicyAcceptableAaguids": [],
+
+  "webAuthnPolicyPasswordlessRpEntityName": "JAG Holdings Platform",
+  "webAuthnPolicyPasswordlessRpId": "jagcorporate.com",
+  "webAuthnPolicyPasswordlessSignatureAlgorithms": ["ES256", "RS256"],
+  "webAuthnPolicyPasswordlessAttestationConveyancePreference": "none",
+  "webAuthnPolicyPasswordlessAuthenticatorAttachment": "platform",
+  "webAuthnPolicyPasswordlessRequireResidentKey": "Yes",
+  "webAuthnPolicyPasswordlessUserVerificationRequirement": "required",
+  "webAuthnPolicyPasswordlessCreateTimeout": 0,
+  "webAuthnPolicyPasswordlessAvoidSameAuthenticatorRegister": false,
+
+  "browserFlow": "jag-browser",
+
+  "_policy_decisions": {
+    "authenticatorAttachment": "platform — built-in biometrics only (Touch ID, Windows Hello, Face ID). Cross-platform hardware keys (YubiKey) excluded deliberately. The platform default is suitable for a private owner portal where all devices are known.",
+    "userVerificationRequirement": "required — the user must prove presence AND identity to their device (biometric or PIN). A bare hardware key tap is not sufficient.",
+    "requireResidentKey": "No for standard WebAuthn (2FA). Yes for passwordless — the credential must be stored on the authenticator so the user can log in without typing a username.",
+    "attestationConveyancePreference": "none — we do not verify device provenance. The JAG platform is a private single-owner system; attestation adds complexity without meaningful security gain here.",
+    "rpId_production": "Must be set to the actual domain (jagcorporate.com) before users register. The browser enforces that credentials registered against jagcorporate.com cannot be used from localhost and vice versa."
+  }
+}
