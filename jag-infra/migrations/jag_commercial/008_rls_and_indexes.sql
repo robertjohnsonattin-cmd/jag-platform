@@ -129,9 +129,8 @@ DROP POLICY IF EXISTS tenant_isolation ON db_clients;
 CREATE POLICY tenant_isolation ON db_clients
   USING (tenant_id = (NULLIF(current_setting('app.current_tenant_id', true), ''))::uuid);
 
-DROP POLICY IF EXISTS tenant_isolation ON db_order_shipments;
-CREATE POLICY tenant_isolation ON db_order_shipments
-  USING (tenant_id = (NULLIF(current_setting('app.current_tenant_id', true), ''))::uuid);
+-- db_order_shipments is a junction table (order ↔ shipment) with no tenant_id.
+-- Access is controlled via FK to db_orders which has RLS. No separate policy needed.
 
 -- ── Idempotency key UNIQUE constraints (STD-11) ───────────────────────────────
 -- jabco_vendor_invoices already has idempotency_key; add UNIQUE if missing.
@@ -168,7 +167,6 @@ END $$;
 -- ── Performance indexes — FK columns missing indexes ─────────────────────────
 
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_db_clients_tenant_id ON db_clients(tenant_id);
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_db_order_shipments_tenant_id ON db_order_shipments(tenant_id);
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_crm_contacts_tenant_id ON crm_contacts(tenant_id);
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_crm_contacts_company_id ON crm_contacts(company_id);
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_crm_interactions_tenant_id ON crm_interactions(tenant_id);
@@ -179,7 +177,8 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_nlcb_expenses_tenant_id ON nlcb_expe
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_nlcb_expenses_expense_date ON nlcb_expenses(expense_date);
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_nlcb_sales_tenant_id ON nlcb_sales(tenant_id);
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_nlcb_sales_session_id ON nlcb_sales(session_id);
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_pending_events_status ON pending_events(status) WHERE status = 'PENDING';
+-- pending_events uses processed_at IS NULL to identify unprocessed events (no status column).
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_pending_events_unprocessed ON pending_events(created_at) WHERE processed_at IS NULL;
 
 -- ── Core: missing FK indexes ──────────────────────────────────────────────────
 -- These must be run against jag_core directly; record here for deploy.sh awareness.
