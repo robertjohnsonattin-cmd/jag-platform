@@ -6,12 +6,53 @@ import { logger } from './lib/logger';
 const app = express();
 const PORT = Number(process.env.PORT ?? 3000);
 
+// ── Security headers (STD-12: no security regressions to production) ──────────
+app.use((_req: Request, res: Response, next: NextFunction) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('X-XSS-Protection', '1; mode=block');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
+  res.removeHeader('X-Powered-By');
+  next();
+});
+
+// ── In-memory rate limiter — 300 req/min per IP ───────────────────────────────
+// Resets every 60 s window. Sufficient for a closed enterprise API.
+const _rateWindows = new Map<string, { count: number; reset: number }>();
+app.use((req: Request, res: Response, next: NextFunction) => {
+  const ip = (req.headers['x-forwarded-for'] as string | undefined)?.split(',')[0]?.trim()
+           ?? req.socket.remoteAddress ?? 'unknown';
+  const now = Date.now();
+  const window = _rateWindows.get(ip);
+  if (!window || now > window.reset) {
+    _rateWindows.set(ip, { count: 1, reset: now + 60_000 });
+    return next();
+  }
+  window.count += 1;
+  if (window.count > 300) {
+    res.status(429).json({ success: false, data: null, error: 'Too many requests. Retry after 60 s.', code: 'RATE_LIMITED' });
+    return;
+  }
+  next();
+});
+
+// ── Unhandled promise rejections — log and exit cleanly ───────────────────────
+process.on('unhandledRejection', (reason) => {
+  logger.error({ entity: 'API', action: 'UNHANDLED_REJECTION', error_message: String(reason) });
+  process.exit(1);
+});
+process.on('uncaughtException', (error) => {
+  logger.error({ entity: 'API', action: 'UNCAUGHT_EXCEPTION', error_message: error.message, stack: error.stack });
+  process.exit(1);
+});
+
 // ── WiPay webhook — mount with express.raw() BEFORE express.json() ────────────
 // The webhook HMAC verification requires the raw request body as a Buffer.
 // express.raw() captures it; express.json() below would replace it with a
 // parsed object and destroy the original bytes needed for HMAC.
 import { wipayRouter } from './routes/webhooks/wipay';
-app.use('/api/v1/webhooks/wipay', express.raw({ type: 'application/json' }), wipayRouter);
+app.use('/api/v1/webhooks/wipay', express.raw({ type: 'application/json', limit: '64kb' }), wipayRouter);
 
 // ── JSON body parser (all other routes) ───────────────────────────────────────
 app.use(express.json());
@@ -104,7 +145,7 @@ app.use((error: Error, _req: Request, res: Response, _next: NextFunction) => {
 // Only bind the port when running as the main entry point, not when imported
 // by test suites. Supertest creates its own ephemeral server on each request.
 if (require.main === module) {
-  app.listen(PORT, () => {
+  const server = app.listen(PORT, () => {
     logger.info({
       entity: 'API',
       action: 'STARTUP',
@@ -112,6 +153,19 @@ if (require.main === module) {
       env: process.env.NODE_ENV ?? 'development',
     });
   });
+
+  // Graceful shutdown — finish in-flight requests before exit
+  const shutdown = (signal: string) => {
+    logger.info({ entity: 'API', action: 'SHUTDOWN', signal });
+    server.close(() => {
+      logger.info({ entity: 'API', action: 'SHUTDOWN_COMPLETE' });
+      process.exit(0);
+    });
+    // Force exit after 10 s if connections don't drain
+    setTimeout(() => process.exit(1), 10_000).unref();
+  };
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT',  () => shutdown('SIGINT'));
 }
 
 export default app;

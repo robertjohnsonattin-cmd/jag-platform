@@ -28,7 +28,7 @@ const RegisterFileSchema = z.object({
   title:            z.string().min(1).max(200),
   document_type:    z.enum(['NATIONAL_ID','PASSPORT','BIRTH_CERTIFICATE','MARRIAGE_CERTIFICATE','DEATH_CERTIFICATE','MEDICAL_RECORD','ACADEMIC_CERTIFICATE','PROFESSIONAL_LICENCE','FINANCIAL_STATEMENT','TAX_RETURN','INSURANCE_POLICY','PROPERTY_TITLE','LEGAL_AGREEMENT','OTHER']),
   file_name:        z.string().min(1).max(200),
-  storage_path:     z.string().min(1).max(500),   // MinIO object path
+  storage_path:     z.string().min(1).max(500).regex(/^[a-zA-Z0-9/_\-.]+$/, 'storage_path may only contain alphanumerics, slashes, hyphens, underscores and dots'),   // MinIO object path
   mime_type:        z.string().min(1).max(100),
   file_size_bytes:  z.number().int().positive(),
   family_member_id: z.string().uuid().optional(),

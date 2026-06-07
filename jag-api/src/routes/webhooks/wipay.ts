@@ -122,10 +122,12 @@ wipayRouter.post('/', async (req: Request, res: Response, next: NextFunction): P
           try {
             await auditClient.query('BEGIN');
             await auditClient.query('SELECT set_config($1, $2, true)', ['app.current_user_id', ownerId]);
+            const auditKey = payload.transaction_id ? toUUID(`WIPAY_CONFIRMED:${payload.transaction_id}`) : null;
             await auditClient.query(
-              `INSERT INTO audit_log (user_id, entity, action, record_id, new_values, source)
-               VALUES ($1, 'RentPayment', 'WIPAY_CONFIRMED', $2, $3, 'API')`,
-              [ownerId, updated.id, JSON.stringify(payload)],
+              `INSERT INTO audit_log (user_id, entity, action, record_id, new_values, source, idempotency_key)
+               VALUES ($1, 'RentPayment', 'WIPAY_CONFIRMED', $2, $3, 'API', $4)
+               ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING`,
+              [ownerId, updated.id, JSON.stringify(payload), auditKey],
             );
             await auditClient.query('COMMIT');
           } catch (auditErr) {

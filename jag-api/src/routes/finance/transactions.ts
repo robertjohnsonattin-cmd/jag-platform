@@ -112,7 +112,9 @@ transactionsRouter.post('/', async (req: Request, res: Response, next: NextFunct
         );
         if (acct.rows.length === 0) throw Object.assign(new Error('ACCOUNT_NOT_FOUND'), { status: 404 });
 
-        return c.query(
+        // Insert transaction AND update balance in the same connection/transaction
+        // so both succeed or both roll back together (atomicity).
+        const row = await c.query(
           `INSERT INTO fin_transactions
              (owner_id, account_id, transaction_date, posted_date, amount, currency,
               amount_ttd, fx_rate_used, description, merchant_name, category,
@@ -124,18 +126,15 @@ transactionsRouter.post('/', async (req: Request, res: Response, next: NextFunct
            b.description, b.merchant_name ?? null, b.category,
            b.reference_number ?? null, b.transfer_pair_id ?? null, b.idempotency_key],
         ).then(r => r.rows[0]);
-      });
 
-      // Update account balance (credit positive, debit negative)
-      const balClient = await familyPool.connect();
-      try {
-        await withOwnerRLS(balClient, req.rlsCtx, (c) =>
-          c.query(
-            `UPDATE fin_accounts SET current_balance = current_balance + $1, updated_at = now() WHERE id = $2`,
-            [b.amount, b.account_id],
-          ),
+        // Update balance in the same transaction — no separate connection needed
+        await c.query(
+          `UPDATE fin_accounts SET current_balance = current_balance + $1, updated_at = now() WHERE id = $2`,
+          [b.amount, b.account_id],
         );
-      } finally { balClient.release(); }
+
+        return row;
+      });
 
       logger.info({ entity: 'FINANCE', action: 'TRANSACTION_CREATED', user_id: ownerId, record_id: rec.id });
       ok(res, rec, 201);

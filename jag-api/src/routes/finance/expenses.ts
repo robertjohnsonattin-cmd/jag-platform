@@ -341,6 +341,9 @@ expensesRouter.post('/:id/approve', async (req: Request, res: Response, next: Ne
         if (!['EXPENSE','OTHER_EXPENSE'].includes(debitAcct!.account_type)) {
           throw Object.assign(new Error('Debit account must be an EXPENSE account.'), { status: 422, code: 'INVALID_GL_ACCOUNT_TYPE' });
         }
+        if (!['LIABILITY','ASSET'].includes(creditAcct!.account_type)) {
+          throw Object.assign(new Error('Credit account must be a LIABILITY or ASSET account (e.g. bank, credit card, accrued liabilities).'), { status: 422, code: 'INVALID_GL_CREDIT_ACCOUNT_TYPE' });
+        }
 
         const amountTtd = Number(expense.amount_ttd).toFixed(2);
 

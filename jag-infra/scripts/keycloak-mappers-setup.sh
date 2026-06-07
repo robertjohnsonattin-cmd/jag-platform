@@ -63,6 +63,8 @@ log "Token OK."
 kc_get()    { curl -sf -H "Authorization: Bearer ${TOKEN}" "${KC_BASE_URL}/admin/realms/${KC_REALM}/$1"; }
 kc_post()   { curl -sf -X POST   -H "Authorization: Bearer ${TOKEN}" -H "Content-Type: application/json" \
                -d "$2" "${KC_BASE_URL}/admin/realms/${KC_REALM}/$1"; }
+kc_put()    { curl -sf -X PUT    -H "Authorization: Bearer ${TOKEN}" -H "Content-Type: application/json" \
+               -d "$2" "${KC_BASE_URL}/admin/realms/${KC_REALM}/$1"; }
 kc_delete() { curl -sf -X DELETE -H "Authorization: Bearer ${TOKEN}" "${KC_BASE_URL}/admin/realms/${KC_REALM}/$1"; }
 
 # ── Resolve the client's internal UUID ───────────────────────────────────────

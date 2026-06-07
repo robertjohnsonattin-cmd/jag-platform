@@ -24,7 +24,7 @@ const CreateDocSchema = z.object({
   title:               z.string().min(1).max(200),
   description:         z.string().max(2000).optional(),
   document_date:       z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-  storage_path:        z.string().max(500).optional(),   // MinIO path for the actual document
+  storage_path:        z.string().max(500).regex(/^[a-zA-Z0-9/_\-.]+$/, 'storage_path may only contain alphanumerics, slashes, hyphens, underscores and dots').optional(),   // MinIO object path
   is_classified:       z.boolean().default(true),
   governing_law:       z.string().max(100).optional(),
   lawyer_firm:         z.string().max(200).optional(),   // Firm name only — no individual names (OPSEC)

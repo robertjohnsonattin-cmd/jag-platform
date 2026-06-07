@@ -1,8 +1,9 @@
 import type { ParsedStatement, ParsedTransaction } from './types';
 
-const OLLAMA_URL   = process.env['OLLAMA_URL']   ?? 'http://localhost:11434';
-const OLLAMA_MODEL = process.env['OLLAMA_MODEL'] ?? 'mistral';
-const MAX_CHARS    = parseInt(process.env['OLLAMA_MAX_CHARS'] ?? '24000', 10);
+const OLLAMA_URL        = process.env['OLLAMA_URL']            ?? 'http://localhost:11434';
+const OLLAMA_MODEL      = process.env['OLLAMA_MODEL']          ?? 'mistral';
+const MAX_CHARS         = parseInt(process.env['OLLAMA_MAX_CHARS'] ?? '24000', 10);
+const OLLAMA_TIMEOUT_MS = parseInt(process.env['OLLAMA_TIMEOUT_MS'] ?? '120000', 10); // 2 min
 
 const SYSTEM_PROMPT = `You are a financial data extraction assistant for a business platform in Trinidad and Tobago.
 Extract all transactions from the bank statement text below and return a single valid JSON object.
@@ -43,6 +44,8 @@ export async function parseWithOllama(
   const prompt = `${SYSTEM_PROMPT}\n\n---\nBANK STATEMENT TEXT:\n${truncated}\n---`;
 
   let response: Response;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), OLLAMA_TIMEOUT_MS);
   try {
     response = await fetch(`${OLLAMA_URL}/api/generate`, {
       method: 'POST',
@@ -54,9 +57,15 @@ export async function parseWithOllama(
         stream: false,
         options: { temperature: 0.1, num_predict: 8192 },
       }),
+      signal: controller.signal,
     });
-  } catch {
-    throw new Error(`Cannot reach Ollama at ${OLLAMA_URL}. Ensure Ollama is running and model is pulled: ollama pull ${OLLAMA_MODEL}`);
+  } catch (e: unknown) {
+    const msg = e instanceof Error && e.name === 'AbortError'
+      ? `Ollama timed out after ${OLLAMA_TIMEOUT_MS}ms`
+      : `Cannot reach Ollama at ${OLLAMA_URL}. Ensure Ollama is running and model is pulled: ollama pull ${OLLAMA_MODEL}`;
+    throw new Error(msg);
+  } finally {
+    clearTimeout(timer);
   }
 
   if (!response.ok) {

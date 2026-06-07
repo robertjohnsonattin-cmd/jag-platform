@@ -20,7 +20,31 @@
 
 ---
 
-## Step 2 — Open firewall ports in Oracle Cloud
+## Step 2 — Set up Oracle billing alerts (do this immediately after VM creation)
+
+This takes 2 minutes and ensures you are notified before any charge ever occurs.
+
+### 2a — Create a $1 budget alert
+1. In Oracle Cloud top menu: **Billing & Cost Management → Budgets → Create Budget**
+2. Fill in:
+   - **Name:** `jag-spend-alert`
+   - **Target:** Root Compartment
+   - **Budget amount:** `1` (USD, monthly)
+   - **Threshold %:** `100`
+   - **Email recipients:** `robertjohnsonattin@gmail.com`
+   - **Alert message:** `JAG Oracle spend has reached $1 — check for accidentally launched paid resources`
+3. Click **Create**
+
+> If you ever receive this email, log in immediately and check Compute → Instances and Storage → Block Volumes for any resource that isn't `jag-primary`.
+
+### 2b — Check your usage limits baseline
+1. Go to: **Governance & Administration → Limits, Quotas and Usage**
+2. Filter by Service: **Compute**
+3. Confirm your A1 OCPU and memory usage shows **4 / 4 OCPU** and **24 / 24 GB** — confirming you are at the free limit and Oracle will block (not bill) any further compute additions
+
+---
+
+## Step 3 — Open firewall ports in Oracle Cloud
 
 Oracle Cloud has TWO firewalls: Security Lists (VCN-level) and the VM's own UFW. Both must allow traffic.
 
@@ -37,7 +61,7 @@ Oracle Cloud has TWO firewalls: Security Lists (VCN-level) and the VM's own UFW.
 
 ---
 
-## Step 3 — Point DNS to the VM
+## Step 4 — Point DNS to the VM
 
 In **Cloudflare dashboard** for jagcorporate.com:
 
@@ -52,7 +76,7 @@ In **Cloudflare dashboard** for jagcorporate.com:
 
 ---
 
-## Step 4 — Get a Cloudflare API Token
+## Step 5 — Get a Cloudflare API Token
 
 Caddy uses Cloudflare DNS-01 challenge to obtain wildcard TLS certificates. It needs a token.
 
@@ -66,7 +90,7 @@ You will put this token in `jag-infra/.env` as `CLOUDFLARE_API_TOKEN=<token>`.
 
 ---
 
-## Step 5 — Enable Oracle Cloud automated backups
+## Step 6 — Enable Oracle Cloud automated backups
 
 Automated snapshots of the VM's boot volume protect against OS/disk failure.
 
@@ -77,7 +101,7 @@ Automated snapshots of the VM's boot volume protect against OS/disk failure.
 
 ---
 
-## Step 6 — SSH into the VM and run the bootstrap script
+## Step 7 — SSH into the VM and run the bootstrap script
 
 ```bash
 # From your Windows machine (PowerShell or WSL):
@@ -96,7 +120,7 @@ The script takes ~5 minutes and prints each step. **Do not interrupt it.**
 
 ---
 
-## Step 7 — Copy project files to the VM
+## Step 8 — Copy project files to the VM
 
 After bootstrap completes, clone or copy the JAG project:
 
@@ -113,7 +137,7 @@ rsync -avz -e "ssh -i path/to/key" \
 
 ---
 
-## Step 8 — Populate production .env
+## Step 9 — Populate production .env
 
 ```bash
 ssh into the VM, then:
@@ -124,15 +148,15 @@ nano /opt/jag/jag-infra/.env
 Fill in every `CHANGE_ME_*` value. See `.env.example` for the full list.
 **Critical values:**
 - All `CHANGE_ME_*` passwords — generate strong random passwords
-- `CLOUDFLARE_API_TOKEN` — from Step 4
+- `CLOUDFLARE_API_TOKEN` — from Step 5
 - `KC_HOSTNAME=auth.jagcorporate.com`
 - `ACME_EMAIL=robertjohnsonattin@gmail.com`
 - `KC_WEBAUTHN_RP_ID=jagcorporate.com`
-- Leave `ALERT_USER_ID` and `WIPAY_DEFAULT_OWNER_ID` as placeholder — set after Step 10
+- Leave `ALERT_USER_ID` and `WIPAY_DEFAULT_OWNER_ID` as placeholder — set after Step 11
 
 ---
 
-## Step 9 — Run the deploy script (first deploy)
+## Step 10 — Run the deploy script (first deploy)
 
 ```bash
 cd /opt/jag/jag-infra
@@ -143,7 +167,7 @@ This compiles TypeScript, runs migrations on all 5 databases, builds Docker imag
 
 ---
 
-## Step 10 — Keycloak setup
+## Step 11 — Keycloak setup
 
 Once the stack is up:
 
@@ -159,7 +183,7 @@ KC_WEBAUTHN_RP_ID=jagcorporate.com bash scripts/keycloak-webauthn-setup.sh
 
 ---
 
-## Step 11 — Create real Keycloak users
+## Step 12 — Create real Keycloak users
 
 Create each user via the Keycloak admin console at `https://auth.jagcorporate.com/admin`:
 
@@ -180,7 +204,7 @@ Create each user via the Keycloak admin console at `https://auth.jagcorporate.co
 
 ---
 
-## Step 12 — Smoke test
+## Step 13 — Smoke test
 
 ```bash
 # Test API health
@@ -204,3 +228,32 @@ Then open `https://auth.jagcorporate.com/admin` in your browser and log in — c
 | Grafana dashboards | `ssh -L 3001:localhost:3001 ubuntu@<VM-IP>` then `http://localhost:3001` |
 | MinIO console | `ssh -L 9001:localhost:9001 ubuntu@<VM-IP>` then `http://localhost:9001` |
 | PostgreSQL | `ssh -L 5432:localhost:5432 ubuntu@<VM-IP>` then connect with pgAdmin |
+
+---
+
+## Security migrations applied (post-Phase 5 audit)
+
+These migrations were added after the initial Phase 5 schema and must be included in the first deploy:
+
+| Database | File | Purpose |
+|----------|------|---------|
+| jag_core | `006_missing_indexes.sql` | FK indexes on user_tenant_roles; idempotency_key on audit_log |
+| jag_commercial | `008_rls_and_indexes.sql` | RLS policies on 16 unprotected tables (NLCB, CRM, JABCO, pending_events); idempotency UNIQUE constraints; FK indexes |
+
+The deploy script runs all numbered SQL files in order — no manual steps required.
+
+## Code security fixes applied (post-Phase 5 audit)
+
+The following API-layer fixes were applied and are included in the codebase:
+
+- `index.ts` — security headers (X-Frame-Options, HSTS etc.), rate limiting (300 req/min), graceful shutdown
+- `lib/logger.ts` — sensitive field redaction (passwords, tokens, secrets never logged)
+- `lib/extractor/extract.ts` — path traversal guard + 20MB file size limit on PDF extraction
+- `lib/extractor/parse.ts` — Ollama fetch timeout (2 min default, configurable via OLLAMA_TIMEOUT_MS)
+- `routes/finance/transactions.ts` — atomic balance update (was split across two DB connections — race condition fixed)
+- `routes/finance/expenses.ts` — credit account type validation (must be LIABILITY or ASSET, not REVENUE)
+- `routes/docvault/index.ts` — storage_path Zod regex prevents path traversal
+- `routes/succession/index.ts` — storage_path Zod regex prevents path traversal
+- `routes/webhooks/wipay.ts` — body size limit (64kb), idempotent audit log INSERT
+- `caddy/Caddyfile` — HSTS on both api and auth domains
+- `docker-compose.yml` — Promtail corrected to /var/log/postgresql (PG17 Ubuntu path), dispatcher healthcheck, resource limits

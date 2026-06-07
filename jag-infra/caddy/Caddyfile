@@ -32,18 +32,20 @@ api.jagcorporate.com {
 		max_size 25MB
 	}
 
-	# Pass real client IP from Cloudflare header to upstream
-	header_up X-Real-IP {http.request.header.CF-Connecting-IP}
-	header_up X-Forwarded-For {http.request.header.CF-Connecting-IP}
-	header_up X-Forwarded-Proto https
-
-	reverse_proxy api:3000
+	reverse_proxy api:3000 {
+		# Pass real client IP from Cloudflare header to upstream
+		header_up X-Real-IP {http.request.header.CF-Connecting-IP}
+		header_up X-Forwarded-For {http.request.header.CF-Connecting-IP}
+		header_up X-Forwarded-Proto https
+	}
 
 	# Security headers
 	header {
 		X-Frame-Options DENY
 		X-Content-Type-Options nosniff
 		Referrer-Policy no-referrer
+		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+		Permissions-Policy "geolocation=(), microphone=(), camera=()"
 		-Server
 	}
 }
@@ -58,11 +60,12 @@ auth.jagcorporate.com {
 		max_size 10MB
 	}
 
-	header_up X-Real-IP {http.request.header.CF-Connecting-IP}
-	header_up X-Forwarded-For {http.request.header.CF-Connecting-IP}
-	header_up X-Forwarded-Proto https
-
 	reverse_proxy keycloak:8080 {
+		# Pass real client IP from Cloudflare header to upstream
+		header_up X-Real-IP {http.request.header.CF-Connecting-IP}
+		header_up X-Forwarded-For {http.request.header.CF-Connecting-IP}
+		header_up X-Forwarded-Proto https
+
 		# Keycloak requires longer timeouts for admin operations and cold start
 		transport http {
 			dial_timeout 10s
@@ -76,6 +79,7 @@ auth.jagcorporate.com {
 		X-Frame-Options SAMEORIGIN
 		X-Content-Type-Options nosniff
 		Referrer-Policy strict-origin-when-cross-origin
+		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
 		-Server
 	}
 }

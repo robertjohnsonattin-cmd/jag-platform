@@ -49,7 +49,7 @@ services:
       KC_HOSTNAME: ${KC_HOSTNAME}
       KC_HOSTNAME_STRICT: "false"
       KC_HOSTNAME_STRICT_BACKCHANNEL: "false"
-      KC_PROXY: edge
+      KC_PROXY_HEADERS: xforwarded
       KC_HTTP_ENABLED: "true"
       KC_HTTP_PORT: "8080"
       KC_HTTPS_ENABLED: "false"   # TLS terminated by Caddy
@@ -88,6 +88,18 @@ services:
       MAX_RETRIES:                "3"
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+        reservations:
+          memory: 64M
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f dispatcher || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
 
   # ── JAG API ───────────────────────────────────────────────────────────────────
   api:
@@ -132,6 +144,12 @@ services:
       timeout: 10s
       retries: 3
       start_period: 15s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 128M
 
   # ── MinIO Object Storage ──────────────────────────────────────────────────────
   minio:
@@ -153,6 +171,12 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 256M
 
   # ── Loki — Log Aggregation ────────────────────────────────────────────────────
   loki:
@@ -184,7 +208,7 @@ services:
       - ./promtail/promtail-config.yml:/etc/promtail/promtail-config.yml:ro
       - /var/lib/docker/containers:/var/lib/docker/containers:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      - /var/lib/pgsql/16/data/log:/var/lib/pgsql/16/data/log:ro   # native PostgreSQL logs
+      - /var/log/postgresql:/var/log/postgresql:ro   # PostgreSQL 17 on Ubuntu logs here
     depends_on:
       loki:
         condition: service_healthy

@@ -230,26 +230,27 @@ SUBFLOW
 )"
 log "  Created JAG WebAuthn subflow."
 
-# Get the newly created subflow's alias to add executions to it.
+# Get the newly created subflow's ID and URL-encoded alias to add executions to it.
 WEBAUTHN_SUBFLOW_ALIAS="JAG WebAuthn"
+WEBAUTHN_SUBFLOW_ALIAS_ENC="JAG%20WebAuthn"
 
 # Add Condition - User Configured (skips WebAuthn if no device registered yet)
-kc_post "authentication/flows/${WEBAUTHN_SUBFLOW_ALIAS}/executions/execution" \
+kc_post "authentication/flows/${WEBAUTHN_SUBFLOW_ALIAS_ENC}/executions/execution" \
   '{"provider": "conditional-user-configured"}'
 log "  Added conditional-user-configured execution."
 
 # Add WebAuthn Authenticator execution.
-kc_post "authentication/flows/${WEBAUTHN_SUBFLOW_ALIAS}/executions/execution" \
+kc_post "authentication/flows/${WEBAUTHN_SUBFLOW_ALIAS_ENC}/executions/execution" \
   '{"provider": "webauthn-authenticator"}'
 log "  Added webauthn-authenticator execution."
 
 # Set requirements on the new executions.
-WEBAUTHN_EXECUTIONS=$(kc_get "authentication/flows/${WEBAUTHN_SUBFLOW_ALIAS}/executions")
+WEBAUTHN_EXECUTIONS=$(kc_get "authentication/flows/${WEBAUTHN_SUBFLOW_ALIAS_ENC}/executions")
 
 set_requirement() {
   local exec_id="$1"
   local requirement="$2"
-  kc_put "authentication/flows/${WEBAUTHN_SUBFLOW_ALIAS}/executions" \
+  kc_put "authentication/flows/${WEBAUTHN_SUBFLOW_ALIAS_ENC}/executions" \
     "{\"id\": \"${exec_id}\", \"requirement\": \"${requirement}\"}"
 }
 
