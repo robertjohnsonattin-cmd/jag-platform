@@ -236,6 +236,7 @@ imsVehiclesRouter.patch('/:id', async (req: Request, res: Response, next: NextFu
         const vPush = (v: unknown) => { vParams.push(v); return `$${vParams.length}`; };
 
         if (b.owner_entity           !== undefined) { vCols.push(`owner_entity = ${vPush(b.owner_entity)}`); vCols.push(`fleet_type = ${vPush(b.owner_entity)}`); }
+        if (b.colour                 !== undefined) vCols.push(`colour = ${vPush(b.colour)}`);
         if (b.insurance_policy_number !== undefined) vCols.push(`insurance_policy_number = ${vPush(b.insurance_policy_number)}`);
         if (b.insurance_provider      !== undefined) vCols.push(`insurance_provider = ${vPush(b.insurance_provider)}`);
         if (b.insurance_expiry        !== undefined) vCols.push(`insurance_expiry = ${vPush(b.insurance_expiry)}`);
@@ -262,7 +263,6 @@ imsVehiclesRouter.patch('/:id', async (req: Request, res: Response, next: NextFu
         if (b.condition   !== undefined) iCols.push(`condition = ${iPush(b.condition)}`);
         if (b.unit_value  !== undefined) iCols.push(`unit_value = ${iPush(b.unit_value)}`);
         if (b.location_id !== undefined) iCols.push(`location_id = ${iPush(b.location_id)}`);
-        if (b.colour      !== undefined) iCols.push(`colour = ${iPush(b.colour)}`);
 
         if (iCols.length > 2) {
           iParams.push(cur.rows[0].item_id);

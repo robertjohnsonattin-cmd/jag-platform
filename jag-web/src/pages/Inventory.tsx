@@ -650,6 +650,22 @@ function EditVehicleModal({
               <input value={form.insurance_policy_number} onChange={set('insurance_policy_number')} className={cls} />
             </div>
           </div>
+          {(vehicle.vin || vehicle.engine_number) && (
+            <div className="flex gap-3">
+              {vehicle.vin && (
+                <div className="flex-1">
+                  <label className="block text-xs text-slate-400 mb-1">VIN / Chassis</label>
+                  <input readOnly value={vehicle.vin} className="w-full bg-slate-700/50 border border-slate-600 rounded-lg px-3 py-2 text-xs text-slate-300 font-mono cursor-default select-all" />
+                </div>
+              )}
+              {vehicle.engine_number && (
+                <div className="flex-1">
+                  <label className="block text-xs text-slate-400 mb-1">Engine Number</label>
+                  <input readOnly value={vehicle.engine_number} className="w-full bg-slate-700/50 border border-slate-600 rounded-lg px-3 py-2 text-xs text-slate-300 font-mono cursor-default select-all" />
+                </div>
+              )}
+            </div>
+          )}
           {error && <p className="text-red-400 text-xs">{error instanceof Error ? error.message : 'Failed.'}</p>}
         </div>
         <div className="flex gap-3 mt-4">
