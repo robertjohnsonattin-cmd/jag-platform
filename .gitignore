@@ -19,3 +19,7 @@ migration/audit/
 
 # ZAP security scan reports contain auth tokens and PII
 security/reports/
+
+# Master Architecture — classified document; offline only; never commit to any cloud system
+JAG_Master_Architecture*.docx
+JAG_Master_Architecture_generator*.js

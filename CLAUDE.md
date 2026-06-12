@@ -1,7 +1,7 @@
 # JAG Integrated Business Platform — Claude Session Context
 
 **Owner:** Robert Johnson-Attin | Barataria, Trinidad & Tobago
-**Architecture:** v1.9 | **Current Phase:** ALL PHASES COMPLETE — in production | **Updated:** 2026-06-12
+**Architecture:** v1.9 | **Current Phase:** ALL PHASES COMPLETE — in production | **Updated:** 2026-06-12 (session 2)
 
 ---
 
@@ -117,6 +117,9 @@ PostgreSQL `numeric` / `decimal` columns arrive in Node.js as **strings**, not n
 ### WebAuthn
 `KC_WEBAUTHN_RP_ID` is bound at registration and **cannot be changed**. Run `keycloak-webauthn-setup.sh` with `KC_WEBAUTHN_RP_ID=jabco.tt` before any user registers a device on production.
 
+### Net Worth Snapshot — stale data behaviour
+`POST /finance/net-worth/snapshot` upserts on `(owner_id, owner_entity_id, snapshot_date)` — one row per entity per day. If property valuations are edited **after** a snapshot is taken on the same day, the snapshot will be stale. Fix: `DELETE FROM fin_net_worth_snapshots WHERE snapshot_date = 'YYYY-MM-DD'` then retrigger from Finance → Net Worth → Take Snapshot. This happened 2026-06-11: `JAG Properties Management` and `62 Ariapita Avenue` valuations were cleared at 17:19 but snapshot was already taken at 06:36.
+
 ### CRITICAL: jag-api Docker deploy pattern
 The Dockerfile copies `dist/` (pre-compiled TypeScript) — **NOT** `src/`. Uploading source changes has zero effect on the running container.
 
@@ -165,15 +168,36 @@ Step 6 (ZAP baseline) fires automatically when `ZAP_SCAN_PASSWORD` env var is se
 
 ---
 
-## ROBERT'S ACCOUNT
+## USER ACCOUNTS
 
+### Robert (Owner)
 | Field | Value |
 |---|---|
 | Email | `robertjohnsonattin@gmail.com` |
 | Keycloak ID | `e58436eb-bcd9-40c4-95f6-251d77d0b001` |
 | jag_core users.id | `95ca3f77-60ba-4a0f-af70-2832b247b525` |
-| Role | Owner on JAG_HOLDINGS |
+| Role | Owner on all 7 tenants (JAG_HOLDINGS is default) |
+| Keycloak realm roles | `default-roles-jag` |
 | Token source | `https://auth.jagcorporate.com` (NOT localhost — issuer mismatch) |
+
+### Wife (Emergency Designate — full read-only)
+| Field | Value |
+|---|---|
+| Email | `zhanghuachang22@gmail.com` |
+| Keycloak ID | `7b03b15d-f9e7-4000-8394-7e530d2ce35f` |
+| jag_core users.id | `847d5964-302c-4513-b0c9-e54406c43e62` |
+| Role | Auditor on JAG_HOLDINGS (auditor portal shows Robert's books) |
+| Keycloak realm roles | `default-roles-jag`, `jag_auditor` |
+
+### Brian
+| Field | Value |
+|---|---|
+| Email | `brijohn929@gmail.com` |
+| Keycloak ID | `566710e3-258c-4220-984c-bc1729417770` |
+| jag_core users.id | `1b9f8e53-8f1e-4eb9-be81-83dc6d3f5670` |
+| Role | Staff on NLCB (his own login); seed user `00000000-0000-0000-0002-000000000001` used by X-Act-As flow |
+| Keycloak realm roles | `default-roles-jag`, `brian_portal` |
+| Default tenant | NLCB (`00000000-0000-0000-0001-000000000007`) per `brian_portal_config` |
 
 ---
 
@@ -326,6 +350,13 @@ Step 6 (ZAP baseline) fires automatically when `ZAP_SCAN_PASSWORD` env var is se
 - ~~**Rent proof workflow**~~ — **DONE**: endpoint `GET /properties/:propertyId/rent-payments/:paymentId/receipt` live in `routes/properties/properties.ts`; frontend copy/WhatsApp share in PropertiesPanel.tsx
 - ~~**Migration 009 collision (jag_properties)**~~ — **FIXED 2026-06-12**: renamed to `009b_prop_properties_audit_cols.sql`; production `__migrations` updated; 010 registered
 - ~~**FDW DR password gap**~~ — **FIXED 2026-06-12**: `005b_fdw_setup.sql` now uses psql `:'JAG_APP_PASSWORD'` variable substitution (STD-07); `jag-infra/scripts/fdw-rotate-password.sh` added for credential rotation. **Production action required:** run `fdw-rotate-password.sh` once to resync existing USER MAPPINGs on the live VM.
+- ~~**user_tenant_roles empty**~~ — **FIXED 2026-06-12**: Robert (Owner/JAG_HOLDINGS), Wife (Auditor/JAG_HOLDINGS), Brian real KC user (Staff/NLCB) all provisioned; pre-existing rows for 6 other tenants confirmed active
+- ~~**Wife missing jag_auditor Keycloak role**~~ — **FIXED 2026-06-12**: assigned via admin API; Wife email confirmed `zhanghuachang22@gmail.com`
+- ~~**MinIO buckets missing**~~ — **FIXED 2026-06-12**: all 4 buckets created (`jag-bank-statements`, `jag-receipts`, `jag-documents`, `jag-photos`)
+- ~~**Grafana + Promtail never started**~~ — **FIXED 2026-06-12**: containers were in `Created` state for 5 days; now running; logs flowing to Loki
+- ~~**Oracle boot-volume backup policy**~~ — **DONE 2026-06-12**: Bronze policy applied to both boot volumes
+- ~~**Stale net worth snapshot (11 Jun)**~~ — **FIXED 2026-06-12**: snapshot captured property valuations of `JAG Properties Management` and `62 Ariapita Avenue` before they were cleared; deleted stale rows; fresh snapshot regenerated — consolidated NW now $12,207,370.50 ✓
+- **WebAuthn device registration** — PENDING for all 3 users (Robert, Brian, Wife); requires in-person browser session at `https://auth.jagcorporate.com/realms/jag/account`
 - **Ollama** — deferred; set `DRY_RUN=false` + `ollama pull llama3.2` when ready
 - **Data population** — B3 Leases (new leases needed — all expired), A2 Chart of Accounts, A3 FX Rates not yet populated in production
 - **JAG Plantations / JAG Trading** — future phases; placeholder pages exist in frontend
