@@ -42,8 +42,6 @@ set -euo pipefail
 
 # ── Config ─────────────────────────────────────────────────────────────────────
 DATABASES=(jag_core jag_commercial jag_entertainment jag_family jag_properties)
-PG_HOST="localhost"
-PG_PORT="5432"
 PG_USER="postgres"
 BACKUP_ROOT="/opt/jag/backups"
 MINIO_ALIAS="jag"
@@ -102,13 +100,10 @@ for DB in "${DATABASES[@]}"; do
   log_db "dump_start" "INFO" "$DB"
 
   if sudo -u postgres pg_dump \
-      --host="$PG_HOST" \
-      --port="$PG_PORT" \
       --username="$PG_USER" \
       --format=custom \
       --compress=9 \
-      --file="$FILEPATH" \
-      "$DB"; then
+      "$DB" > "$FILEPATH"; then
     SIZE=$(du -sh "$FILEPATH" | cut -f1)
     log_db "dump_done" "INFO" "$DB" '"file":"'"$FILENAME"'","size":"'"$SIZE"'"'
   else
