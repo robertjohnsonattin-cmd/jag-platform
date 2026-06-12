@@ -269,3 +269,23 @@ export interface IntercompanyElimination {
   amount_ttd: string
   created_at: string
 }
+
+export type BankStatementJobStatus = 'PENDING' | 'PROCESSING' | 'COMPLETE' | 'PARTIAL' | 'FAILED'
+
+export interface BankStatementJob {
+  id: string
+  account_id: string
+  status: BankStatementJobStatus
+  file_name: string
+  mime_type: string
+  statement_from: string | null
+  statement_to: string | null
+  rows_parsed: number
+  rows_imported: number
+  rows_skipped: number
+  error_detail: string | null
+  started_at: string | null
+  completed_at: string | null
+  created_at: string
+  updated_at: string
+}

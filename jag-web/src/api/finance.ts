@@ -6,6 +6,7 @@ import type {
   IntercompanyCharge, IntercompanyElimination,
   InsurancePolicyType, InsuranceAssetType, PremiumFrequency,
   IntercompanyChargeType,
+  BankStatementJob,
 } from '../types/finance'
 
 export const financeApi = {
@@ -219,6 +220,28 @@ export const financeApi = {
       : ''
     return api.get<IntercompanyElimination[]>(`/finance/intercompany/eliminations${qs}`)
   },
+
+  // ── Bank Statements ──────────────────────────────────────────────────────────
+
+  uploadBankStatement: (file: File, account_id: string, idempotency_key: string) => {
+    const form = new FormData()
+    form.append('statement', file)
+    form.append('account_id', account_id)
+    form.append('idempotency_key', idempotency_key)
+    return api.postForm<BankStatementJob>('/finance/bank-statements/upload', form)
+  },
+
+  getBankStatementJobs: (params?: { account_id?: string; status?: string; limit?: number; offset?: number }) => {
+    const qs = params
+      ? '?' + new URLSearchParams(Object.fromEntries(
+          Object.entries(params).filter(([, v]) => v !== undefined).map(([k, v]) => [k, String(v)])
+        )).toString()
+      : ''
+    return api.get<BankStatementJob[]>(`/finance/bank-statements${qs}`)
+  },
+
+  requeueBankStatementJob: (id: string) =>
+    api.post<BankStatementJob>(`/finance/bank-statements/${id}/requeue`, {}),
 
   getConsolidated: (params: { period_year: number; period_month?: number }) => {
     const qs = '?' + new URLSearchParams(Object.fromEntries(

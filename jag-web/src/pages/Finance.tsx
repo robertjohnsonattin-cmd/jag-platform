@@ -7,16 +7,18 @@ import InvestmentsPanel from '../components/finance/InvestmentsPanel'
 import LoansPanel from '../components/finance/LoansPanel'
 import InsurancePanel from '../components/finance/InsurancePanel'
 import IntercompanyPanel from '../components/finance/IntercompanyPanel'
+import BankStatementsPanel from '../components/finance/BankStatementsPanel'
 
 const TABS = [
-  { id: 'accounts',     label: 'Accounts' },
-  { id: 'transactions', label: 'Transactions' },
-  { id: 'investments',  label: 'Investments' },
-  { id: 'loans',        label: 'Loans' },
-  { id: 'insurance',    label: 'Insurance' },
-  { id: 'intercompany', label: 'Intercompany' },
-  { id: 'net-worth',    label: 'Net Worth' },
-  { id: 'fx-rates',     label: 'FX Rates' },
+  { id: 'accounts',        label: 'Accounts' },
+  { id: 'transactions',    label: 'Transactions' },
+  { id: 'bank-statements', label: 'Bank Statements' },
+  { id: 'investments',     label: 'Investments' },
+  { id: 'loans',           label: 'Loans' },
+  { id: 'insurance',       label: 'Insurance' },
+  { id: 'intercompany',    label: 'Intercompany' },
+  { id: 'net-worth',       label: 'Net Worth' },
+  { id: 'fx-rates',        label: 'FX Rates' },
 ] as const
 
 type TabId = (typeof TABS)[number]['id']
@@ -44,9 +46,10 @@ export default function Finance() {
         ))}
       </div>
 
-      {tab === 'accounts'     && <AccountsPanel />}
-      {tab === 'transactions' && <TransactionsPanel />}
-      {tab === 'investments'  && <InvestmentsPanel />}
+      {tab === 'accounts'        && <AccountsPanel />}
+      {tab === 'transactions'    && <TransactionsPanel />}
+      {tab === 'bank-statements' && <BankStatementsPanel />}
+      {tab === 'investments'     && <InvestmentsPanel />}
       {tab === 'loans'        && <LoansPanel />}
       {tab === 'insurance'    && <InsurancePanel />}
       {tab === 'intercompany' && <IntercompanyPanel />}
