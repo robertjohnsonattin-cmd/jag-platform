@@ -118,7 +118,7 @@ glRouter.post('/accounts', async (req: Request, res: Response, next: NextFunctio
       logger.info({ entity: 'GL', action: 'ACCOUNT_CREATED', user_id: ownerId, record_id: rec.id });
       ok(res, rec, 201);
     } catch (e: unknown) {
-      if (e instanceof Error && e.message.includes('uq_gl_accounts_code_per_entity')) {
+      if ((e as { code?: string }).code === '23505') {
         err(res, 409, 'DUPLICATE_ACCOUNT_CODE', 'An account with this code already exists for this entity.');
         return;
       }
