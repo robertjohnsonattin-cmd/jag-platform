@@ -10,7 +10,15 @@
 --   Migration 005_fin_intercompany.sql must be applied first (as jag_app).
 --
 -- Run:
---   psql $DATABASE_URL_FAMILY_SUPERUSER -f 005b_fdw_setup.sql
+--   JAG_APP_PASSWORD=$JAG_APP_PASSWORD psql $DATABASE_URL_FAMILY_SUPERUSER \
+--     --variable=JAG_APP_PASSWORD="$JAG_APP_PASSWORD" \
+--     -f 005b_fdw_setup.sql
+--
+-- JAG_APP_PASSWORD must match the jag_app PostgreSQL role password (from Oracle Vault / env).
+-- Never hardcode the password here — the variable is injected at run time (STD-07).
+--
+-- To rotate the password after a jag_app credential change:
+--   bash jag-infra/scripts/fdw-rotate-password.sh
 --
 -- All foreign tables are in schema 'fdw' to keep them separate from local tables.
 
@@ -38,13 +46,13 @@ EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 DO $$ BEGIN
   CREATE USER MAPPING FOR jag_app
     SERVER jag_commercial_fdw
-    OPTIONS (user 'jag_app', password 'jag_password_change_me');
+    OPTIONS (user 'jag_app', password :'JAG_APP_PASSWORD');
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 DO $$ BEGIN
   CREATE USER MAPPING FOR jag_app
     SERVER jag_entertainment_fdw
-    OPTIONS (user 'jag_app', password 'jag_password_change_me');
+    OPTIONS (user 'jag_app', password :'JAG_APP_PASSWORD');
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 -- Grant schema usage to jag_app

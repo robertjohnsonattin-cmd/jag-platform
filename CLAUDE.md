@@ -325,6 +325,7 @@ Step 6 (ZAP baseline) fires automatically when `ZAP_SCAN_PASSWORD` env var is se
 - ~~**WiPay webhook**~~ — **REMOVED**: WiPay does not issue webhooks to individuals; rents paid directly to personal bank accounts
 - ~~**Rent proof workflow**~~ — **DONE**: endpoint `GET /properties/:propertyId/rent-payments/:paymentId/receipt` live in `routes/properties/properties.ts`; frontend copy/WhatsApp share in PropertiesPanel.tsx
 - ~~**Migration 009 collision (jag_properties)**~~ — **FIXED 2026-06-12**: renamed to `009b_prop_properties_audit_cols.sql`; production `__migrations` updated; 010 registered
+- ~~**FDW DR password gap**~~ — **FIXED 2026-06-12**: `005b_fdw_setup.sql` now uses psql `:'JAG_APP_PASSWORD'` variable substitution (STD-07); `jag-infra/scripts/fdw-rotate-password.sh` added for credential rotation. **Production action required:** run `fdw-rotate-password.sh` once to resync existing USER MAPPINGs on the live VM.
 - **Ollama** — deferred; set `DRY_RUN=false` + `ollama pull llama3.2` when ready
 - **Data population** — B3 Leases (new leases needed — all expired), A2 Chart of Accounts, A3 FX Rates not yet populated in production
 - **JAG Plantations / JAG Trading** — future phases; placeholder pages exist in frontend
