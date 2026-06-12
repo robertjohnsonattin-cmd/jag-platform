@@ -1952,6 +1952,382 @@ describeInsurance('Insurance RLS isolation — jag_family (STD-03)', () => {
 
 const describeNoCrossDbFk = DB_URL_FAMILY ? describe : describe.skip;
 
+// ─────────────────────────────────────────────────────────────────────────────
+// jag_properties — Phase 7 tables (STD-03) owner_id RLS isolation
+// Covers: prop_insurance, prop_property_tax, prop_inspections,
+//         prop_units, prop_utility_accounts
+// ─────────────────────────────────────────────────────────────────────────────
+
+const describeProps7 = DB_URL_PROPS ? describe : describe.skip;
+
+// Use the same ownerA/ownerB as describeProps; new property and child row UUIDs
+// to avoid FK collisions with other suites.
+const PROP7 = {
+  propA:  'e0000000-0000-0000-0060-000000000001',
+  propB:  'e0000000-0000-0000-0060-000000000002',
+  insurA: 'e0000000-0000-0000-0061-000000000001',
+  insurB: 'e0000000-0000-0000-0061-000000000002',
+  taxA:   'e0000000-0000-0000-0062-000000000001',
+  taxB:   'e0000000-0000-0000-0062-000000000002',
+  inspA:  'e0000000-0000-0000-0063-000000000001',
+  inspB:  'e0000000-0000-0000-0063-000000000002',
+  unitA:  'e0000000-0000-0000-0064-000000000001',
+  unitB:  'e0000000-0000-0000-0064-000000000002',
+  utilA:  'e0000000-0000-0000-0065-000000000001',
+  utilB:  'e0000000-0000-0000-0065-000000000002',
+} as const;
+
+describeProps7('RLS isolation — jag_properties Phase 7 tables (STD-03)', () => {
+  let props7Pool: Pool;
+
+  beforeAll(async () => {
+    props7Pool = new Pool({ connectionString: DB_URL_PROPS });
+    const c = await props7Pool.connect();
+    try {
+      for (const [ownerId, propId, propCode] of [
+        [PROP.ownerA, PROP7.propA, 'P7-TEST-A'],
+        [PROP.ownerB, PROP7.propB, 'P7-TEST-B'],
+      ] as [string, string, string][]) {
+        await c.query('BEGIN');
+        await c.query('SELECT set_config($1, $2, true)', ['app.current_owner_id', ownerId]);
+        await c.query(`
+          INSERT INTO prop_properties
+            (id, owner_id, property_code, name, address_line1, city, property_type)
+          VALUES ($1, $2, $3, $3, '1 Test St', 'POS', 'RESIDENTIAL')
+          ON CONFLICT (id) DO NOTHING
+        `, [propId, ownerId, propCode]);
+        await c.query('COMMIT');
+      }
+
+      const rows: [string, string, string, string, string][] = [
+        // [table, ownerInsertSQL, ownerA_id, ownerB_id, propA_id]
+        // handled per-table below for clarity
+      ];
+
+      // prop_insurance
+      for (const [ownerId, id, propId] of [
+        [PROP.ownerA, PROP7.insurA, PROP7.propA],
+        [PROP.ownerB, PROP7.insurB, PROP7.propB],
+      ] as [string, string, string][]) {
+        await c.query('BEGIN');
+        await c.query('SELECT set_config($1, $2, true)', ['app.current_owner_id', ownerId]);
+        await c.query(
+          `INSERT INTO prop_insurance (id, owner_id, property_id, insurance_type, insurer)
+           VALUES ($1, $2, $3, 'BUILDING', 'Test Insurer') ON CONFLICT (id) DO NOTHING`,
+          [id, ownerId, propId],
+        );
+        await c.query('COMMIT');
+      }
+
+      // prop_property_tax
+      for (const [ownerId, id, propId, amount] of [
+        [PROP.ownerA, PROP7.taxA, PROP7.propA, 1000],
+        [PROP.ownerB, PROP7.taxB, PROP7.propB, 2000],
+      ] as [string, string, string, number][]) {
+        await c.query('BEGIN');
+        await c.query('SELECT set_config($1, $2, true)', ['app.current_owner_id', ownerId]);
+        await c.query(
+          `INSERT INTO prop_property_tax (id, owner_id, property_id, tax_year, tax_amount)
+           VALUES ($1, $2, $3, 2024, $4) ON CONFLICT (id) DO NOTHING`,
+          [id, ownerId, propId, amount],
+        );
+        await c.query('COMMIT');
+      }
+
+      // prop_inspections
+      for (const [ownerId, id, propId] of [
+        [PROP.ownerA, PROP7.inspA, PROP7.propA],
+        [PROP.ownerB, PROP7.inspB, PROP7.propB],
+      ] as [string, string, string][]) {
+        await c.query('BEGIN');
+        await c.query('SELECT set_config($1, $2, true)', ['app.current_owner_id', ownerId]);
+        await c.query(
+          `INSERT INTO prop_inspections (id, owner_id, property_id, inspection_type, inspection_date)
+           VALUES ($1, $2, $3, 'PERIODIC', '2024-01-01') ON CONFLICT (id) DO NOTHING`,
+          [id, ownerId, propId],
+        );
+        await c.query('COMMIT');
+      }
+
+      // prop_units
+      for (const [ownerId, id, propId] of [
+        [PROP.ownerA, PROP7.unitA, PROP7.propA],
+        [PROP.ownerB, PROP7.unitB, PROP7.propB],
+      ] as [string, string, string][]) {
+        await c.query('BEGIN');
+        await c.query('SELECT set_config($1, $2, true)', ['app.current_owner_id', ownerId]);
+        await c.query(
+          `INSERT INTO prop_units (id, owner_id, property_id, unit_number)
+           VALUES ($1, $2, $3, 'UNIT-01') ON CONFLICT (id) DO NOTHING`,
+          [id, ownerId, propId],
+        );
+        await c.query('COMMIT');
+      }
+
+      // prop_utility_accounts
+      for (const [ownerId, id, propId] of [
+        [PROP.ownerA, PROP7.utilA, PROP7.propA],
+        [PROP.ownerB, PROP7.utilB, PROP7.propB],
+      ] as [string, string, string][]) {
+        await c.query('BEGIN');
+        await c.query('SELECT set_config($1, $2, true)', ['app.current_owner_id', ownerId]);
+        await c.query(
+          `INSERT INTO prop_utility_accounts (id, owner_id, property_id, utility_type, provider)
+           VALUES ($1, $2, $3, 'ELECTRICITY', 'T&TEC') ON CONFLICT (id) DO NOTHING`,
+          [id, ownerId, propId],
+        );
+        await c.query('COMMIT');
+      }
+    } finally { c.release(); }
+  });
+
+  afterAll(async () => {
+    if (!props7Pool) return;
+    const c = await props7Pool.connect();
+    try {
+      for (const [ownerId, propId, rows_] of [
+        [PROP.ownerA, PROP7.propA, [PROP7.utilA, PROP7.unitA, PROP7.inspA, PROP7.taxA, PROP7.insurA]],
+        [PROP.ownerB, PROP7.propB, [PROP7.utilB, PROP7.unitB, PROP7.inspB, PROP7.taxB, PROP7.insurB]],
+      ] as [string, string, string[]][]) {
+        await c.query('BEGIN');
+        await c.query('SELECT set_config($1, $2, true)', ['app.current_owner_id', ownerId]);
+        for (const [table, id] of [
+          ['prop_utility_accounts', rows_[0]],
+          ['prop_units',            rows_[1]],
+          ['prop_inspections',      rows_[2]],
+          ['prop_property_tax',     rows_[3]],
+          ['prop_insurance',        rows_[4]],
+        ] as [string, string][]) {
+          await c.query(`DELETE FROM ${table} WHERE id = $1`, [id]);
+        }
+        await c.query(`DELETE FROM prop_properties WHERE id = $1`, [propId]);
+        await c.query('COMMIT');
+      }
+    } finally { c.release(); }
+    await props7Pool.end();
+  });
+
+  // ── prop_insurance ──────────────────────────────────────────────────────────
+
+  describe('prop_insurance — owner isolation', () => {
+    it('owner A reads only their policy', async () => {
+      const client = await props7Pool.connect();
+      try {
+        const { rows } = await withOwnerRLS(client,
+          { userId: PROP.ownerA, tenantId: '', isOwner: false, ownerId: PROP.ownerA },
+          c => c.query('SELECT id FROM prop_insurance WHERE id IN ($1,$2)', [PROP7.insurA, PROP7.insurB]),
+        );
+        expect(rows.map((r: { id: string }) => r.id)).toContain(PROP7.insurA);
+        expect(rows.map((r: { id: string }) => r.id)).not.toContain(PROP7.insurB);
+      } finally { client.release(); }
+    });
+
+    it('owner B cannot read owner A policy', async () => {
+      const client = await props7Pool.connect();
+      try {
+        const { rows } = await withOwnerRLS(client,
+          { userId: PROP.ownerB, tenantId: '', isOwner: false, ownerId: PROP.ownerB },
+          c => c.query('SELECT id FROM prop_insurance WHERE id = $1', [PROP7.insurA]),
+        );
+        expect(rows).toHaveLength(0);
+      } finally { client.release(); }
+    });
+
+    it('fail-closed: no owner context returns 0 rows', async () => {
+      const fresh = new Pool({ connectionString: DB_URL_PROPS });
+      const client = await fresh.connect();
+      try {
+        await client.query('BEGIN');
+        const { rows } = await client.query(
+          'SELECT id FROM prop_insurance WHERE id IN ($1,$2)', [PROP7.insurA, PROP7.insurB],
+        );
+        await client.query('COMMIT');
+        expect(rows).toHaveLength(0);
+      } finally { client.release(); await fresh.end(); }
+    });
+
+    it('cross-owner INSERT is rejected by WITH CHECK', async () => {
+      const client = await props7Pool.connect();
+      try {
+        await expect(
+          withOwnerRLS(client,
+            { userId: PROP.ownerA, tenantId: '', isOwner: false, ownerId: PROP.ownerA },
+            c => c.query(
+              `INSERT INTO prop_insurance (id, owner_id, property_id, insurance_type, insurer)
+               VALUES ('e0000000-0000-0000-0061-999999999999', $1, $2, 'BUILDING', 'X')`,
+              [PROP.ownerB, PROP7.propA],
+            ),
+          ),
+        ).rejects.toThrow();
+      } finally { client.release(); }
+    });
+  });
+
+  // ── prop_property_tax ───────────────────────────────────────────────────────
+
+  describe('prop_property_tax — owner isolation', () => {
+    it('owner A reads only their tax record', async () => {
+      const client = await props7Pool.connect();
+      try {
+        const { rows } = await withOwnerRLS(client,
+          { userId: PROP.ownerA, tenantId: '', isOwner: false, ownerId: PROP.ownerA },
+          c => c.query('SELECT id FROM prop_property_tax WHERE id IN ($1,$2)', [PROP7.taxA, PROP7.taxB]),
+        );
+        expect(rows.map((r: { id: string }) => r.id)).toContain(PROP7.taxA);
+        expect(rows.map((r: { id: string }) => r.id)).not.toContain(PROP7.taxB);
+      } finally { client.release(); }
+    });
+
+    it('owner B cannot read owner A tax record', async () => {
+      const client = await props7Pool.connect();
+      try {
+        const { rows } = await withOwnerRLS(client,
+          { userId: PROP.ownerB, tenantId: '', isOwner: false, ownerId: PROP.ownerB },
+          c => c.query('SELECT id FROM prop_property_tax WHERE id = $1', [PROP7.taxA]),
+        );
+        expect(rows).toHaveLength(0);
+      } finally { client.release(); }
+    });
+
+    it('fail-closed: no owner context returns 0 rows', async () => {
+      const fresh = new Pool({ connectionString: DB_URL_PROPS });
+      const client = await fresh.connect();
+      try {
+        await client.query('BEGIN');
+        const { rows } = await client.query(
+          'SELECT id FROM prop_property_tax WHERE id IN ($1,$2)', [PROP7.taxA, PROP7.taxB],
+        );
+        await client.query('COMMIT');
+        expect(rows).toHaveLength(0);
+      } finally { client.release(); await fresh.end(); }
+    });
+  });
+
+  // ── prop_inspections ────────────────────────────────────────────────────────
+
+  describe('prop_inspections — owner isolation', () => {
+    it('owner A reads only their inspection', async () => {
+      const client = await props7Pool.connect();
+      try {
+        const { rows } = await withOwnerRLS(client,
+          { userId: PROP.ownerA, tenantId: '', isOwner: false, ownerId: PROP.ownerA },
+          c => c.query('SELECT id FROM prop_inspections WHERE id IN ($1,$2)', [PROP7.inspA, PROP7.inspB]),
+        );
+        expect(rows.map((r: { id: string }) => r.id)).toContain(PROP7.inspA);
+        expect(rows.map((r: { id: string }) => r.id)).not.toContain(PROP7.inspB);
+      } finally { client.release(); }
+    });
+
+    it('owner B cannot read owner A inspection', async () => {
+      const client = await props7Pool.connect();
+      try {
+        const { rows } = await withOwnerRLS(client,
+          { userId: PROP.ownerB, tenantId: '', isOwner: false, ownerId: PROP.ownerB },
+          c => c.query('SELECT id FROM prop_inspections WHERE id = $1', [PROP7.inspA]),
+        );
+        expect(rows).toHaveLength(0);
+      } finally { client.release(); }
+    });
+
+    it('fail-closed: no owner context returns 0 rows', async () => {
+      const fresh = new Pool({ connectionString: DB_URL_PROPS });
+      const client = await fresh.connect();
+      try {
+        await client.query('BEGIN');
+        const { rows } = await client.query(
+          'SELECT id FROM prop_inspections WHERE id IN ($1,$2)', [PROP7.inspA, PROP7.inspB],
+        );
+        await client.query('COMMIT');
+        expect(rows).toHaveLength(0);
+      } finally { client.release(); await fresh.end(); }
+    });
+  });
+
+  // ── prop_units ──────────────────────────────────────────────────────────────
+
+  describe('prop_units — owner isolation', () => {
+    it('owner A reads only their unit', async () => {
+      const client = await props7Pool.connect();
+      try {
+        const { rows } = await withOwnerRLS(client,
+          { userId: PROP.ownerA, tenantId: '', isOwner: false, ownerId: PROP.ownerA },
+          c => c.query('SELECT id FROM prop_units WHERE id IN ($1,$2)', [PROP7.unitA, PROP7.unitB]),
+        );
+        expect(rows.map((r: { id: string }) => r.id)).toContain(PROP7.unitA);
+        expect(rows.map((r: { id: string }) => r.id)).not.toContain(PROP7.unitB);
+      } finally { client.release(); }
+    });
+
+    it('owner B cannot read owner A unit', async () => {
+      const client = await props7Pool.connect();
+      try {
+        const { rows } = await withOwnerRLS(client,
+          { userId: PROP.ownerB, tenantId: '', isOwner: false, ownerId: PROP.ownerB },
+          c => c.query('SELECT id FROM prop_units WHERE id = $1', [PROP7.unitA]),
+        );
+        expect(rows).toHaveLength(0);
+      } finally { client.release(); }
+    });
+
+    it('fail-closed: no owner context returns 0 rows', async () => {
+      const fresh = new Pool({ connectionString: DB_URL_PROPS });
+      const client = await fresh.connect();
+      try {
+        await client.query('BEGIN');
+        const { rows } = await client.query(
+          'SELECT id FROM prop_units WHERE id IN ($1,$2)', [PROP7.unitA, PROP7.unitB],
+        );
+        await client.query('COMMIT');
+        expect(rows).toHaveLength(0);
+      } finally { client.release(); await fresh.end(); }
+    });
+  });
+
+  // ── prop_utility_accounts ───────────────────────────────────────────────────
+
+  describe('prop_utility_accounts — owner isolation', () => {
+    it('owner A reads only their utility account', async () => {
+      const client = await props7Pool.connect();
+      try {
+        const { rows } = await withOwnerRLS(client,
+          { userId: PROP.ownerA, tenantId: '', isOwner: false, ownerId: PROP.ownerA },
+          c => c.query('SELECT id FROM prop_utility_accounts WHERE id IN ($1,$2)', [PROP7.utilA, PROP7.utilB]),
+        );
+        expect(rows.map((r: { id: string }) => r.id)).toContain(PROP7.utilA);
+        expect(rows.map((r: { id: string }) => r.id)).not.toContain(PROP7.utilB);
+      } finally { client.release(); }
+    });
+
+    it('owner B cannot read owner A utility account', async () => {
+      const client = await props7Pool.connect();
+      try {
+        const { rows } = await withOwnerRLS(client,
+          { userId: PROP.ownerB, tenantId: '', isOwner: false, ownerId: PROP.ownerB },
+          c => c.query('SELECT id FROM prop_utility_accounts WHERE id = $1', [PROP7.utilA]),
+        );
+        expect(rows).toHaveLength(0);
+      } finally { client.release(); }
+    });
+
+    it('fail-closed: no owner context returns 0 rows', async () => {
+      const fresh = new Pool({ connectionString: DB_URL_PROPS });
+      const client = await fresh.connect();
+      try {
+        await client.query('BEGIN');
+        const { rows } = await client.query(
+          'SELECT id FROM prop_utility_accounts WHERE id IN ($1,$2)', [PROP7.utilA, PROP7.utilB],
+        );
+        await client.query('COMMIT');
+        expect(rows).toHaveLength(0);
+      } finally { client.release(); await fresh.end(); }
+    });
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// STD-01: No cross-database FK constraints
+// ─────────────────────────────────────────────────────────────────────────────
+
 describeNoCrossDbFk('STD-01: No cross-database FK constraints', () => {
   it('fam_personal_vehicles accepts ims_item_id that does not exist in jag_commercial', async () => {
     const famPool = new Pool({ connectionString: DB_URL_FAMILY });

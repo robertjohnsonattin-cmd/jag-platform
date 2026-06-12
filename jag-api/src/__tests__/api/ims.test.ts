@@ -154,6 +154,99 @@ describe('IMS endpoints', () => {
     });
   });
 
+  // ── Vehicles — STD-13 dual-write (owner_entity ↔ fleet_type) ───────────────
+  describe('POST + PATCH /api/v1/ims/vehicles — STD-13 dual-write', () => {
+    let createdVehicleId: string;
+
+    it('POST creates vehicle with owner_entity and fleet_type in sync', async () => {
+      if (!hasDb) return;
+      const res = await request(app)
+        .post('/api/v1/ims/vehicles')
+        .set('Authorization', 'Bearer mock')
+        .send({
+          name:                'STD-13 Test Truck',
+          owner_entity:        'JABCO',
+          registration_number: 'T13-0001',
+          make:                'Toyota',
+          model:               'Hilux',
+          year:                2022,
+          vehicle_type:        'TRUCK',
+          fuel_type:           'DIESEL',
+          service_interval_days: 90,
+        });
+      expect(res.status).toBe(201);
+      createdVehicleId = res.body.data?.vehicle_id;
+      expect(createdVehicleId).toBeTruthy();
+    });
+
+    it('GET returns matching owner_entity and fleet_type after POST', async () => {
+      if (!hasDb || !createdVehicleId) return;
+      const res = await request(app)
+        .get('/api/v1/ims/vehicles')
+        .set('Authorization', 'Bearer mock')
+        .query({ registration_number: 'T13-0001' });
+      expect(res.status).toBe(200);
+      const v = res.body.data?.vehicles?.[0];
+      expect(v).toBeTruthy();
+      expect(v.owner_entity).toBe('JABCO');
+      expect(v.fleet_type).toBe('JABCO');
+    });
+
+    it('PATCH owner_entity also updates fleet_type (STD-13 dual-write)', async () => {
+      if (!hasDb || !createdVehicleId) return;
+      const patchRes = await request(app)
+        .patch(`/api/v1/ims/vehicles/${createdVehicleId}`)
+        .set('Authorization', 'Bearer mock')
+        .send({ owner_entity: 'JAG Properties' });
+      expect(patchRes.status).toBe(200);
+
+      const getRes = await request(app)
+        .get('/api/v1/ims/vehicles')
+        .set('Authorization', 'Bearer mock')
+        .query({ registration_number: 'T13-0001' });
+      expect(getRes.status).toBe(200);
+      const v = getRes.body.data?.vehicles?.[0];
+      expect(v.owner_entity).toBe('JAG Properties');
+      expect(v.fleet_type).toBe('JAG Properties');
+    });
+
+    it('PATCH colour updates ims_vehicles (colour column on vehicle row, not item row)', async () => {
+      if (!hasDb || !createdVehicleId) return;
+      const patchRes = await request(app)
+        .patch(`/api/v1/ims/vehicles/${createdVehicleId}`)
+        .set('Authorization', 'Bearer mock')
+        .send({ colour: 'Red' });
+      expect(patchRes.status).toBe(200);
+
+      const getRes = await request(app)
+        .get('/api/v1/ims/vehicles')
+        .set('Authorization', 'Bearer mock')
+        .query({ registration_number: 'T13-0001' });
+      expect(getRes.status).toBe(200);
+      const v = getRes.body.data?.vehicles?.[0];
+      expect(v.colour).toBe('Red');
+    });
+
+    afterAll(async () => {
+      if (!hasDb || !createdVehicleId) return;
+      const pool = new Pool({ connectionString: process.env.DATABASE_URL_COMMERCIAL });
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        await client.query("SELECT set_config('app.current_tenant_id', $1, true)", [TEST_TENANT_ID]);
+        const itemRow = await client.query(
+          `SELECT item_id FROM ims_vehicles WHERE id = $1`, [createdVehicleId],
+        );
+        await client.query(`DELETE FROM ims_vehicles WHERE id = $1`, [createdVehicleId]);
+        if (itemRow.rows[0]) {
+          await client.query(`DELETE FROM ims_items WHERE id = $1`, [itemRow.rows[0].item_id]);
+        }
+        await client.query('COMMIT');
+      } catch { await client.query('ROLLBACK'); }
+      finally { client.release(); await pool.end(); }
+    });
+  });
+
   // ── Cleanup ─────────────────────────────────────────────────────────────────
   afterAll(async () => {
     if (!hasDb || !createdItemId) return;
