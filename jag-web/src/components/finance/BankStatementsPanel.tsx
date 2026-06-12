@@ -1,7 +1,21 @@
-import { useRef, useState } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useCallback, useRef, useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { financeApi } from '../../api/finance'
 import type { BankStatementJob, BankStatementJobStatus } from '../../types/finance'
+
+// ── Types ─────────────────────────────────────────────────────────────────────
+
+type UploadState = 'idle' | 'uploading' | 'done' | 'error'
+
+interface StagedFile {
+  key: string       // unique local key
+  file: File
+  accountId: string
+  state: UploadState
+  errorMsg: string | null
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 const STATUS_STYLES: Record<BankStatementJobStatus, string> = {
   PENDING:    'bg-yellow-500/20 text-yellow-300',
@@ -16,113 +30,227 @@ function fmt(dt: string | null) {
   return new Date(dt).toLocaleString('en-TT', { dateStyle: 'short', timeStyle: 'short' })
 }
 
+function fmtBytes(n: number) {
+  if (n < 1024) return `${n} B`
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`
+}
+
+const ALLOWED_EXTS = ['.pdf', '.csv', '.txt']
+
+function isAllowed(f: File) {
+  const ext = f.name.slice(f.name.lastIndexOf('.')).toLowerCase()
+  return ALLOWED_EXTS.includes(ext)
+}
+
+// ── Component ─────────────────────────────────────────────────────────────────
+
 export default function BankStatementsPanel() {
   const qc = useQueryClient()
-  const fileRef = useRef<HTMLInputElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
 
-  const [accountId, setAccountId] = useState('')
-  const [file, setFile]           = useState<File | null>(null)
-  const [uploadErr, setUploadErr] = useState<string | null>(null)
+  const [staged, setStaged]     = useState<StagedFile[]>([])
+  const [dragging, setDragging] = useState(false)
+  const [uploading, setUploading] = useState(false)
 
   const { data: accounts = [] } = useQuery({
     queryKey: ['finance-accounts'],
     queryFn: () => financeApi.getAccounts({ is_active: 'true' }),
   })
 
-  const { data: jobs = [], isLoading } = useQuery({
+  const { data: jobs = [], isLoading: jobsLoading } = useQuery({
     queryKey: ['bank-statement-jobs'],
-    queryFn: () => financeApi.getBankStatementJobs({ limit: 50 }),
+    queryFn: () => financeApi.getBankStatementJobs({ limit: 100 }),
     refetchInterval: (query) => {
       const data = query.state.data as BankStatementJob[] | undefined
-      const hasActive = data?.some(j => j.status === 'PENDING' || j.status === 'PROCESSING')
-      return hasActive ? 10_000 : false
+      return data?.some(j => j.status === 'PENDING' || j.status === 'PROCESSING') ? 10_000 : false
     },
   })
 
-  const upload = useMutation({
-    mutationFn: () => {
-      if (!file || !accountId) throw new Error('Select an account and file first.')
-      const idem = `upload:${accountId}:${file.name}:${file.size}:${Date.now()}`
-      return financeApi.uploadBankStatement(file, accountId, idem)
-    },
-    onSuccess: () => {
-      setFile(null)
-      setUploadErr(null)
-      if (fileRef.current) fileRef.current.value = ''
-      qc.invalidateQueries({ queryKey: ['bank-statement-jobs'] })
-    },
-    onError: (e: Error) => setUploadErr(e.message),
-  })
+  // ── Staging ────────────────────────────────────────────────────────────────
 
-  const requeue = useMutation({
-    mutationFn: (id: string) => financeApi.requeueBankStatementJob(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['bank-statement-jobs'] }),
-  })
+  const addFiles = useCallback((files: FileList | File[]) => {
+    const arr = Array.from(files).filter(isAllowed)
+    if (!arr.length) return
+    setStaged(prev => {
+      const existing = new Set(prev.map(s => s.file.name + s.file.size))
+      const fresh = arr
+        .filter(f => !existing.has(f.name + f.size))
+        .map(f => ({
+          key: `${f.name}-${f.size}-${Date.now()}-${Math.random()}`,
+          file: f,
+          accountId: '',
+          state: 'idle' as UploadState,
+          errorMsg: null,
+        }))
+      return [...prev, ...fresh]
+    })
+  }, [])
 
-  const inp = 'bg-slate-700 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500'
+  const onDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    setDragging(false)
+    addFiles(e.dataTransfer.files)
+  }, [addFiles])
+
+  const onInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files?.length) addFiles(e.target.files)
+    e.target.value = ''
+  }
+
+  const removeStaged = (key: string) =>
+    setStaged(prev => prev.filter(s => s.key !== key))
+
+  const setAccount = (key: string, accountId: string) =>
+    setStaged(prev => prev.map(s => s.key === key ? { ...s, accountId } : s))
+
+  // ── Upload all ─────────────────────────────────────────────────────────────
+
+  const uploadAll = async () => {
+    const ready = staged.filter(s => s.accountId && s.state === 'idle')
+    if (!ready.length) return
+    setUploading(true)
+
+    await Promise.all(ready.map(async (s) => {
+      setStaged(prev => prev.map(x => x.key === s.key ? { ...x, state: 'uploading' } : x))
+      try {
+        const idem = `upload:${s.accountId}:${s.file.name}:${s.file.size}:${Date.now()}`
+        await financeApi.uploadBankStatement(s.file, s.accountId, idem)
+        setStaged(prev => prev.map(x => x.key === s.key ? { ...x, state: 'done' } : x))
+      } catch (e) {
+        setStaged(prev => prev.map(x =>
+          x.key === s.key ? { ...x, state: 'error', errorMsg: (e as Error).message } : x
+        ))
+      }
+    }))
+
+    setUploading(false)
+    qc.invalidateQueries({ queryKey: ['bank-statement-jobs'] })
+  }
+
+  const clearDone = () => setStaged(prev => prev.filter(s => s.state !== 'done'))
+
+  // ── Derived ────────────────────────────────────────────────────────────────
+
+  const readyCount   = staged.filter(s => s.accountId && s.state === 'idle').length
+  const unassigned   = staged.filter(s => !s.accountId && s.state === 'idle').length
+  const doneCount    = staged.filter(s => s.state === 'done').length
+  const errorCount   = staged.filter(s => s.state === 'error').length
+
+  const inp = 'bg-slate-700 border border-slate-600 rounded px-2 py-1 text-xs text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500'
+
+  // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
     <div className="space-y-6">
 
-      {/* ── Upload section ── */}
-      <div className="bg-slate-800 border border-slate-700 rounded-lg p-5">
-        <h2 className="text-sm font-semibold text-slate-200 mb-4">Upload Bank Statement</h2>
-        <p className="text-xs text-slate-400 mb-4">
-          Accepted formats: PDF, CSV, TXT (max 20 MB). The Ollama batch processor runs nightly at
-          02:00 and will parse uploaded statements automatically.
+      {/* ── Drop zone ── */}
+      <div
+        className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors ${
+          dragging ? 'border-blue-400 bg-blue-500/10' : 'border-slate-600 hover:border-slate-500'
+        }`}
+        onDragOver={e => { e.preventDefault(); setDragging(true) }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={onDrop}
+        onClick={() => inputRef.current?.click()}
+      >
+        <input
+          ref={inputRef}
+          type="file"
+          multiple
+          accept=".pdf,.csv,.txt"
+          className="hidden"
+          onChange={onInputChange}
+        />
+        <p className="text-slate-300 text-sm font-medium">
+          {dragging ? 'Drop files here' : 'Drag & drop bank statements here, or click to browse'}
         </p>
-
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <div className="sm:col-span-1">
-            <label className="block text-xs text-slate-400 mb-1">Account</label>
-            <select
-              className={`w-full ${inp}`}
-              value={accountId}
-              onChange={e => setAccountId(e.target.value)}
-            >
-              <option value="">— select account —</option>
-              {accounts.map(a => (
-                <option key={a.id} value={a.id}>{a.account_name} ({a.institution_name})</option>
-              ))}
-            </select>
-          </div>
-
-          <div className="sm:col-span-1">
-            <label className="block text-xs text-slate-400 mb-1">File</label>
-            <input
-              ref={fileRef}
-              type="file"
-              accept=".pdf,.csv,.txt"
-              className={`w-full ${inp} file:mr-2 file:py-0.5 file:px-2 file:rounded file:border-0 file:bg-slate-600 file:text-slate-200 file:text-xs cursor-pointer`}
-              onChange={e => setFile(e.target.files?.[0] ?? null)}
-            />
-          </div>
-
-          <div className="flex items-end">
-            <button
-              className="w-full px-4 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded text-sm font-medium transition-colors"
-              disabled={!accountId || !file || upload.isPending}
-              onClick={() => upload.mutate()}
-            >
-              {upload.isPending ? 'Uploading…' : 'Upload'}
-            </button>
-          </div>
-        </div>
-
-        {uploadErr && (
-          <p className="mt-2 text-xs text-red-400">{uploadErr}</p>
-        )}
-        {upload.isSuccess && (
-          <p className="mt-2 text-xs text-green-400">
-            Statement uploaded. Job queued — Ollama will process it tonight at 02:00.
-          </p>
-        )}
+        <p className="text-slate-500 text-xs mt-1">PDF, CSV, TXT — up to 20 MB each — multiple files supported</p>
       </div>
 
-      {/* ── Jobs table ── */}
+      {/* ── Staging queue ── */}
+      {staged.length > 0 && (
+        <div className="bg-slate-800 border border-slate-700 rounded-lg overflow-hidden">
+          <div className="px-4 py-3 border-b border-slate-700 flex items-center justify-between gap-4">
+            <div className="flex items-center gap-3 text-xs text-slate-400">
+              <span>{staged.length} file{staged.length !== 1 ? 's' : ''}</span>
+              {unassigned > 0 && <span className="text-yellow-400">{unassigned} need account assignment</span>}
+              {doneCount  > 0 && <span className="text-green-400">{doneCount} uploaded</span>}
+              {errorCount > 0 && <span className="text-red-400">{errorCount} failed</span>}
+            </div>
+            <div className="flex items-center gap-2">
+              {doneCount > 0 && (
+                <button
+                  className="text-xs text-slate-400 hover:text-slate-200 transition-colors"
+                  onClick={clearDone}
+                >
+                  Clear done
+                </button>
+              )}
+              <button
+                className="px-4 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 rounded text-xs font-medium transition-colors"
+                disabled={readyCount === 0 || uploading}
+                onClick={uploadAll}
+              >
+                {uploading ? 'Uploading…' : `Upload ${readyCount > 0 ? readyCount : 'All'}`}
+              </button>
+            </div>
+          </div>
+
+          <div className="divide-y divide-slate-700/50">
+            {staged.map(s => (
+              <div key={s.key} className="px-4 py-2 flex items-center gap-3">
+
+                {/* Status icon */}
+                <div className="w-5 flex-shrink-0 text-center">
+                  {s.state === 'idle'      && <span className="text-slate-500 text-xs">○</span>}
+                  {s.state === 'uploading' && <span className="text-blue-400 text-xs animate-pulse">↑</span>}
+                  {s.state === 'done'      && <span className="text-green-400 text-xs">✓</span>}
+                  {s.state === 'error'     && <span className="text-red-400 text-xs">✗</span>}
+                </div>
+
+                {/* File name + size */}
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm text-slate-200 truncate" title={s.file.name}>{s.file.name}</p>
+                  {s.errorMsg
+                    ? <p className="text-xs text-red-400 truncate">{s.errorMsg}</p>
+                    : <p className="text-xs text-slate-500">{fmtBytes(s.file.size)}</p>
+                  }
+                </div>
+
+                {/* Account selector */}
+                <select
+                  className={`w-52 flex-shrink-0 ${inp} ${!s.accountId && s.state === 'idle' ? 'border-yellow-600' : ''}`}
+                  value={s.accountId}
+                  disabled={s.state !== 'idle'}
+                  onChange={e => setAccount(s.key, e.target.value)}
+                >
+                  <option value="">— assign account —</option>
+                  {accounts.map(a => (
+                    <option key={a.id} value={a.id}>{a.account_name} · {a.institution_name}</option>
+                  ))}
+                </select>
+
+                {/* Remove */}
+                {s.state === 'idle' && (
+                  <button
+                    className="text-slate-500 hover:text-red-400 transition-colors text-sm flex-shrink-0"
+                    onClick={() => removeStaged(s.key)}
+                    title="Remove"
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── Jobs history ── */}
       <div className="bg-slate-800 border border-slate-700 rounded-lg overflow-hidden">
         <div className="px-5 py-3 border-b border-slate-700 flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-slate-200">Processing Jobs</h2>
+          <h2 className="text-sm font-semibold text-slate-200">Processing History</h2>
           <button
             className="text-xs text-slate-400 hover:text-slate-200 transition-colors"
             onClick={() => qc.invalidateQueries({ queryKey: ['bank-statement-jobs'] })}
@@ -131,17 +259,17 @@ export default function BankStatementsPanel() {
           </button>
         </div>
 
-        {isLoading && (
+        {jobsLoading && (
           <p className="text-sm text-slate-400 px-5 py-6">Loading…</p>
         )}
 
-        {!isLoading && jobs.length === 0 && (
+        {!jobsLoading && jobs.length === 0 && (
           <p className="text-sm text-slate-400 px-5 py-6">
-            No jobs yet. Upload a statement above to get started.
+            No jobs yet — drop some files above to get started.
           </p>
         )}
 
-        {!isLoading && jobs.length > 0 && (
+        {!jobsLoading && jobs.length > 0 && (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
@@ -186,9 +314,12 @@ export default function BankStatementsPanel() {
                       <td className="px-4 py-2 text-right">
                         {job.status === 'FAILED' && (
                           <button
-                            className="text-xs text-blue-400 hover:text-blue-300 disabled:opacity-50 transition-colors"
-                            disabled={requeue.isPending}
-                            onClick={() => requeue.mutate(job.id)}
+                            className="text-xs text-blue-400 hover:text-blue-300 transition-colors"
+                            onClick={() =>
+                              financeApi.requeueBankStatementJob(job.id).then(() =>
+                                qc.invalidateQueries({ queryKey: ['bank-statement-jobs'] })
+                              )
+                            }
                           >
                             Requeue
                           </button>
@@ -203,11 +334,10 @@ export default function BankStatementsPanel() {
         )}
       </div>
 
-      {/* ── Info box ── */}
+      {/* ── Info ── */}
       <div className="bg-slate-800/50 border border-slate-700 rounded-lg p-4 text-xs text-slate-400 space-y-1">
-        <p><span className="text-slate-200 font-medium">How it works:</span> After uploading, the Ollama AI batch processor runs at 02:00 each morning.</p>
-        <p>It downloads the file, extracts transaction data using the local <span className="text-slate-200">llama3.2</span> model, and writes parsed transactions to Finance → Transactions with <span className="text-slate-200">is_pending_review = true</span>.</p>
-        <p>Review and confirm parsed transactions in the Transactions tab. To process immediately, run the batch manually from PowerShell:</p>
+        <p><span className="text-slate-200 font-medium">How it works:</span> Uploaded files are queued and processed by the local Ollama AI batch at 02:00 each morning.</p>
+        <p>Parsed transactions land in Finance → Transactions marked for review. To run immediately:</p>
         <code className="block bg-slate-900 rounded px-3 py-1.5 text-slate-300 mt-1">
           Start-ScheduledTask -TaskName "JAG-Ollama-Batch"
         </code>
