@@ -358,7 +358,9 @@ Step 6 (ZAP baseline) fires automatically when `ZAP_SCAN_PASSWORD` env var is se
 - ~~**Stale net worth snapshot (11 Jun)**~~ — **FIXED 2026-06-12**: snapshot captured property valuations of `JAG Properties Management` and `62 Ariapita Avenue` before they were cleared; deleted stale rows; fresh snapshot regenerated — consolidated NW now $12,207,370.50 ✓
 - **WebAuthn device registration** — PENDING for all 3 users (Robert, Brian, Wife); requires in-person browser session at `https://auth.jagcorporate.com/realms/jag/account`
 - **Ollama** — deferred; set `DRY_RUN=false` + `ollama pull llama3.2` when ready
-- **Data population** — B3 Leases (new leases needed — all expired), A2 Chart of Accounts, A3 FX Rates not yet populated in production
+- ~~**Chart of Accounts (A2)**~~ — **DONE 2026-06-12**: 150 accounts across 7 entities seeded via `migration/coa-populate.js`; GL route fix (23505 error code) committed `621a976`
+- ~~**FX Rates (A3)**~~ — **DONE 2026-06-12**: `jag-infra/scripts/fx-rates-sync.sh` seeds rates from open.er-api.com daily at 06:00 TT via VM cron; today's seed: 1 USD = 6.7829 TTD, 1 CNY = 0.9993 TTD
+- **Leases (B3)** — PENDING: all leases expired; need monthly rent amounts per unit from Robert to create new leases
 - **JAG Plantations / JAG Trading** — future phases; placeholder pages exist in frontend
 - ~~**JAG Entertainment UI** — BAR + Members Club frontend not yet built~~ **DONE**
 - ~~**DragonBridge UI** — China sourcing / forex frontend not yet built~~ **DONE**
