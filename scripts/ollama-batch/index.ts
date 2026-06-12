@@ -37,7 +37,7 @@ import { Client as MinioClient } from 'minio';
 // ── Config ────────────────────────────────────────────────────────────────────
 
 function loadEnv(): void {
-  const envFile = path.resolve(__dirname, '.env.ollama-batch');
+  const envFile = path.resolve(__dirname, '..', '.env.ollama-batch');
   if (!fs.existsSync(envFile)) return;
   const lines = fs.readFileSync(envFile, 'utf8').split('\n');
   for (const line of lines) {

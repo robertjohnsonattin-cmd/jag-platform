@@ -12,12 +12,16 @@ $TaskName    = "JAG-Ollama-Batch"
 $Description = "JAG Holdings - nightly bank statement AI processing via Ollama"
 
 # Resolve paths relative to this script's location
-$ScriptDir  = Split-Path -Parent $MyInvocation.MyCommand.Path
-$NodeExe    = (Get-Command node -ErrorAction Stop).Source
-$ScriptPath = Join-Path $ScriptDir "dist\index.js"
+$ScriptDir    = Split-Path -Parent $MyInvocation.MyCommand.Path
+$RunScript    = Join-Path $ScriptDir "run-batch.ps1"
+$CompiledBatch = Join-Path $ScriptDir "dist\index.js"
 
-if (-not (Test-Path $ScriptPath)) {
-  Write-Error "Compiled script not found at $ScriptPath. Run 'npm run build:batch' from jag-api first."
+if (-not (Test-Path $RunScript)) {
+  Write-Error "run-batch.ps1 not found at $RunScript."
+  exit 1
+}
+if (-not (Test-Path $CompiledBatch)) {
+  Write-Error "Compiled batch not found at $CompiledBatch. Run 'npm run build:batch' from jag-api first."
   exit 1
 }
 
@@ -30,10 +34,11 @@ if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
 # Trigger: daily at 02:00
 $Trigger = New-ScheduledTaskTrigger -Daily -At "02:00"
 
-# Action: node dist\index.js with working directory set so .env.ollama-batch is found
+# Action: powershell.exe runs run-batch.ps1 (which opens SSH tunnel then runs node)
+$PwshExe = (Get-Command powershell.exe).Source
 $Action = New-ScheduledTaskAction `
-  -Execute $NodeExe `
-  -Argument "`"$ScriptPath`"" `
+  -Execute $PwshExe `
+  -Argument "-NonInteractive -ExecutionPolicy Bypass -File `"$RunScript`"" `
   -WorkingDirectory $ScriptDir
 
 # Settings: run whether logged on or not; wake to run; 30-min timeout
@@ -56,12 +61,14 @@ Register-ScheduledTask `
 Write-Host ""
 Write-Host "Task '$TaskName' registered successfully."
 Write-Host "  Schedule : Daily at 02:00"
-Write-Host "  Runs     : $NodeExe `"$ScriptPath`""
+Write-Host "  Launcher : run-batch.ps1 (opens SSH tunnel, runs batch, closes tunnel)"
 Write-Host "  WorkDir  : $ScriptDir"
 Write-Host ""
-Write-Host "To test immediately (dry run first - set DRY_RUN=true in .env.ollama-batch):"
+Write-Host "To test immediately:"
 Write-Host "  Start-ScheduledTask -TaskName '$TaskName'"
 Write-Host ""
 Write-Host "To check last run result:"
 Write-Host "  (Get-ScheduledTaskInfo -TaskName '$TaskName').LastTaskResult"
 Write-Host "  0 = success"
+Write-Host ""
+Write-Host "Logs written to: $ScriptDir\run-batch.log"
