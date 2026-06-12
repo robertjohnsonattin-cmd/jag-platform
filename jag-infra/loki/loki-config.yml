@@ -61,7 +61,6 @@ ingester:
     final_sleep: 0s
   chunk_idle_period:     5m
   chunk_retain_period:   30s
-  max_transfer_retries:  0
   flush_check_period:    1m
 
 query_range:
