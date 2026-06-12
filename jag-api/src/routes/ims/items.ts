@@ -1,16 +1,31 @@
-// GET  /api/v1/ims/locations
-// GET  /api/v1/ims/categories
-// GET  /api/v1/ims/items
-// GET  /api/v1/ims/items/:id
-// POST /api/v1/ims/items
-// PATCH /api/v1/ims/items/:id
+// GET    /api/v1/ims/locations
+// GET    /api/v1/ims/categories
+// GET    /api/v1/ims/items
+// GET    /api/v1/ims/items/:id
+// POST   /api/v1/ims/items
+// PATCH  /api/v1/ims/items/:id
+// DELETE /api/v1/ims/items/:id  (Owner only — hard delete if no movements/depreciation)
 
 import { Router, type Request, type Response, type NextFunction } from 'express';
+import multer from 'multer';
 import { z } from 'zod';
 import { withTenantRLS } from '../../middleware/rls';
 import { commercialPool, corePool } from '../../db/index';
 import { logger } from '../../lib/logger';
 import { ok, err } from '../../lib/response';
+import {
+  minioClient, ensureBucket, mediaObjectKey,
+  getObjectStream, getObjectStat, deleteObject,
+  BUCKET_PHOTOS,
+} from '../../lib/minio';
+
+const photoUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB
+  fileFilter: (_req, file, cb) => {
+    cb(null, ['image/jpeg', 'image/png', 'image/webp'].includes(file.mimetype));
+  },
+});
 
 export const imsItemsRouter = Router();
 
@@ -80,6 +95,35 @@ imsItemsRouter.get('/locations', async (req: Request, res: Response, next: NextF
       );
       logger.info({ entity: 'IMS', action: 'LOCATIONS_LIST', user_id: req.rlsCtx.userId, tenant_id: req.rlsCtx.tenantId });
       ok(res, rows);
+    } finally { client.release(); }
+  } catch (e) { next(e); }
+});
+
+// ── POST /locations ───────────────────────────────────────────────────────────
+
+const CreateLocationSchema = z.object({
+  name: z.string().min(1).max(200),
+  code: z.string().min(1).max(50).regex(/^[A-Z0-9_]+$/, 'Code must be uppercase letters, digits, underscores'),
+  address: z.string().max(500).optional(),
+}).strict();
+
+imsItemsRouter.post('/locations', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const parsed = CreateLocationSchema.safeParse(req.body);
+    if (!parsed.success) { err(res, 422, 'VALIDATION_ERROR', 'Request body validation failed.'); return; }
+    const { name, code, address } = parsed.data;
+    const { tenantId, userId } = req.rlsCtx;
+    const client = await commercialPool.connect();
+    try {
+      const row = await withTenantRLS(client, req.rlsCtx, (c) =>
+        c.query(
+          `INSERT INTO ims_locations (tenant_id, code, name, address, last_modified_by)
+           VALUES ($1,$2,$3,$4,$5) RETURNING id, code, name, address, is_active, created_at`,
+          [tenantId, code, name, address ?? null, userId],
+        ).then(r => r.rows[0]),
+      );
+      logger.info({ entity: 'IMS', action: 'LOCATION_CREATED', user_id: userId, tenant_id: tenantId, record_id: row.id });
+      ok(res, row, 201);
     } finally { client.release(); }
   } catch (e) { next(e); }
 });
@@ -289,6 +333,295 @@ imsItemsRouter.post('/items', async (req: Request, res: Response, next: NextFunc
   } catch (e) { next(e); }
 });
 
+// ── GET /items/low-stock ─────────────────────────────────────────────────────
+
+imsItemsRouter.get('/items/low-stock', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const client = await commercialPool.connect();
+    try {
+      const rows = await withTenantRLS(client, req.rlsCtx, (c) =>
+        c.query(
+          `SELECT i.id, i.name, i.sku, i.unit_of_measure,
+                  i.quantity_on_hand, i.reorder_point, i.unit_value,
+                  i.condition, i.is_asset, i.last_modified_at,
+                  l.name  AS location_name, l.code AS location_code,
+                  cat.name AS category_name,
+                  COALESCE(
+                    json_agg(DISTINCT jsonb_build_object('id', t.id, 'name', t.name, 'color', t.color))
+                    FILTER (WHERE t.id IS NOT NULL),
+                    '[]'
+                  ) AS tags
+           FROM   ims_items i
+           JOIN   ims_locations  l   ON l.id   = i.location_id
+           LEFT JOIN ims_categories cat ON cat.id = i.category_id
+           LEFT JOIN ims_item_tags   it ON it.item_id = i.id
+           LEFT JOIN ims_tags        t  ON t.id = it.tag_id
+           WHERE  i.is_active = true
+             AND  i.reorder_point IS NOT NULL
+             AND  i.quantity_on_hand <= i.reorder_point
+           GROUP BY i.id, l.name, l.code, cat.name
+           ORDER BY (i.quantity_on_hand - i.reorder_point) ASC, i.name ASC`,
+        ).then(r => r.rows),
+      );
+      logger.info({ entity: 'IMS', action: 'LOW_STOCK_LIST', user_id: req.rlsCtx.userId, tenant_id: req.rlsCtx.tenantId, count: rows.length });
+      ok(res, rows);
+    } finally { client.release(); }
+  } catch (e) { next(e); }
+});
+
+// ── POST /items/:id/barcodes ──────────────────────────────────────────────────
+
+const AddBarcodeSchema = z.object({
+  barcode_value: z.string().min(1).max(100),
+  barcode_type:  z.enum(['EAN13', 'EAN8', 'UPC_A', 'CODE128', 'QR', 'CUSTOM']).default('CODE128'),
+  is_primary:    z.boolean().default(false),
+}).strict();
+
+imsItemsRouter.post('/items/:id/barcodes', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const idParsed = UUIDParam.safeParse(req.params);
+    if (!idParsed.success) { err(res, 422, 'VALIDATION_ERROR', 'Item ID must be a valid UUID.'); return; }
+
+    const bodyParsed = AddBarcodeSchema.safeParse(req.body);
+    if (!bodyParsed.success) { err(res, 422, 'VALIDATION_ERROR', 'Request body validation failed.'); return; }
+
+    const { id } = idParsed.data;
+    const body   = bodyParsed.data;
+    const { userId, tenantId } = req.rlsCtx;
+
+    const client = await commercialPool.connect();
+    try {
+      const barcode = await withTenantRLS(client, req.rlsCtx, async (c) => {
+        const item = await c.query('SELECT id FROM ims_items WHERE id = $1 AND is_active = true', [id]);
+        if (item.rows.length === 0) return null;
+
+        if (body.is_primary) {
+          await c.query('UPDATE ims_barcodes SET is_primary = false WHERE item_id = $1', [id]);
+        }
+
+        return c.query(
+          `INSERT INTO ims_barcodes (tenant_id, item_id, barcode_value, barcode_type, is_primary)
+           VALUES ($1, $2, $3, $4, $5) RETURNING id, barcode_value, barcode_type, is_primary`,
+          [tenantId, id, body.barcode_value, body.barcode_type, body.is_primary],
+        ).then(r => r.rows[0]);
+      });
+
+      if (!barcode) { err(res, 404, 'ITEM_NOT_FOUND', 'Item not found.'); return; }
+      logger.info({ entity: 'IMS', action: 'BARCODE_ADDED', user_id: userId, tenant_id: tenantId, record_id: id });
+      ok(res, barcode, 201);
+    } finally { client.release(); }
+  } catch (e) { next(e); }
+});
+
+// ── DELETE /items/:id/barcodes/:barcodeId ─────────────────────────────────────
+
+const BarcodeParams = z.object({ id: z.string().uuid(), barcodeId: z.string().uuid() });
+
+imsItemsRouter.delete('/items/:id/barcodes/:barcodeId', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const parsed = BarcodeParams.safeParse(req.params);
+    if (!parsed.success) { err(res, 422, 'VALIDATION_ERROR', 'Invalid parameters.'); return; }
+
+    const { id, barcodeId } = parsed.data;
+    const { userId, tenantId } = req.rlsCtx;
+
+    const client = await commercialPool.connect();
+    try {
+      const deleted = await withTenantRLS(client, req.rlsCtx, (c) =>
+        c.query(
+          'DELETE FROM ims_barcodes WHERE id = $1 AND item_id = $2 RETURNING id',
+          [barcodeId, id],
+        ).then(r => r.rows[0] ?? null),
+      );
+      if (!deleted) { err(res, 404, 'BARCODE_NOT_FOUND', 'Barcode not found.'); return; }
+      logger.info({ entity: 'IMS', action: 'BARCODE_DELETED', user_id: userId, tenant_id: tenantId, record_id: barcodeId });
+      ok(res, { deleted: true });
+    } finally { client.release(); }
+  } catch (e) { next(e); }
+});
+
+// ── GET /items/:id/photos ─────────────────────────────────────────────────────
+
+imsItemsRouter.get('/items/:id/photos', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const parsed = UUIDParam.safeParse(req.params);
+    if (!parsed.success) { err(res, 422, 'VALIDATION_ERROR', 'Invalid item ID.'); return; }
+
+    const client = await commercialPool.connect();
+    try {
+      const rows = await withTenantRLS(client, req.rlsCtx, (c) =>
+        c.query(
+          `SELECT id, storage_path, is_primary, created_at
+           FROM   ims_photos WHERE item_id = $1 ORDER BY is_primary DESC, created_at ASC`,
+          [parsed.data.id],
+        ).then(r => r.rows),
+      );
+      ok(res, rows);
+    } finally { client.release(); }
+  } catch (e) { next(e); }
+});
+
+// ── POST /items/:id/photos ────────────────────────────────────────────────────
+
+imsItemsRouter.post(
+  '/items/:id/photos',
+  photoUpload.single('photo'),
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const parsed = UUIDParam.safeParse(req.params);
+      if (!parsed.success) { err(res, 422, 'VALIDATION_ERROR', 'Invalid item ID.'); return; }
+      if (!req.file) { err(res, 422, 'NO_FILE', 'No photo attached. Use field name "photo".'); return; }
+
+      const { id } = parsed.data;
+      const { userId, tenantId, ownerId } = req.rlsCtx;
+      const isPrimary = req.body?.is_primary === 'true';
+
+      const key = mediaObjectKey(ownerId, 'ims', id, req.file.originalname);
+
+      await ensureBucket(BUCKET_PHOTOS);
+      await minioClient.putObject(
+        BUCKET_PHOTOS, key, req.file.buffer, req.file.size,
+        { 'Content-Type': req.file.mimetype },
+      );
+
+      const client = await commercialPool.connect();
+      try {
+        const photo = await withTenantRLS(client, req.rlsCtx, async (c) => {
+          const item = await c.query('SELECT id FROM ims_items WHERE id = $1', [id]);
+          if (item.rows.length === 0) return null;
+
+          if (isPrimary) {
+            await c.query('UPDATE ims_photos SET is_primary = false WHERE item_id = $1', [id]);
+          }
+
+          return c.query(
+            `INSERT INTO ims_photos (tenant_id, item_id, storage_path, is_primary, uploaded_by)
+             VALUES ($1, $2, $3, $4, $5) RETURNING id, storage_path, is_primary, created_at`,
+            [tenantId, id, key, isPrimary, userId],
+          ).then(r => r.rows[0]);
+        });
+
+        if (!photo) {
+          await deleteObject(BUCKET_PHOTOS, key).catch(() => {});
+          err(res, 404, 'ITEM_NOT_FOUND', 'Item not found.'); return;
+        }
+
+        logger.info({ entity: 'IMS', action: 'PHOTO_UPLOADED', user_id: userId, tenant_id: tenantId, record_id: id });
+        ok(res, photo, 201);
+      } finally { client.release(); }
+    } catch (e) { next(e); }
+  },
+);
+
+// ── GET /items/:id/photos/:photoId/download ───────────────────────────────────
+
+const PhotoParams = z.object({ id: z.string().uuid(), photoId: z.string().uuid() });
+
+imsItemsRouter.get('/items/:id/photos/:photoId/download', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const parsed = PhotoParams.safeParse(req.params);
+    if (!parsed.success) { err(res, 422, 'VALIDATION_ERROR', 'Invalid parameters.'); return; }
+
+    const { id, photoId } = parsed.data;
+
+    const client = await commercialPool.connect();
+    try {
+      const photo = await withTenantRLS(client, req.rlsCtx, (c) =>
+        c.query('SELECT storage_path FROM ims_photos WHERE id = $1 AND item_id = $2', [photoId, id])
+          .then(r => r.rows[0] ?? null),
+      );
+
+      if (!photo) { err(res, 404, 'PHOTO_NOT_FOUND', 'Photo not found.'); return; }
+
+      let stat: { size: number; contentType: string };
+      try { stat = await getObjectStat(BUCKET_PHOTOS, photo.storage_path); }
+      catch { err(res, 404, 'FILE_NOT_FOUND', 'File not found in storage.'); return; }
+
+      res.setHeader('Content-Type', stat.contentType);
+      res.setHeader('Content-Length', stat.size);
+      res.setHeader('Content-Disposition', 'inline');
+      res.setHeader('Cache-Control', 'private, max-age=3600');
+
+      const stream = await getObjectStream(BUCKET_PHOTOS, photo.storage_path);
+      stream.on('error', () => { if (!res.headersSent) res.status(500).end(); });
+      stream.pipe(res);
+    } finally { client.release(); }
+  } catch (e) { next(e); }
+});
+
+// ── DELETE /items/:id/photos/:photoId ─────────────────────────────────────────
+
+imsItemsRouter.delete('/items/:id/photos/:photoId', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const parsed = PhotoParams.safeParse(req.params);
+    if (!parsed.success) { err(res, 422, 'VALIDATION_ERROR', 'Invalid parameters.'); return; }
+
+    const { id, photoId } = parsed.data;
+    const { userId, tenantId } = req.rlsCtx;
+
+    const client = await commercialPool.connect();
+    try {
+      const photo = await withTenantRLS(client, req.rlsCtx, (c) =>
+        c.query(
+          'DELETE FROM ims_photos WHERE id = $1 AND item_id = $2 RETURNING storage_path',
+          [photoId, id],
+        ).then(r => r.rows[0] ?? null),
+      );
+
+      if (!photo) { err(res, 404, 'PHOTO_NOT_FOUND', 'Photo not found.'); return; }
+
+      await deleteObject(BUCKET_PHOTOS, photo.storage_path).catch((e) => {
+        logger.warn({ entity: 'IMS', action: 'PHOTO_MINIO_DELETE_FAILED', storage_path: photo.storage_path, error: (e as Error).message });
+      });
+
+      logger.info({ entity: 'IMS', action: 'PHOTO_DELETED', user_id: userId, tenant_id: tenantId, record_id: photoId });
+      ok(res, { deleted: true });
+    } finally { client.release(); }
+  } catch (e) { next(e); }
+});
+
+// ── GET /valuation ────────────────────────────────────────────────────────────
+
+imsItemsRouter.get('/valuation', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const client = await commercialPool.connect();
+    try {
+      const [byLocation, byCategory, summary] = await withTenantRLS(client, req.rlsCtx, (c) =>
+        Promise.all([
+          c.query(
+            `SELECT l.name AS location_name, l.code AS location_code,
+                    COUNT(i.id)::int                            AS item_count,
+                    COALESCE(SUM(i.quantity_on_hand * i.unit_value) FILTER (WHERE i.unit_value IS NOT NULL), 0) AS total_value
+             FROM   ims_items i JOIN ims_locations l ON l.id = i.location_id
+             WHERE  i.is_active = true
+             GROUP  BY l.id, l.name, l.code
+             ORDER  BY total_value DESC`,
+          ).then(r => r.rows),
+          c.query(
+            `SELECT COALESCE(cat.name, 'Uncategorised') AS category_name,
+                    COUNT(i.id)::int                            AS item_count,
+                    COALESCE(SUM(i.quantity_on_hand * i.unit_value) FILTER (WHERE i.unit_value IS NOT NULL), 0) AS total_value
+             FROM   ims_items i LEFT JOIN ims_categories cat ON cat.id = i.category_id
+             WHERE  i.is_active = true
+             GROUP  BY cat.name
+             ORDER  BY total_value DESC`,
+          ).then(r => r.rows),
+          c.query(
+            `SELECT COUNT(*)::int                                                                             AS total_items,
+                    COUNT(*) FILTER (WHERE reorder_point IS NOT NULL AND quantity_on_hand <= reorder_point)::int AS low_stock_count,
+                    COUNT(*) FILTER (WHERE quantity_on_hand = 0)::int                                        AS out_of_stock_count,
+                    COALESCE(SUM(quantity_on_hand * unit_value) FILTER (WHERE unit_value IS NOT NULL), 0)    AS total_stock_value,
+                    COALESCE(SUM(unit_value)      FILTER (WHERE is_asset = true AND unit_value IS NOT NULL), 0) AS total_asset_value
+             FROM   ims_items WHERE is_active = true`,
+          ).then(r => r.rows[0]),
+        ]),
+      );
+      logger.info({ entity: 'IMS', action: 'VALUATION', user_id: req.rlsCtx.userId, tenant_id: req.rlsCtx.tenantId });
+      ok(res, { summary, by_location: byLocation, by_category: byCategory });
+    } finally { client.release(); }
+  } catch (e) { next(e); }
+});
+
 // ── PATCH /items/:id ──────────────────────────────────────────────────────────
 
 imsItemsRouter.patch('/items/:id', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
@@ -356,4 +689,85 @@ imsItemsRouter.patch('/items/:id', async (req: Request, res: Response, next: Nex
       ok(res, updated);
     } finally { commClient.release(); }
   } catch (e) { next(e); }
+});
+
+// ── DELETE /items/:id ─────────────────────────────────────────────────────────
+// Owner only. Hard deletes if no movements, stock-take lines, or depreciation exist.
+// Also removes any MinIO photos for the item.
+
+imsItemsRouter.delete('/items/:id', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    if (!req.rlsCtx.isOwner) { err(res, 403, 'FORBIDDEN', 'This action requires Owner role.'); return; }
+
+    const idParsed = UUIDParam.safeParse(req.params);
+    if (!idParsed.success) { err(res, 422, 'VALIDATION_ERROR', 'Item ID must be a valid UUID.'); return; }
+
+    const { id } = idParsed.data;
+    const { userId, tenantId } = req.rlsCtx;
+
+    const commClient = await commercialPool.connect();
+    try {
+      const photoPaths = await withTenantRLS(commClient, req.rlsCtx, async (c) => {
+        const item = await c.query(
+          `SELECT id, name FROM ims_items WHERE id = $1`, [id],
+        ).then(r => r.rows[0] ?? null);
+        if (!item) throw Object.assign(new Error('Item not found.'), { status: 404, code: 'ITEM_NOT_FOUND' });
+
+        const deps = await c.query<{ movements: string; stock_take_lines: string; depreciation: string }>(
+          `SELECT
+             (SELECT count(*) FROM ims_stock_movements       WHERE item_id = $1) AS movements,
+             (SELECT count(*) FROM ims_stock_take_lines      WHERE item_id = $1) AS stock_take_lines,
+             (SELECT count(*) FROM ims_depreciation_schedules WHERE item_id = $1) AS depreciation`,
+          [id],
+        ).then(r => r.rows[0]);
+
+        const blocking: Record<string, number> = {};
+        for (const [k, v] of Object.entries(deps)) {
+          const n = Number(v);
+          if (n > 0) blocking[k] = n;
+        }
+        if (Object.keys(blocking).length > 0) {
+          throw Object.assign(
+            new Error('Item has dependent records and cannot be deleted.'),
+            { status: 409, code: 'DEPENDENCY_EXISTS', blocking },
+          );
+        }
+
+        const photos = await c.query<{ storage_path: string }>(
+          `SELECT storage_path FROM ims_photos WHERE item_id = $1`, [id],
+        ).then(r => r.rows.map(p => p.storage_path));
+
+        await c.query(`DELETE FROM ims_photos   WHERE item_id = $1`, [id]);
+        await c.query(`DELETE FROM ims_barcodes WHERE item_id = $1`, [id]);
+        await c.query(`DELETE FROM ims_items    WHERE id = $1`, [id]);
+        return photos;
+      });
+
+      // Remove MinIO photos outside the transaction — best-effort, non-fatal.
+      for (const path of photoPaths) {
+        try { await deleteObject(BUCKET_PHOTOS, path); } catch { /* ignore */ }
+      }
+
+      const coreClient = await corePool.connect();
+      try {
+        await coreClient.query('BEGIN');
+        await coreClient.query('SELECT set_config($1, $2, true)', ['app.current_tenant_id', tenantId]);
+        await coreClient.query('SELECT set_config($1, $2, true)', ['app.current_user_id', userId]);
+        await coreClient.query(
+          `INSERT INTO audit_log (tenant_id, user_id, entity, action, record_id, new_values, source)
+           VALUES ($1, $2, 'InventoryItem', 'DELETE', $3, $4, 'API')`,
+          [tenantId, userId, id, JSON.stringify({ id })],
+        );
+        await coreClient.query('COMMIT');
+      } catch { await coreClient.query('ROLLBACK'); } finally { coreClient.release(); }
+
+      logger.info({ entity: 'IMS', action: 'ITEM_DELETED', user_id: userId, tenant_id: tenantId, record_id: id });
+      ok(res, { deleted: true, id });
+    } finally { commClient.release(); }
+  } catch (e: unknown) {
+    const ex = e as { status?: number; code?: string; blocking?: Record<string, number>; message: string };
+    if (ex.status === 404) { err(res, 404, 'ITEM_NOT_FOUND', ex.message); return; }
+    if (ex.status === 409) { res.status(409).json({ success: false, data: null, error: ex.message, code: ex.code, blocking: ex.blocking }); return; }
+    next(e);
+  }
 });

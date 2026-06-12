@@ -29,6 +29,7 @@ services:
       - /data/caddy/data:/data
       - /data/caddy/config:/config
       - /var/www/jabco.tt:/var/www/jabco.tt:ro
+      - /opt/jag/jag-web/dist:/opt/jag/jag-web/dist:ro
     depends_on:
       keycloak:
         condition: service_healthy

@@ -190,26 +190,72 @@ accountsRouter.patch('/:id', async (req: Request, res: Response, next: NextFunct
 });
 
 // ── DELETE /accounts/:id ──────────────────────────────────────────────────────
-// Soft-delete only — sets is_active = false. Financial records are never hard-deleted.
+// Owner only.
+// No transactions → hard delete (test data cleanup).
+// Has transactions → 409 DEPENDENCY_EXISTS (financial records must not be destroyed).
 
 accountsRouter.delete('/:id', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
+    if (!req.rlsCtx.isOwner) { err(res, 403, 'FORBIDDEN', 'This action requires Owner role.'); return; }
+
     const parsed = UUIDParam.safeParse(req.params);
     if (!parsed.success) { err(res, 422, 'VALIDATION_ERROR', 'ID must be a valid UUID.'); return; }
+
     const { ownerId } = req.rlsCtx;
     const client = await familyPool.connect();
     try {
-      const rec = await withOwnerRLS(client, req.rlsCtx, (c) =>
-        c.query(
-          `UPDATE fin_accounts SET is_active = false, closed_date = CURRENT_DATE, updated_at = now()
-           WHERE id = $1 AND is_active = true
-           RETURNING id, account_name`,
+      const result = await withOwnerRLS(client, req.rlsCtx, async (c) => {
+        const rec = await c.query(
+          `SELECT id, account_name FROM fin_accounts WHERE id = $1`,
           [parsed.data.id],
-        ).then(r => r.rows[0] ?? null),
-      );
-      if (!rec) { err(res, 404, 'ACCOUNT_NOT_FOUND', 'Account not found or already closed.'); return; }
-      logger.info({ entity: 'FINANCE', action: 'ACCOUNT_CLOSED', user_id: ownerId, record_id: parsed.data.id });
-      ok(res, { closed: true, id: rec.id, account_name: rec.account_name });
+        ).then(r => r.rows[0] ?? null);
+        if (!rec) throw Object.assign(new Error('Account not found.'), { status: 404, code: 'ACCOUNT_NOT_FOUND' });
+
+        const txnCount = await c.query<{ count: string }>(
+          `SELECT count(*) FROM fin_transactions WHERE account_id = $1`,
+          [parsed.data.id],
+        ).then(r => Number(r.rows[0].count));
+
+        const stmtCount = await c.query<{ count: string }>(
+          `SELECT count(*) FROM fin_bank_statement_lines WHERE account_id = $1`,
+          [parsed.data.id],
+        ).then(r => Number(r.rows[0].count));
+
+        const total = txnCount + stmtCount;
+        if (total > 0) {
+          throw Object.assign(
+            new Error('Account has financial records and cannot be hard-deleted.'),
+            { status: 409, code: 'DEPENDENCY_EXISTS', blocking: { transactions: txnCount, bank_statement_lines: stmtCount } },
+          );
+        }
+
+        await c.query(`DELETE FROM fin_accounts WHERE id = $1`, [parsed.data.id]);
+        return rec.account_name as string;
+      });
+
+      logger.info({ entity: 'FINANCE', action: 'ACCOUNT_DELETED', user_id: ownerId, record_id: parsed.data.id });
+
+      const coreClient = await corePool.connect();
+      try {
+        await coreClient.query('BEGIN');
+        await coreClient.query('SELECT set_config($1,$2,true)', ['app.current_user_id', ownerId]);
+        await coreClient.query(
+          `INSERT INTO audit_log (user_id, entity, action, record_id, new_values, source)
+           VALUES ($1,'FinAccount','DELETE',$2,$3,'API')`,
+          [ownerId, parsed.data.id, JSON.stringify({ account_name: result })],
+        );
+        await coreClient.query('COMMIT');
+      } catch { await coreClient.query('ROLLBACK'); } finally { coreClient.release(); }
+
+      ok(res, { deleted: true, id: parsed.data.id });
     } finally { client.release(); }
-  } catch (e) { next(e); }
+  } catch (e: unknown) {
+    const ex = e as { status?: number; code?: string; blocking?: Record<string, number>; message: string };
+    if (ex.status === 404) { err(res, 404, 'ACCOUNT_NOT_FOUND', ex.message); return; }
+    if (ex.status === 409) {
+      res.status(409).json({ success: false, data: null, error: ex.message, code: ex.code, blocking: ex.blocking });
+      return;
+    }
+    next(e);
+  }
 });

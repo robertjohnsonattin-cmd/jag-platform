@@ -16,6 +16,7 @@ import { withOwnerRLS } from '../../middleware/rls';
 import { familyPool, corePool } from '../../db/index';
 import { logger } from '../../lib/logger';
 import { ok, err } from '../../lib/response';
+import { minioClient, ensureBucket, mediaObjectKey, BUCKET_RECEIPTS } from '../../lib/minio';
 
 export const expensesRouter = Router();
 
@@ -463,6 +464,167 @@ expensesRouter.post('/:id/reject', async (req: Request, res: Response, next: Nex
   } catch (e) { next(e); }
 });
 
+// ── POST /expenses/:id/reverse ────────────────────────────────────────────────
+// APPROVED → REVERSED  (Owner only)
+// Voids the original GL journal entry and posts a reversing entry in one
+// transaction, then marks the expense REVERSED. The original entry is never
+// deleted — full audit trail is preserved.
+
+const ReverseExpenseSchema = z.object({
+  reversal_reason: z.string().min(1).max(1000),
+  idempotency_key: z.string().min(1).max(500),
+}).strict();
+
+expensesRouter.post('/:id/reverse', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const paramParsed = UUIDParam.safeParse(req.params);
+    if (!paramParsed.success) { err(res, 422, 'VALIDATION_ERROR', 'ID must be a valid UUID.'); return; }
+    const bodyParsed = ReverseExpenseSchema.safeParse(req.body);
+    if (!bodyParsed.success) { err(res, 422, 'VALIDATION_ERROR', 'reversal_reason and idempotency_key are required.'); return; }
+
+    if (!req.rlsCtx.isOwner) { err(res, 403, 'FORBIDDEN', 'Only the Owner can reverse expenses.'); return; }
+
+    const { id } = paramParsed.data;
+    const { reversal_reason, idempotency_key } = bodyParsed.data;
+    const { ownerId } = req.rlsCtx;
+
+    const client = await familyPool.connect();
+    try {
+      const result = await withOwnerRLS(client, req.rlsCtx, async (c) => {
+        const expense = await c.query(
+          `SELECT * FROM fin_expenses WHERE id = $1`, [id],
+        ).then(r => r.rows[0] ?? null);
+
+        if (!expense) throw Object.assign(new Error('Expense not found.'), { status: 404, code: 'EXPENSE_NOT_FOUND' });
+        if (expense.status !== 'APPROVED') throw Object.assign(new Error('Only APPROVED expenses can be reversed.'), { status: 409, code: 'EXPENSE_NOT_APPROVED' });
+        if (!expense.journal_entry_id) throw Object.assign(new Error('No GL entry linked to this expense.'), { status: 409, code: 'NO_JOURNAL_ENTRY' });
+
+        // Fetch original GL lines
+        const lines = await c.query(
+          `SELECT * FROM fin_journal_entry_lines WHERE journal_entry_id = $1 ORDER BY line_number`,
+          [expense.journal_entry_id],
+        ).then(r => r.rows);
+
+        // Void the original entry
+        await c.query(
+          `UPDATE fin_journal_entries
+           SET status = 'VOID', void_reason = $1, voided_at = now(), voided_by = $2, updated_at = now()
+           WHERE id = $3`,
+          [reversal_reason, ownerId, expense.journal_entry_id],
+        );
+
+        // Post the reversing entry (swap debit/credit)
+        const amountTtd = Number(expense.amount_ttd).toFixed(2);
+        const reversing = await c.query(
+          `INSERT INTO fin_journal_entries
+             (owner_id, owner_entity_id, entry_date, description, status, source, source_id,
+              currency, total_debit_ttd, total_credit_ttd, posted_at, posted_by, idempotency_key)
+           VALUES ($1,$2,CURRENT_DATE,$3,'POSTED','REVERSAL',$4,'TTD',$5,$6,now(),$7,$8)
+           RETURNING *`,
+          [ownerId, expense.owner_entity_id,
+           `REVERSAL: ${expense.description}`,
+           expense.journal_entry_id, amountTtd, amountTtd, ownerId, idempotency_key],
+        ).then(r => r.rows[0]);
+
+        // Insert reversed lines (debit ↔ credit swapped)
+        for (const line of lines) {
+          await c.query(
+            `INSERT INTO fin_journal_entry_lines
+               (owner_id, journal_entry_id, gl_account_id, line_number, description, debit_ttd, credit_ttd)
+             VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+            [ownerId, reversing.id, line.gl_account_id, line.line_number,
+             `REVERSAL: ${line.description}`,
+             line.credit_ttd, line.debit_ttd],  // swapped
+          );
+        }
+
+        // Mark expense as REVERSED
+        const updated = await c.query(
+          `UPDATE fin_expenses
+           SET status = 'REVERSED', reversal_reason = $1, reversed_at = now(),
+               reversed_by = $2, reversing_journal_entry_id = $3, updated_at = now()
+           WHERE id = $4
+           RETURNING *`,
+          [reversal_reason, ownerId, reversing.id, id],
+        ).then(r => r.rows[0]);
+
+        return { expense: updated, reversing_journal_entry_id: reversing.id };
+      });
+
+      logger.info({ entity: 'EXPENSE', action: 'REVERSED', user_id: ownerId, record_id: id, reversing_je: result.reversing_journal_entry_id });
+
+      const coreClient = await corePool.connect();
+      try {
+        await coreClient.query('BEGIN');
+        await coreClient.query('SELECT set_config($1,$2,true)', ['app.current_user_id', ownerId]);
+        await coreClient.query(
+          `INSERT INTO audit_log (user_id, entity, action, record_id, new_values, source)
+           VALUES ($1,'Expense','REVERSE',$2,$3,'API')`,
+          [ownerId, id, JSON.stringify({ reversal_reason, reversing_journal_entry_id: result.reversing_journal_entry_id })],
+        );
+        await coreClient.query('COMMIT');
+      } catch { await coreClient.query('ROLLBACK'); } finally { coreClient.release(); }
+
+      ok(res, result.expense);
+    } catch (e: unknown) {
+      if (e instanceof Error) {
+        const typed = e as Error & { status?: number; code?: string };
+        if (typed.status) { err(res, typed.status, typed.code ?? 'EXPENSE_ERROR', typed.message); return; }
+        if (typed.message.includes('idempotency_key')) {
+          err(res, 409, 'DUPLICATE_REVERSAL', 'This expense has already been reversed.');
+          return;
+        }
+      }
+      throw e;
+    } finally { client.release(); }
+  } catch (e) { next(e); }
+});
+
+// ── DELETE /expenses/:id ──────────────────────────────────────────────────────
+// Owner only. Deletes DRAFT or REJECTED expenses. SUBMITTED/APPROVED are blocked.
+
+expensesRouter.delete('/:id', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    if (!req.rlsCtx.isOwner) { err(res, 403, 'FORBIDDEN', 'This action requires Owner role.'); return; }
+
+    const parsed = UUIDParam.safeParse(req.params);
+    if (!parsed.success) { err(res, 422, 'VALIDATION_ERROR', 'ID must be a valid UUID.'); return; }
+
+    const { id } = parsed.data;
+    const { ownerId } = req.rlsCtx;
+
+    const client = await familyPool.connect();
+    try {
+      const deleted = await withOwnerRLS(client, req.rlsCtx, async (c) => {
+        const expense = await c.query(
+          `SELECT id, status, description FROM fin_expenses WHERE id = $1`,
+          [id],
+        ).then(r => r.rows[0] ?? null);
+
+        if (!expense) throw Object.assign(new Error('Expense not found.'), { status: 404, code: 'EXPENSE_NOT_FOUND' });
+
+        if (expense.status === 'SUBMITTED' || expense.status === 'APPROVED') {
+          throw Object.assign(
+            new Error(`Cannot delete a ${expense.status.toLowerCase()} expense. Void or reverse it instead.`),
+            { status: 409, code: 'EXPENSE_IN_WORKFLOW' },
+          );
+        }
+
+        await c.query(`DELETE FROM fin_expenses WHERE id = $1`, [id]);
+        return expense.description as string;
+      });
+
+      logger.info({ entity: 'EXPENSE', action: 'EXPENSE_DELETED', user_id: ownerId, record_id: id });
+      ok(res, { deleted: true, id });
+    } catch (e: unknown) {
+      const typed = e as Error & { status?: number; code?: string };
+      if (typed.status === 404) { err(res, 404, 'EXPENSE_NOT_FOUND', typed.message); return; }
+      if (typed.status === 409) { err(res, 409, typed.code ?? 'EXPENSE_ERROR', typed.message); return; }
+      throw e;
+    } finally { client.release(); }
+  } catch (e) { next(e); }
+});
+
 // ── POST /expenses/:id/receipt ─────────────────────────────────────────────────
 // Attach a receipt file. Stores to MinIO path pattern: expenses/{owner_id}/{expense_id}/{filename}
 
@@ -474,10 +636,13 @@ expensesRouter.post('/:id/receipt', upload.single('receipt'), async (req: Reques
 
     const { ownerId } = req.rlsCtx;
     const { id } = parsed.data;
-    const storagePath = `expenses/${ownerId}/${id}/${req.file.originalname}`;
+    const key  = mediaObjectKey(ownerId, 'expenses', id, req.file.originalname);
+    const mime = req.file.mimetype || 'application/octet-stream';
 
-    // In production this uploads to MinIO; for now we store the path only.
-    // MinIO upload will be added when the MinIO swap (Phase 5 item 6) is implemented.
+    // Upload to MinIO first — if it fails, the DB is never touched.
+    await ensureBucket(BUCKET_RECEIPTS);
+    await minioClient.putObject(BUCKET_RECEIPTS, key, req.file.buffer, req.file.size, { 'Content-Type': mime });
+    logger.info({ entity: 'MINIO', action: 'OBJECT_PUT', bucket: BUCKET_RECEIPTS, key });
 
     const client = await familyPool.connect();
     try {
@@ -489,10 +654,10 @@ expensesRouter.post('/:id/receipt', upload.single('receipt'), async (req: Reques
 
         return c.query(
           `UPDATE fin_expenses
-           SET receipt_path = $1, receipt_filename = $2, updated_at = now()
-           WHERE id = $3
-           RETURNING id, receipt_path, receipt_filename`,
-          [storagePath, req.file!.originalname, id],
+           SET receipt_path = $1, receipt_filename = $2, receipt_bucket = $3, updated_at = now()
+           WHERE id = $4
+           RETURNING id, receipt_path, receipt_filename, receipt_bucket`,
+          [key, req.file!.originalname, BUCKET_RECEIPTS, id],
         ).then(r => r.rows[0]);
       });
       logger.info({ entity: 'EXPENSE', action: 'RECEIPT_ATTACHED', user_id: ownerId, record_id: id });

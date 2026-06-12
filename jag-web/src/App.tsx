@@ -1,0 +1,76 @@
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { AuthProvider, useAuth } from './auth/AuthProvider'
+import AppShell from './layout/AppShell'
+import Dashboard from './pages/Dashboard'
+import Finance from './pages/Finance'
+import Ledger from './pages/Ledger'
+import Properties from './pages/Properties'
+import Expenses from './pages/Expenses'
+import Jabco from './pages/Jabco'
+import Inventory from './pages/Inventory'
+import Purchasing from './pages/Purchasing'
+import CRM from './pages/CRM'
+import Entertainment from './pages/Entertainment'
+import DragonBridge from './pages/DragonBridge'
+import NLCB from './pages/NLCB'
+import DocVault from './pages/DocVault'
+import BrianAdmin from './pages/BrianAdmin'
+import BrianPortal from './pages/BrianPortal'
+import Lifestyle from './pages/Lifestyle'
+import Reports from './pages/Reports'
+
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: { staleTime: 30_000, retry: 1 },
+  },
+})
+
+function AppRoutes() {
+  const { roles } = useAuth()
+  const isBrian = roles.includes('brian_portal')
+
+  if (isBrian) {
+    return (
+      <BrowserRouter>
+        <BrianPortal />
+      </BrowserRouter>
+    )
+  }
+
+  return (
+    <BrowserRouter>
+      <Routes>
+        <Route path="/" element={<AppShell />}>
+          <Route index element={<Navigate to="/dashboard" replace />} />
+          <Route path="dashboard" element={<Dashboard />} />
+          <Route path="finance" element={<Finance />} />
+          <Route path="ledger" element={<Ledger />} />
+          <Route path="reports" element={<Reports />} />
+          <Route path="expenses" element={<Expenses />} />
+          <Route path="properties" element={<Properties />} />
+          <Route path="jabco" element={<Jabco />} />
+          <Route path="inventory" element={<Inventory />} />
+          <Route path="purchasing" element={<Purchasing />} />
+          <Route path="crm" element={<CRM />} />
+          <Route path="entertainment" element={<Entertainment />} />
+          <Route path="dragonbridge" element={<DragonBridge />} />
+          <Route path="nlcb" element={<NLCB />} />
+          <Route path="docvault" element={<DocVault />} />
+          <Route path="lifestyle" element={<Lifestyle />} />
+          <Route path="brian-admin" element={<BrianAdmin />} />
+        </Route>
+      </Routes>
+    </BrowserRouter>
+  )
+}
+
+export default function App() {
+  return (
+    <QueryClientProvider client={queryClient}>
+      <AuthProvider>
+        <AppRoutes />
+      </AuthProvider>
+    </QueryClientProvider>
+  )
+}

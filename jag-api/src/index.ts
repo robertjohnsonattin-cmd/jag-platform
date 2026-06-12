@@ -101,6 +101,7 @@ import { nlcbRouter }            from './routes/nlcb/index';
 import { dragonbridgeRouter }    from './routes/dragonbridge/index';
 import { entertainmentRouter }   from './routes/entertainment/index';
 import { financeRouter }         from './routes/finance/index';
+import { filesRouter }           from './routes/files/index';
 
 app.use('/api/v1/auth',          authRouter);
 app.use('/api/v1/me',            meRouter);
@@ -121,6 +122,7 @@ app.use('/api/v1/nlcb',         nlcbRouter);
 app.use('/api/v1/dragonbridge',   dragonbridgeRouter);
 app.use('/api/v1/entertainment', entertainmentRouter);
 app.use('/api/v1/finance',       financeRouter);
+app.use('/api/v1/files',         filesRouter);
 
 // ── Global error handler ───────────────────────────────────────────────────────
 // Must be defined after all routes. Four-argument signature required by Express.

@@ -142,6 +142,37 @@ pipelineRouter.post('/', async (req: Request, res: Response, next: NextFunction)
   } catch (e) { next(e); }
 });
 
+// ── DELETE /properties/pipeline/:id ──────────────────────────────────────────
+// Owner only. Hard deletes a pipeline item — no financial records attached.
+
+pipelineRouter.delete('/:id', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    if (!req.rlsCtx.isOwner) { err(res, 403, 'FORBIDDEN', 'This action requires Owner role.'); return; }
+
+    const idParsed = UUIDParam.safeParse(req.params);
+    if (!idParsed.success) { err(res, 422, 'VALIDATION_ERROR', 'ID must be a valid UUID.'); return; }
+
+    const { id } = idParsed.data;
+    const { userId: ownerId } = req.rlsCtx;
+
+    const client = await propertiesPool.connect();
+    try {
+      const deleted = await withOwnerRLS(client, req.rlsCtx, (c) =>
+        c.query(
+          `DELETE FROM prop_property_pipeline WHERE id = $1 RETURNING name`,
+          [id],
+        ).then(r => r.rows[0] ?? null),
+      );
+
+      if (!deleted) { err(res, 404, 'PIPELINE_ITEM_NOT_FOUND', 'Pipeline item not found.'); return; }
+
+      logger.info({ entity: 'PROPERTIES', action: 'PIPELINE_DELETED', user_id: ownerId, record_id: id });
+      await auditLog(ownerId, 'PropertyPipeline', 'DELETE', id, { name: deleted.name });
+      ok(res, { deleted: true, id });
+    } finally { client.release(); }
+  } catch (e) { next(e); }
+});
+
 // ── PATCH /properties/pipeline/:id ───────────────────────────────────────────
 
 pipelineRouter.patch('/:id', async (req: Request, res: Response, next: NextFunction): Promise<void> => {

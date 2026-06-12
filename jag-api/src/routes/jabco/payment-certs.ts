@@ -54,7 +54,7 @@ jabcoPaymentCertsRouter.get('/', async (req: Request, res: Response, next: NextF
       );
 
       logger.info({ entity: 'JABCO', action: 'CERTS_LIST', user_id: req.rlsCtx.userId, tenant_id: req.rlsCtx.tenantId });
-      ok(res, rows);
+      ok(res, { payment_certificates: rows });
     } finally { client.release(); }
   } catch (e) { next(e); }
 });
@@ -147,6 +147,50 @@ jabcoPaymentCertsRouter.post('/', async (req: Request, res: Response, next: Next
       }
 
       ok(res, record, created ? 201 : 200);
+    } finally { client.release(); }
+  } catch (e) { next(e); }
+});
+
+// ── PATCH /projects/:projectId/payment-certificates/:id/pay ──────────────────
+// Record client payment against a certificate.
+
+const CertParam    = z.object({ projectId: z.string().uuid(), id: z.string().uuid() });
+const PayCertSchema = z.object({
+  paid_date:         z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'paid_date must be YYYY-MM-DD'),
+  payment_reference: z.string().max(200).optional(),
+}).strict();
+
+jabcoPaymentCertsRouter.patch('/:id/pay', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const paramParsed = CertParam.safeParse(req.params);
+    if (!paramParsed.success) { err(res, 422, 'VALIDATION_ERROR', 'Invalid UUID in path.'); return; }
+
+    const bodyParsed = PayCertSchema.safeParse(req.body);
+    if (!bodyParsed.success) { err(res, 422, 'VALIDATION_ERROR', 'Request body validation failed.'); return; }
+
+    const { id } = paramParsed.data;
+    const { paid_date, payment_reference } = bodyParsed.data;
+    const { userId, tenantId } = req.rlsCtx;
+
+    const client = await commercialPool.connect();
+    try {
+      const updated = await withTenantRLS(client, req.rlsCtx, (c) =>
+        c.query(
+          `UPDATE jabco_payment_certificates
+           SET    paid_date         = $1,
+                  payment_reference = $2,
+                  status            = 'PAID',
+                  updated_at        = now()
+           WHERE  id = $3
+           RETURNING *`,
+          [paid_date, payment_reference ?? null, id],
+        ).then(r => r.rows[0] ?? null),
+      );
+
+      if (!updated) { err(res, 404, 'CERT_NOT_FOUND', 'Payment certificate not found.'); return; }
+
+      logger.info({ entity: 'JABCO', action: 'CERT_PAID', user_id: userId, tenant_id: tenantId, record_id: id });
+      ok(res, updated);
     } finally { client.release(); }
   } catch (e) { next(e); }
 });

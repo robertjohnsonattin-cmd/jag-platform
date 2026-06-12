@@ -1,7 +1,10 @@
-// GET  /api/v1/crm/companies
-// POST /api/v1/crm/companies
-// GET  /api/v1/crm/contacts
-// POST /api/v1/crm/interactions
+// GET    /api/v1/crm/companies
+// POST   /api/v1/crm/companies
+// DELETE /api/v1/crm/companies/:id   (Owner only — hard delete if no contacts)
+// GET    /api/v1/crm/contacts
+// POST   /api/v1/crm/contacts
+// DELETE /api/v1/crm/contacts/:id    (Owner only — hard delete if no interactions)
+// POST   /api/v1/crm/interactions
 
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import { z } from 'zod';
@@ -31,10 +34,22 @@ const CreateCompanySchema = z.object({
   name:     z.string().min(1).max(200),
   industry: z.string().max(100).optional(),
   country:  z.string().length(2).default('TT'),
-  phone:    z.string().max(30).optional(),
+  phone:    z.string().max(50).optional(),
   email:    z.string().email().optional(),
   website:  z.string().url().optional(),
   notes:    z.string().max(2000).optional(),
+}).strict();
+
+const CreateContactSchema = z.object({
+  first_name:         z.string().min(1).max(200),
+  last_name:          z.string().min(1).max(200),
+  email:              z.string().email().optional(),
+  phone:              z.string().max(50).optional(),
+  phone2:             z.string().max(50).optional(),
+  role:               z.string().max(100).optional(),
+  company_id:         z.string().uuid().optional(),
+  notes:              z.string().max(2000).optional(),
+  preferred_language: z.string().max(5).default('en'),
 }).strict();
 
 const InteractionTypeEnum = z.enum(['CALL', 'EMAIL', 'MEETING', 'SITE_VISIT', 'OTHER']);
@@ -173,7 +188,7 @@ crmRouter.get('/contacts', async (req: Request, res: Response, next: NextFunctio
           `SELECT count(*) FROM crm_contacts ct ${where}`, params,
         );
         const dataResult = await c.query(
-          `SELECT ct.id, ct.first_name, ct.last_name, ct.email, ct.phone, ct.role,
+          `SELECT ct.id, ct.first_name, ct.last_name, ct.email, ct.phone, ct.phone2, ct.role,
                   ct.preferred_language, ct.last_modified_at, ct.created_at,
                   co.id   AS company_id,
                   co.name AS company_name
@@ -191,6 +206,50 @@ crmRouter.get('/contacts', async (req: Request, res: Response, next: NextFunctio
       ok(res, { contacts: rows, pagination: { page, limit, total, pages: Math.ceil(total / limit) } });
     } finally { client.release(); }
   } catch (e) { next(e); }
+});
+
+// ── POST /crm/contacts ────────────────────────────────────────────────────────
+
+crmRouter.post('/contacts', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const parsed = CreateContactSchema.safeParse(req.body);
+    if (!parsed.success) { err(res, 422, 'VALIDATION_ERROR', 'Request body validation failed.'); return; }
+
+    const body = parsed.data;
+    const { userId, tenantId } = req.rlsCtx;
+
+    const client = await commercialPool.connect();
+    try {
+      const newContact = await withTenantRLS(client, req.rlsCtx, async (c) => {
+        if (body.company_id) {
+          const co = await c.query<{ id: string }>(
+            `SELECT id FROM crm_companies WHERE id = $1`, [body.company_id],
+          );
+          if (co.rows.length === 0) {
+            throw Object.assign(new Error('COMPANY_NOT_FOUND'), { httpStatus: 404 });
+          }
+        }
+
+        return c.query(
+          `INSERT INTO crm_contacts
+             (tenant_id, company_id, first_name, last_name, email, phone, phone2,
+              role, notes, preferred_language, last_modified_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,now())
+           RETURNING *`,
+          [tenantId, body.company_id ?? null, body.first_name, body.last_name,
+           body.email ?? null, body.phone ?? null, body.phone2 ?? null,
+           body.role ?? null, body.notes ?? null, body.preferred_language],
+        ).then(r => r.rows[0]);
+      });
+
+      logger.info({ entity: 'CRM', action: 'CONTACT_CREATED', user_id: userId, tenant_id: tenantId, record_id: newContact.id });
+      await auditLog(tenantId, userId, 'CrmContact', 'CREATE', newContact.id, body);
+      ok(res, newContact, 201);
+    } finally { client.release(); }
+  } catch (e) {
+    if ((e as { httpStatus?: number }).httpStatus === 404) { err(res, 404, 'COMPANY_NOT_FOUND', 'Company not found.'); return; }
+    next(e);
+  }
 });
 
 // ── POST /crm/interactions ────────────────────────────────────────────────────
@@ -232,6 +291,105 @@ crmRouter.post('/interactions', async (req: Request, res: Response, next: NextFu
     } finally { client.release(); }
   } catch (e) {
     if ((e as { httpStatus?: number }).httpStatus === 404) { err(res, 404, 'CONTACT_NOT_FOUND', 'Contact not found.'); return; }
+    next(e);
+  }
+});
+
+// ── DELETE /crm/companies/:id ─────────────────────────────────────────────────
+// Owner only. Hard deletes if no contacts are linked.
+
+const UUIDParam = z.object({ id: z.string().uuid() });
+
+crmRouter.delete('/companies/:id', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    if (!req.rlsCtx.isOwner) { err(res, 403, 'FORBIDDEN', 'This action requires Owner role.'); return; }
+
+    const idParsed = UUIDParam.safeParse(req.params);
+    if (!idParsed.success) { err(res, 422, 'VALIDATION_ERROR', 'Company ID must be a valid UUID.'); return; }
+
+    const { id } = idParsed.data;
+    const { userId, tenantId } = req.rlsCtx;
+
+    const client = await commercialPool.connect();
+    try {
+      await withTenantRLS(client, req.rlsCtx, async (c) => {
+        const company = await c.query(`SELECT id, name FROM crm_companies WHERE id = $1`, [id])
+          .then(r => r.rows[0] ?? null);
+        if (!company) throw Object.assign(new Error('Company not found.'), { status: 404, code: 'COMPANY_NOT_FOUND' });
+
+        const contactCount = await c.query<{ count: string }>(
+          `SELECT count(*) FROM crm_contacts WHERE company_id = $1`, [id],
+        ).then(r => Number(r.rows[0].count));
+
+        if (contactCount > 0) {
+          throw Object.assign(
+            new Error('Company has linked contacts and cannot be deleted.'),
+            { status: 409, code: 'DEPENDENCY_EXISTS', blocking: { contacts: contactCount } },
+          );
+        }
+
+        await c.query(`DELETE FROM crm_companies WHERE id = $1`, [id]);
+        return company.name;
+      }).then(async (name) => {
+        logger.info({ entity: 'CRM', action: 'COMPANY_DELETED', user_id: userId, tenant_id: tenantId, record_id: id });
+        await auditLog(tenantId, userId, 'CrmCompany', 'DELETE', id, { name });
+      });
+
+      ok(res, { deleted: true, id });
+    } finally { client.release(); }
+  } catch (e: unknown) {
+    const ex = e as { status?: number; code?: string; blocking?: Record<string, number>; message: string };
+    if (ex.status === 404) { err(res, 404, 'COMPANY_NOT_FOUND', ex.message); return; }
+    if (ex.status === 409) { res.status(409).json({ success: false, data: null, error: ex.message, code: ex.code, blocking: ex.blocking }); return; }
+    next(e);
+  }
+});
+
+// ── DELETE /crm/contacts/:id ──────────────────────────────────────────────────
+// Owner only. Hard deletes if no interactions are logged.
+
+crmRouter.delete('/contacts/:id', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    if (!req.rlsCtx.isOwner) { err(res, 403, 'FORBIDDEN', 'This action requires Owner role.'); return; }
+
+    const idParsed = UUIDParam.safeParse(req.params);
+    if (!idParsed.success) { err(res, 422, 'VALIDATION_ERROR', 'Contact ID must be a valid UUID.'); return; }
+
+    const { id } = idParsed.data;
+    const { userId, tenantId } = req.rlsCtx;
+
+    const client = await commercialPool.connect();
+    try {
+      await withTenantRLS(client, req.rlsCtx, async (c) => {
+        const contact = await c.query(
+          `SELECT id, first_name, last_name FROM crm_contacts WHERE id = $1`, [id],
+        ).then(r => r.rows[0] ?? null);
+        if (!contact) throw Object.assign(new Error('Contact not found.'), { status: 404, code: 'CONTACT_NOT_FOUND' });
+
+        const interactionCount = await c.query<{ count: string }>(
+          `SELECT count(*) FROM crm_interactions WHERE contact_id = $1`, [id],
+        ).then(r => Number(r.rows[0].count));
+
+        if (interactionCount > 0) {
+          throw Object.assign(
+            new Error('Contact has logged interactions and cannot be deleted.'),
+            { status: 409, code: 'DEPENDENCY_EXISTS', blocking: { interactions: interactionCount } },
+          );
+        }
+
+        await c.query(`DELETE FROM crm_contacts WHERE id = $1`, [id]);
+        return contact;
+      }).then(async (contact) => {
+        logger.info({ entity: 'CRM', action: 'CONTACT_DELETED', user_id: userId, tenant_id: tenantId, record_id: id });
+        await auditLog(tenantId, userId, 'CrmContact', 'DELETE', id, { first_name: contact.first_name, last_name: contact.last_name });
+      });
+
+      ok(res, { deleted: true, id });
+    } finally { client.release(); }
+  } catch (e: unknown) {
+    const ex = e as { status?: number; code?: string; blocking?: Record<string, number>; message: string };
+    if (ex.status === 404) { err(res, 404, 'CONTACT_NOT_FOUND', ex.message); return; }
+    if (ex.status === 409) { res.status(409).json({ success: false, data: null, error: ex.message, code: ex.code, blocking: ex.blocking }); return; }
     next(e);
   }
 });

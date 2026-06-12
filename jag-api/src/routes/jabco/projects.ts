@@ -1,10 +1,12 @@
-// GET  /api/v1/jabco/projects
-// POST /api/v1/jabco/projects
-// GET  /api/v1/jabco/projects/:id
-// GET  /api/v1/jabco/projects/:id/boq
-// POST /api/v1/jabco/projects/:id/boq
-// POST /api/v1/jabco/projects/:id/variation-orders
-// POST /api/v1/jabco/projects/:id/progress-claims
+// GET    /api/v1/jabco/projects
+// POST   /api/v1/jabco/projects
+// GET    /api/v1/jabco/projects/:id
+// PATCH  /api/v1/jabco/projects/:id
+// DELETE /api/v1/jabco/projects/:id              (Owner only — hard delete if no financial records)
+// GET    /api/v1/jabco/projects/:id/boq
+// POST   /api/v1/jabco/projects/:id/boq
+// POST   /api/v1/jabco/projects/:id/variation-orders
+// POST   /api/v1/jabco/projects/:id/progress-claims
 
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import { z } from 'zod';
@@ -31,6 +33,7 @@ const CreateProjectSchema = z.object({
   name:               z.string().min(1).max(200),
   client_name:        z.string().min(1).max(200),
   client_type:        z.enum(['GOVERNMENT', 'PRIVATE']),
+  client_company_id:  z.string().uuid().optional(),
   contract_value:     z.number().positive(),
   contract_currency:  z.string().length(3).default('TTD'),
   vat_inclusive:      z.boolean().default(false),
@@ -41,6 +44,15 @@ const CreateProjectSchema = z.object({
   project_manager_id: z.string().uuid(),
   idempotency_key:    z.string().uuid(),
 }).strict();
+
+const PatchProjectSchema = z.object({
+  client_company_id:  z.string().uuid().nullable().optional(),
+  status:             z.enum(['TENDER','ACTIVE','PRACTICAL_COMPLETION','DEFECTS_LIABILITY','CLOSED','CANCELLED']).optional(),
+  name:               z.string().min(1).max(200).optional(),
+  expected_end_date:  z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+  actual_end_date:    z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+  site_address:       z.string().max(500).nullable().optional(),
+}).strict().refine(d => Object.keys(d).length > 0, { message: 'At least one field required.' });
 
 const AddBoqItemSchema = z.object({
   section:           z.string().min(1).max(200),
@@ -125,13 +137,15 @@ jabcoProjectsRouter.get('/', async (req: Request, res: Response, next: NextFunct
                   p.status, p.contract_value, p.contract_currency,
                   p.start_date, p.expected_end_date, p.actual_end_date,
                   p.site_address, p.project_manager_id,
+                  p.client_company_id, co.name AS client_company_name,
                   p.last_modified_at, p.created_at,
                   COALESCE(SUM(b.amount_budgeted), 0)  AS boq_total_budgeted,
                   COALESCE(SUM(b.amount_actual),   0)  AS boq_total_actual
            FROM   jabco_projects p
            LEFT JOIN jabco_boq_items b ON b.project_id = p.id
+           LEFT JOIN crm_companies   co ON co.id = p.client_company_id
            ${where}
-           GROUP BY p.id
+           GROUP BY p.id, co.name
            ORDER BY p.created_at DESC
            LIMIT ${push(limit)} OFFSET ${push(offset)}`,
           params,
@@ -171,13 +185,15 @@ jabcoProjectsRouter.post('/', async (req: Request, res: Response, next: NextFunc
         const result = await c.query(
           `INSERT INTO jabco_projects
              (tenant_id, project_code, name, client_name, client_type,
+              client_company_id,
               contract_value, contract_currency, vat_inclusive, vat_pct,
               start_date, expected_end_date,
               site_address, project_manager_id, idempotency_key, last_modified_by)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
            RETURNING *`,
           [
             tenantId, body.project_code, body.name, body.client_name, body.client_type,
+            body.client_company_id ?? null,
             body.contract_value, body.contract_currency,
             body.vat_inclusive, body.vat_pct,
             body.start_date ?? null, body.expected_end_date ?? null,
@@ -207,7 +223,10 @@ jabcoProjectsRouter.get('/:id', async (req: Request, res: Response, next: NextFu
       const project = await withTenantRLS(client, req.rlsCtx, async (c) => {
         const [projResult, boqSummary, voResult, claimResult] = await Promise.all([
           c.query(
-            `SELECT * FROM jabco_projects WHERE id = $1`,
+            `SELECT p.*, co.name AS client_company_name
+             FROM jabco_projects p
+             LEFT JOIN crm_companies co ON co.id = p.client_company_id
+             WHERE p.id = $1`,
             [idParsed.data.id],
           ),
           c.query(
@@ -244,6 +263,127 @@ jabcoProjectsRouter.get('/:id', async (req: Request, res: Response, next: NextFu
       ok(res, project);
     } finally { client.release(); }
   } catch (e) { next(e); }
+});
+
+// ── PATCH /projects/:id ───────────────────────────────────────────────────────
+// Update project status, CRM link, name, dates, or site address.
+
+jabcoProjectsRouter.patch('/:id', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const idParsed = UUIDParam.safeParse(req.params);
+    if (!idParsed.success) { err(res, 422, 'VALIDATION_ERROR', 'Project ID must be a valid UUID.'); return; }
+
+    const bodyParsed = PatchProjectSchema.safeParse(req.body);
+    if (!bodyParsed.success) { err(res, 422, 'VALIDATION_ERROR', 'Request body validation failed.'); return; }
+
+    const b = bodyParsed.data;
+    const { userId, tenantId } = req.rlsCtx;
+    const { id } = idParsed.data;
+
+    const client = await commercialPool.connect();
+    try {
+      const updated = await withTenantRLS(client, req.rlsCtx, async (c) => {
+        const params: unknown[] = [];
+        const push = (v: unknown) => { params.push(v); return `$${params.length}`; };
+        const sets: string[] = ['last_modified_at = now()', `last_modified_by = ${push(userId)}`];
+        if (b.client_company_id !== undefined) sets.push(`client_company_id = ${push(b.client_company_id)}`);
+        if (b.status            !== undefined) sets.push(`status = ${push(b.status)}`);
+        if (b.name              !== undefined) sets.push(`name = ${push(b.name)}`);
+        if (b.expected_end_date !== undefined) sets.push(`expected_end_date = ${push(b.expected_end_date)}`);
+        if (b.actual_end_date   !== undefined) sets.push(`actual_end_date = ${push(b.actual_end_date)}`);
+        if (b.site_address      !== undefined) sets.push(`site_address = ${push(b.site_address)}`);
+        params.push(id);
+
+        const row = await c.query(
+          `UPDATE jabco_projects SET ${sets.join(', ')} WHERE id = $${params.length} RETURNING id`,
+          params,
+        ).then(r => r.rows[0] ?? null);
+
+        if (!row) throw Object.assign(new Error('PROJECT_NOT_FOUND'), { httpStatus: 404 });
+
+        return c.query(
+          `SELECT p.*, co.name AS client_company_name
+           FROM jabco_projects p
+           LEFT JOIN crm_companies co ON co.id = p.client_company_id
+           WHERE p.id = $1`, [id],
+        ).then(r => r.rows[0]);
+      });
+
+      logger.info({ entity: 'JABCO', action: 'PROJECT_PATCHED', user_id: userId, tenant_id: tenantId, record_id: id });
+      await auditLog(tenantId, userId, 'JabcoProject', 'UPDATE', id, b);
+      ok(res, updated);
+    } finally { client.release(); }
+  } catch (e) {
+    if ((e as { httpStatus?: number }).httpStatus === 404) { err(res, 404, 'PROJECT_NOT_FOUND', 'Project not found.'); return; }
+    next(e);
+  }
+});
+
+// ── DELETE /projects/:id ──────────────────────────────────────────────────────
+// Owner only. Hard deletes the project if it has no payment certs, progress claims,
+// variation orders, or site diary entries.
+
+jabcoProjectsRouter.delete('/:id', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    if (!req.rlsCtx.isOwner) { err(res, 403, 'FORBIDDEN', 'This action requires Owner role.'); return; }
+
+    const idParsed = UUIDParam.safeParse(req.params);
+    if (!idParsed.success) { err(res, 422, 'VALIDATION_ERROR', 'Project ID must be a valid UUID.'); return; }
+
+    const { id } = idParsed.data;
+    const { userId, tenantId } = req.rlsCtx;
+
+    const client = await commercialPool.connect();
+    try {
+      await withTenantRLS(client, req.rlsCtx, async (c) => {
+        const project = await c.query(
+          `SELECT id, name FROM jabco_projects WHERE id = $1`, [id],
+        ).then(r => r.rows[0] ?? null);
+        if (!project) throw Object.assign(new Error('Project not found.'), { status: 404, code: 'PROJECT_NOT_FOUND' });
+
+        const deps = await c.query<{
+          payment_certs: string; progress_claims: string;
+          variation_orders: string; site_diary_entries: string;
+        }>(
+          `SELECT
+             (SELECT count(*) FROM jabco_payment_certificates pc
+              JOIN jabco_progress_claims cl ON cl.id = pc.progress_claim_id
+              WHERE cl.project_id = $1)                                       AS payment_certs,
+             (SELECT count(*) FROM jabco_progress_claims WHERE project_id = $1) AS progress_claims,
+             (SELECT count(*) FROM jabco_variation_orders WHERE project_id = $1) AS variation_orders,
+             (SELECT count(*) FROM jabco_site_diary        WHERE project_id = $1) AS site_diary_entries`,
+          [id],
+        ).then(r => r.rows[0]);
+
+        const blocking: Record<string, number> = {};
+        for (const [k, v] of Object.entries(deps)) {
+          const n = Number(v);
+          if (n > 0) blocking[k] = n;
+        }
+        if (Object.keys(blocking).length > 0) {
+          throw Object.assign(
+            new Error('Project has dependent records and cannot be deleted.'),
+            { status: 409, code: 'DEPENDENCY_EXISTS', blocking },
+          );
+        }
+
+        // Cascade structural records (BoQ items) — no financial significance.
+        await c.query(`DELETE FROM jabco_boq_items   WHERE project_id = $1`, [id]);
+        await c.query(`DELETE FROM jabco_projects    WHERE id = $1`, [id]);
+        return project.name as string;
+      }).then(async (name) => {
+        logger.info({ entity: 'JABCO', action: 'PROJECT_DELETED', user_id: userId, tenant_id: tenantId, record_id: id });
+        await auditLog(tenantId, userId, 'JabcoProject', 'DELETE', id, { name });
+      });
+
+      ok(res, { deleted: true, id });
+    } finally { client.release(); }
+  } catch (e: unknown) {
+    const ex = e as { status?: number; code?: string; blocking?: Record<string, number>; message: string };
+    if (ex.status === 404) { err(res, 404, 'PROJECT_NOT_FOUND', ex.message); return; }
+    if (ex.status === 409) { res.status(409).json({ success: false, data: null, error: ex.message, code: ex.code, blocking: ex.blocking }); return; }
+    next(e);
+  }
 });
 
 // ── GET /projects/:projectId/boq ──────────────────────────────────────────────

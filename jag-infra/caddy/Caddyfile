@@ -46,6 +46,10 @@ api.jagcorporate.com {
 		Referrer-Policy no-referrer
 		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
 		Permissions-Policy "geolocation=(), microphone=(), camera=()"
+		# REST API — no resources to load; block everything
+		Content-Security-Policy "default-src 'none'"
+		# Allow same-site fetch (jagcorporate.com → api.jagcorporate.com)
+		Cross-Origin-Resource-Policy same-site
 		-Server
 	}
 }
@@ -80,22 +84,50 @@ auth.jagcorporate.com {
 		X-Content-Type-Options nosniff
 		Referrer-Policy strict-origin-when-cross-origin
 		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+		# Allow same-site fetch (jagcorporate.com → auth.jagcorporate.com)
+		Cross-Origin-Resource-Policy same-site
 		-Server
 	}
 }
 
-# ── jagcorporate.com / www.jagcorporate.com — static placeholder ─────────────────────────────
-# Replace with reverse_proxy when the React frontend (Phase 7) is deployed.
+# ── jagcorporate.com / www.jagcorporate.com — JAG React frontend ─────────────────────────────
 
 jagcorporate.com, www.jagcorporate.com {
 	import cloudflare_tls
 
-	root * /var/www/jagcorporate.com
-	file_server
-
 	header {
 		X-Frame-Options SAMEORIGIN
 		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+		# React SPA — scripts/styles from self; API + auth calls to JAG subdomains;
+		# Keycloak iframes allowed for silent token refresh
+		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' https://api.jagcorporate.com https://auth.jagcorporate.com; font-src 'self'; frame-src https://auth.jagcorporate.com; object-src 'none'; base-uri 'self'; form-action 'self' https://auth.jagcorporate.com"
+		Cross-Origin-Resource-Policy same-origin
 		-Server
+	}
+
+	# Proxy /api/* to the API container — must be matched before the SPA fallback
+	handle /api/* {
+		reverse_proxy api:3000 {
+			header_up X-Real-IP {http.request.header.CF-Connecting-IP}
+			header_up X-Forwarded-For {http.request.header.CF-Connecting-IP}
+			header_up X-Forwarded-Proto https
+		}
+	}
+
+	# React SPA — fall back to index.html for client-side routing
+	handle {
+		root * /opt/jag/jag-web/dist
+		try_files {path} /index.html
+		file_server
+
+		# Cache hashed assets (JS/CSS bundles) forever — content-addressed filenames
+		@assets path /assets/*
+		header @assets Cache-Control "public, max-age=31536000, immutable"
+
+		# Never cache index.html — ensures browsers always pick up new hashed bundles
+		@html not path /assets/*
+		header @html Cache-Control "no-cache"
 	}
 }

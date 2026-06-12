@@ -1,10 +1,13 @@
-// GET  /api/v1/properties
-// GET  /api/v1/properties/review-queue          ← must be before /:id
-// PATCH /api/v1/properties/review-queue/:id
-// GET  /api/v1/properties/:id
-// GET  /api/v1/properties/:id/leases
-// GET  /api/v1/properties/:id/rent-payments
-// POST /api/v1/properties/:id/rent-payments
+// GET    /api/v1/properties
+// GET    /api/v1/properties/review-queue          ← must be before /:id
+// PATCH  /api/v1/properties/review-queue/:id
+// GET    /api/v1/properties/:id
+// PATCH  /api/v1/properties/:id
+// DELETE /api/v1/properties/:id                  (Owner only — hard delete if no financial records)
+// GET    /api/v1/properties/:id/leases
+// GET    /api/v1/properties/:id/rent-payments
+// POST   /api/v1/properties/:id/rent-payments
+// GET    /api/v1/properties/:id/rent-payments/:paymentId/receipt
 
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import { z } from 'zod';
@@ -23,7 +26,7 @@ const PropertyParam   = z.object({ propertyId: z.string().uuid() });
 const PropertiesQuerySchema = z.object({
   is_rented: z.enum(['true', 'false']).optional(),
   page:  z.coerce.number().int().min(1).default(1),
-  limit: z.coerce.number().int().min(1).max(100).default(20),
+  limit: z.coerce.number().int().min(1).max(500).default(20),
 }).strict();
 
 const RentPaymentsQuerySchema = z.object({
@@ -41,9 +44,10 @@ const CreatePaymentSchema = z.object({
   amount_due:     z.number().positive(),
   amount_paid:    z.number().min(0),
   payment_method: PaymentMethodEnum,
-  receipt_number: z.string().max(100).optional(),
-  notes:          z.string().max(1000).optional(),
+  receipt_number:  z.string().max(100).optional(),
+  notes:           z.string().max(1000).optional(),
   late_fee_charged: z.number().min(0).default(0),
+  proof_image_url: z.string().max(1000).optional(),
   idempotency_key: z.string().uuid(),
 }).strict();
 
@@ -71,6 +75,78 @@ async function auditLog(ownerId: string, entity: string, action: string, recordI
     logger.warn({ entity: 'PROPERTIES', action: 'AUDIT_LOG_FAILED', error_message: (e as Error).message });
   } finally { client.release(); }
 }
+
+const CreatePropertySchema = z.object({
+  name:             z.string().min(1).max(200),
+  property_code:    z.string().min(1).max(20),
+  address_line1:    z.string().max(300).optional(),
+  address_line2:    z.string().max(300).optional(),
+  city:             z.string().max(100).optional(),
+  country:          z.string().max(100).default('Trinidad and Tobago'),
+  property_type:    z.enum(['RESIDENTIAL', 'COMMERCIAL', 'LAND', 'MIXED', 'AGRICULTURAL']),
+  tenure_type:      z.enum(['FREEHOLD', 'LEASEHOLD', 'STATE_LAND']).default('FREEHOLD'),
+  bedrooms:         z.number().int().min(0).optional(),
+  bathrooms:        z.number().min(0).optional(),
+  lot_size_sqm:     z.number().positive().optional(),
+  floor_area_sqm:   z.number().positive().optional(),
+  purchase_price:   z.number().positive().optional(),
+  purchase_date:    z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  current_valuation: z.number().positive().optional(),
+  valuation_date:   z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  notes:            z.string().optional(),
+}).strict();
+
+const CreateLeaseSchema = z.object({
+  tenant_id:           z.string().uuid(),
+  unit_id:             z.string().uuid().optional(),
+  lease_type:          z.enum(['RESIDENTIAL', 'COMMERCIAL', 'SHORT_TERM', 'OTHER']).default('RESIDENTIAL'),
+  start_date:          z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  end_date:            z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  monthly_rent:        z.number().positive(),
+  security_deposit:    z.number().min(0).default(0),
+  payment_due_day:     z.number().int().min(1).max(28).default(1),
+  currency:            z.string().length(3).default('TTD'),
+  late_fee_type:       z.enum(['NONE','FIXED','PERCENT']).default('NONE'),
+  late_fee_value:      z.number().min(0).default(0),
+  late_fee_grace_days: z.number().int().min(0).default(0),
+  notes:               z.string().optional(),
+}).strict();
+
+// ── POST /properties ──────────────────────────────────────────────────────────
+
+propertiesRouter.post('/', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const parsed = CreatePropertySchema.safeParse(req.body);
+    if (!parsed.success) { err(res, 422, 'VALIDATION_ERROR', 'Request body validation failed.'); return; }
+
+    const b = parsed.data;
+    const { userId: ownerId } = req.rlsCtx;
+
+    const client = await propertiesPool.connect();
+    try {
+      const property = await withOwnerRLS(client, req.rlsCtx, (c) =>
+        c.query(
+          `INSERT INTO prop_properties
+             (owner_id, name, property_code, address_line1, address_line2, city, country,
+              property_type, tenure_type, bedrooms, bathrooms, lot_size_sqm, floor_area_sqm,
+              purchase_price, purchase_date, current_valuation, valuation_date, notes)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+           RETURNING *`,
+          [
+            ownerId, b.name, b.property_code, b.address_line1 ?? null, b.address_line2 ?? null,
+            b.city ?? null, b.country, b.property_type, b.tenure_type,
+            b.bedrooms ?? null, b.bathrooms ?? null, b.lot_size_sqm ?? null, b.floor_area_sqm ?? null,
+            b.purchase_price ?? null, b.purchase_date ?? null, b.current_valuation ?? null,
+            b.valuation_date ?? null, b.notes ?? null,
+          ],
+        ).then(r => r.rows[0]),
+      );
+      logger.info({ entity: 'PROPERTIES', action: 'PROPERTY_CREATED', user_id: ownerId, record_id: property.id });
+      await auditLog(ownerId, 'Property', 'CREATE', property.id, { name: b.name, property_code: b.property_code });
+      ok(res, property, 201);
+    } finally { client.release(); }
+  } catch (e) { next(e); }
+});
 
 // ── GET /properties ────────────────────────────────────────────────────────────
 
@@ -175,6 +251,78 @@ propertiesRouter.patch('/review-queue/:id', async (req: Request, res: Response, 
   } catch (e) { next(e); }
 });
 
+// ── GET /properties/arrears ───────────────────────────────────────────────────
+// MUST stay before GET /:id — Express matches in order; 'arrears' is not a UUID
+// but /:id would capture it first and return 422.
+
+propertiesRouter.get('/arrears', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const client = await propertiesPool.connect();
+    try {
+      const rows = await withOwnerRLS(client, req.rlsCtx, (c) =>
+        c.query(
+          `SELECT rp.id, rp.payment_date, rp.period_month, rp.period_year,
+                  rp.amount_due, rp.amount_paid,
+                  (rp.amount_due - rp.amount_paid) AS balance_owed,
+                  rp.late_fee_charged, rp.is_late,
+                  la.id        AS lease_id,
+                  la.monthly_rent,
+                  p.id         AS property_id,
+                  p.name       AS property_name,
+                  p.property_code,
+                  COALESCE(t.company_name, CONCAT(t.first_name, ' ', COALESCE(t.last_name, ''))) AS tenant_name,
+                  t.email      AS tenant_email,
+                  t.phone      AS tenant_phone,
+                  (CURRENT_DATE - rp.payment_date) AS days_overdue
+           FROM   prop_rent_payments rp
+           JOIN   prop_lease_agreements la ON la.id   = rp.lease_id
+           JOIN   prop_properties p        ON p.id    = la.property_id
+           JOIN   prop_property_tenants t  ON t.id    = la.tenant_id
+           WHERE  rp.amount_paid < rp.amount_due
+           ORDER  BY days_overdue DESC, balance_owed DESC`,
+          [],
+        ).then(r => r.rows),
+      );
+      logger.info({ entity: 'PROPERTIES', action: 'ARREARS_LIST', user_id: req.rlsCtx.userId, count: rows.length });
+      ok(res, rows);
+    } finally { client.release(); }
+  } catch (e) { next(e); }
+});
+
+// ── GET /properties/lease-expiry ──────────────────────────────────────────────
+// MUST stay before GET /:id for the same reason as /arrears above.
+
+propertiesRouter.get('/lease-expiry', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const client = await propertiesPool.connect();
+    try {
+      const rows = await withOwnerRLS(client, req.rlsCtx, (c) =>
+        c.query(
+          `SELECT la.id, la.start_date, la.end_date, la.monthly_rent, la.currency,
+                  la.lease_type, la.status,
+                  (la.end_date - CURRENT_DATE) AS days_remaining,
+                  p.id   AS property_id,
+                  p.name AS property_name,
+                  p.property_code,
+                  COALESCE(t.company_name, CONCAT(t.first_name, ' ', COALESCE(t.last_name, ''))) AS tenant_name,
+                  t.email     AS tenant_email,
+                  t.phone     AS tenant_phone
+           FROM   prop_lease_agreements la
+           JOIN   prop_properties       p ON p.id = la.property_id
+           JOIN   prop_property_tenants t ON t.id = la.tenant_id
+           WHERE  la.status = 'ACTIVE'
+             AND  la.end_date  IS NOT NULL
+             AND  la.end_date  <= CURRENT_DATE + INTERVAL '90 days'
+           ORDER  BY la.end_date ASC`,
+          [],
+        ).then(r => r.rows),
+      );
+      logger.info({ entity: 'PROPERTIES', action: 'LEASE_EXPIRY_LIST', user_id: req.rlsCtx.userId, count: rows.length });
+      ok(res, rows);
+    } finally { client.release(); }
+  } catch (e) { next(e); }
+});
+
 // ── GET /properties/:id ────────────────────────────────────────────────────────
 
 propertiesRouter.get('/:id', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
@@ -214,6 +362,66 @@ propertiesRouter.get('/:id', async (req: Request, res: Response, next: NextFunct
   } catch (e) { next(e); }
 });
 
+// ── PATCH /properties/:id ─────────────────────────────────────────────────────
+
+const UpdatePropertySchema = z.object({
+  name:              z.string().min(1).max(200).optional(),
+  address_line1:     z.string().max(300).optional(),
+  address_line2:     z.string().max(300).optional(),
+  city:              z.string().max(100).optional(),
+  country:           z.string().max(100).optional(),
+  current_valuation: z.number().positive().optional(),
+  valuation_date:    z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  notes:             z.string().optional(),
+}).strict().refine(d => Object.keys(d).length > 0, { message: 'At least one field required.' });
+
+propertiesRouter.patch('/:id', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const idParsed = UUIDParam.safeParse(req.params);
+    if (!idParsed.success) { err(res, 422, 'VALIDATION_ERROR', 'Property ID must be a valid UUID.'); return; }
+
+    const bodyParsed = UpdatePropertySchema.safeParse(req.body);
+    if (!bodyParsed.success) { err(res, 422, 'VALIDATION_ERROR', 'Request body validation failed.'); return; }
+
+    const { id } = idParsed.data;
+    const b = bodyParsed.data;
+    const { userId: ownerId } = req.rlsCtx;
+
+    const setClauses: string[] = [];
+    const params: unknown[] = [];
+    const push = (v: unknown) => { params.push(v); return `$${params.length}`; };
+
+    if (b.name              !== undefined) setClauses.push(`name              = ${push(b.name)}`);
+    if (b.address_line1     !== undefined) setClauses.push(`address_line1     = ${push(b.address_line1)}`);
+    if (b.address_line2     !== undefined) setClauses.push(`address_line2     = ${push(b.address_line2)}`);
+    if (b.city              !== undefined) setClauses.push(`city              = ${push(b.city)}`);
+    if (b.country           !== undefined) setClauses.push(`country           = ${push(b.country)}`);
+    if (b.current_valuation !== undefined) setClauses.push(`current_valuation = ${push(b.current_valuation)}`);
+    if (b.valuation_date    !== undefined) setClauses.push(`valuation_date    = ${push(b.valuation_date)}`);
+    if (b.notes             !== undefined) setClauses.push(`notes             = ${push(b.notes)}`);
+
+    setClauses.push(`last_modified_at = now()`);
+    setClauses.push(`last_modified_by = ${push(ownerId)}`);
+
+    const client = await propertiesPool.connect();
+    try {
+      const property = await withOwnerRLS(client, req.rlsCtx, (c) =>
+        c.query(
+          `UPDATE prop_properties SET ${setClauses.join(', ')}
+           WHERE id = ${push(id)} AND is_active = true
+           RETURNING *`,
+          params,
+        ).then(r => r.rows[0] ?? null),
+      );
+
+      if (!property) { err(res, 404, 'PROPERTY_NOT_FOUND', 'Property not found.'); return; }
+      logger.info({ entity: 'PROPERTIES', action: 'PROPERTY_UPDATED', user_id: ownerId, record_id: id });
+      await auditLog(ownerId, 'Property', 'UPDATE', id, b);
+      ok(res, property);
+    } finally { client.release(); }
+  } catch (e) { next(e); }
+});
+
 // ── GET /properties/:propertyId/leases ────────────────────────────────────────
 
 propertiesRouter.get('/:propertyId/leases', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
@@ -237,6 +445,98 @@ propertiesRouter.get('/:propertyId/leases', async (req: Request, res: Response, 
       ok(res, rows);
     } finally { client.release(); }
   } catch (e) { next(e); }
+});
+
+// ── POST /properties/:propertyId/leases ──────────────────────────────────────
+
+propertiesRouter.post('/:propertyId/leases', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const paramParsed = PropertyParam.safeParse(req.params);
+    if (!paramParsed.success) { err(res, 422, 'VALIDATION_ERROR', 'Property ID must be a valid UUID.'); return; }
+
+    const bodyParsed = CreateLeaseSchema.safeParse(req.body);
+    if (!bodyParsed.success) { err(res, 422, 'VALIDATION_ERROR', 'Request body validation failed.'); return; }
+
+    const b = bodyParsed.data;
+    const { userId: ownerId } = req.rlsCtx;
+    const { propertyId } = paramParsed.data;
+
+    const client = await propertiesPool.connect();
+    try {
+      const lease = await withOwnerRLS(client, req.rlsCtx, async (c) => {
+        // Verify property belongs to this owner
+        const prop = await c.query(`SELECT id FROM prop_properties WHERE id = $1 AND is_active = true`, [propertyId]);
+        if (prop.rows.length === 0) throw Object.assign(new Error('Property not found.'), { status: 404, code: 'PROPERTY_NOT_FOUND' });
+
+        const result = await c.query(
+          `INSERT INTO prop_lease_agreements
+             (owner_id, property_id, tenant_id, unit_id, lease_type, start_date, end_date,
+              monthly_rent, security_deposit, payment_due_day, currency, status,
+              late_fee_type, late_fee_value, late_fee_grace_days, notes)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'ACTIVE',$12,$13,$14,$15)
+           RETURNING *`,
+          [
+            ownerId, propertyId, b.tenant_id, b.unit_id ?? null, b.lease_type, b.start_date, b.end_date ?? null,
+            b.monthly_rent, b.security_deposit, b.payment_due_day, b.currency,
+            b.late_fee_type, b.late_fee_value, b.late_fee_grace_days, b.notes ?? null,
+          ],
+        );
+        // Update property is_rented flag
+        await c.query(`UPDATE prop_properties SET is_rented = true WHERE id = $1`, [propertyId]);
+        return result.rows[0];
+      });
+      logger.info({ entity: 'PROPERTIES', action: 'LEASE_CREATED', user_id: ownerId, record_id: lease.id });
+      await auditLog(ownerId, 'Lease', 'CREATE', lease.id, { property_id: propertyId, tenant_id: b.tenant_id });
+      ok(res, lease, 201);
+    } finally { client.release(); }
+  } catch (e) { next(e); }
+});
+
+// ── DELETE /properties/:propertyId/leases/:leaseId ───────────────────────────
+// Owner only. Hard deletes a lease and its rent payments if no blocking conditions.
+
+propertiesRouter.delete('/:propertyId/leases/:leaseId', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    if (!req.rlsCtx.isOwner) { err(res, 403, 'FORBIDDEN', 'This action requires Owner role.'); return; }
+
+    const paramParsed = z.object({ propertyId: z.string().uuid(), leaseId: z.string().uuid() }).safeParse(req.params);
+    if (!paramParsed.success) { err(res, 422, 'VALIDATION_ERROR', 'Invalid path parameters.'); return; }
+
+    const { propertyId, leaseId } = paramParsed.data;
+    const { userId: ownerId } = req.rlsCtx;
+
+    const client = await propertiesPool.connect();
+    try {
+      await withOwnerRLS(client, req.rlsCtx, async (c) => {
+        const lease = await c.query(
+          `SELECT id FROM prop_lease_agreements WHERE id = $1 AND property_id = $2`,
+          [leaseId, propertyId],
+        ).then(r => r.rows[0] ?? null);
+        if (!lease) throw Object.assign(new Error('Lease not found.'), { status: 404, code: 'LEASE_NOT_FOUND' });
+
+        // Cascade rent payments — they are child records of the lease
+        await c.query(`DELETE FROM prop_rent_payments WHERE lease_id = $1`, [leaseId]);
+        await c.query(`DELETE FROM prop_lease_agreements WHERE id = $1`, [leaseId]);
+
+        // Update is_rented flag if no active leases remain
+        const remaining = await c.query(
+          `SELECT count(*) FROM prop_lease_agreements WHERE property_id = $1 AND status = 'ACTIVE'`,
+          [propertyId],
+        ).then(r => Number(r.rows[0].count));
+        if (remaining === 0) {
+          await c.query(`UPDATE prop_properties SET is_rented = false WHERE id = $1`, [propertyId]);
+        }
+      });
+
+      logger.info({ entity: 'PROPERTIES', action: 'LEASE_DELETED', user_id: ownerId, record_id: leaseId });
+      await auditLog(ownerId, 'Lease', 'DELETE', leaseId, { property_id: propertyId });
+      ok(res, { deleted: true, id: leaseId });
+    } finally { client.release(); }
+  } catch (e: unknown) {
+    const ex = e as { status?: number; code?: string; message: string };
+    if (ex.status === 404) { err(res, 404, 'LEASE_NOT_FOUND', ex.message); return; }
+    next(e);
+  }
 });
 
 // ── GET /properties/:propertyId/rent-payments ─────────────────────────────────
@@ -265,7 +565,7 @@ propertiesRouter.get('/:propertyId/rent-payments', async (req: Request, res: Res
           `SELECT rp.id, rp.payment_date, rp.period_month, rp.period_year,
                   rp.amount_due, rp.amount_paid, rp.payment_method,
                   rp.receipt_number, rp.wipay_reference, rp.is_late,
-                  rp.late_fee_charged, rp.notes, rp.created_at
+                  rp.late_fee_charged, rp.notes, rp.proof_image_url, rp.created_at
            FROM   prop_rent_payments rp
            JOIN   prop_lease_agreements la ON la.id = rp.lease_id
            WHERE  la.property_id = $1
@@ -311,14 +611,14 @@ propertiesRouter.post('/:propertyId/rent-payments', async (req: Request, res: Re
           `INSERT INTO prop_rent_payments
              (owner_id, lease_id, payment_date, period_month, period_year,
               amount_due, amount_paid, payment_method, receipt_number,
-              is_late, late_fee_charged, notes, idempotency_key)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+              is_late, late_fee_charged, notes, proof_image_url, idempotency_key)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
            RETURNING *`,
           [
             ownerId, body.lease_id, body.payment_date, body.period_month, body.period_year,
             body.amount_due, body.amount_paid, body.payment_method,
             body.receipt_number ?? null, isLate, body.late_fee_charged,
-            body.notes ?? null, body.idempotency_key,
+            body.notes ?? null, body.proof_image_url ?? null, body.idempotency_key,
           ],
         );
         return { payment: result.rows[0], created: true };
@@ -327,6 +627,328 @@ propertiesRouter.post('/:propertyId/rent-payments', async (req: Request, res: Re
       logger.info({ entity: 'PROPERTIES', action: created ? 'PAYMENT_RECORDED' : 'PAYMENT_DUPLICATE', user_id: ownerId, record_id: payment.id });
       if (created) await auditLog(ownerId, 'RentPayment', 'CREATE', payment.id, body);
       ok(res, payment, created ? 201 : 200);
+    } finally { client.release(); }
+  } catch (e) { next(e); }
+});
+
+// ── GET /properties/:id/financial-summary ────────────────────────────────────
+// Aggregates income and expenses for the last 12 calendar months.
+
+propertiesRouter.get('/:id/financial-summary', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const idParsed = UUIDParam.safeParse(req.params);
+    if (!idParsed.success) { err(res, 422, 'VALIDATION_ERROR', 'Property ID must be a valid UUID.'); return; }
+    const { id } = idParsed.data;
+
+    const client = await propertiesPool.connect();
+    try {
+      const summary = await withOwnerRLS(client, req.rlsCtx, async (c) => {
+        const prop = await c.query(`SELECT id, name, current_valuation FROM prop_properties WHERE id = $1 AND is_active = true`, [id]);
+        if (prop.rows.length === 0) return null;
+
+        const [rentRes, maintRes, utilRes, invoiceRes, mortgageRes] = await Promise.all([
+          // Rent collected last 12 months
+          c.query<{ total: string }>(`
+            SELECT COALESCE(SUM(rp.amount_paid), 0) AS total
+            FROM   prop_rent_payments rp
+            JOIN   prop_lease_agreements la ON la.id = rp.lease_id
+            WHERE  la.property_id = $1
+              AND  rp.payment_date >= CURRENT_DATE - INTERVAL '12 months'`, [id]),
+          // Maintenance actual costs last 12 months (completed)
+          c.query<{ total: string }>(`
+            SELECT COALESCE(SUM(actual_cost), 0) AS total
+            FROM   prop_maintenance_requests
+            WHERE  property_id = $1
+              AND  status IN ('COMPLETED','CLOSED')
+              AND  completed_date >= CURRENT_DATE - INTERVAL '12 months'`, [id]),
+          // Utility bills last 12 months
+          c.query<{ total: string }>(`
+            SELECT COALESCE(SUM(amount + vat_amount), 0) AS total
+            FROM   prop_utility_bills
+            WHERE  property_id = $1
+              AND  bill_date >= CURRENT_DATE - INTERVAL '12 months'`, [id]),
+          // Paid vendor invoices last 12 months
+          c.query<{ total: string }>(`
+            SELECT COALESCE(SUM(amount + vat_amount), 0) AS total
+            FROM   prop_vendor_invoices
+            WHERE  property_id = $1
+              AND  status = 'PAID'
+              AND  paid_date >= CURRENT_DATE - INTERVAL '12 months'`, [id]),
+          // Active mortgage annual cost
+          c.query<{ total: string }>(`
+            SELECT COALESCE(SUM(monthly_payment) * 12, 0) AS total
+            FROM   prop_mortgage_register
+            WHERE  property_id = $1 AND status = 'ACTIVE'`, [id]),
+        ]);
+
+        const rentIn        = Number(rentRes.rows[0].total);
+        const maintOut      = Number(maintRes.rows[0].total);
+        const utilOut       = Number(utilRes.rows[0].total);
+        const invoiceOut    = Number(invoiceRes.rows[0].total);
+        const mortgageOut   = Number(mortgageRes.rows[0].total);
+        const totalExpenses = maintOut + utilOut + invoiceOut + mortgageOut;
+        const netIncome     = rentIn - totalExpenses;
+        const valuation     = Number(prop.rows[0].current_valuation ?? 0);
+        const grossYield    = valuation > 0 ? (rentIn / valuation) * 100 : null;
+        const netYield      = valuation > 0 ? (netIncome / valuation) * 100 : null;
+
+        return {
+          property_id:       id,
+          period_months:     12,
+          rent_collected:    rentIn,
+          maintenance_cost:  maintOut,
+          utility_cost:      utilOut,
+          vendor_invoice_cost: invoiceOut,
+          mortgage_cost:     mortgageOut,
+          total_expenses:    totalExpenses,
+          net_income:        netIncome,
+          current_valuation: valuation,
+          gross_yield_percent: grossYield,
+          net_yield_percent:   netYield,
+        };
+      });
+
+      if (!summary) { err(res, 404, 'PROPERTY_NOT_FOUND', 'Property not found.'); return; }
+      logger.info({ entity: 'PROPERTIES', action: 'FINANCIAL_SUMMARY', user_id: req.rlsCtx.userId, record_id: id });
+      ok(res, summary);
+    } finally { client.release(); }
+  } catch (e) { next(e); }
+});
+
+// ── PATCH /properties/:propertyId/leases/:leaseId/refund-deposit ─────────────
+
+const RefundDepositSchema = z.object({
+  refunded_amount:  z.number().min(0),
+  deductions:       z.number().min(0).default(0),
+  refund_date:      z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  notes:            z.string().max(2000).optional(),
+  idempotency_key:  z.string().uuid(),
+}).strict();
+
+propertiesRouter.patch('/:propertyId/leases/:leaseId/refund-deposit', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const paramParsed = z.object({ propertyId: z.string().uuid(), leaseId: z.string().uuid() }).safeParse(req.params);
+    if (!paramParsed.success) { err(res, 422, 'VALIDATION_ERROR', 'Invalid path parameters.'); return; }
+
+    const bodyParsed = RefundDepositSchema.safeParse(req.body);
+    if (!bodyParsed.success) { err(res, 422, 'VALIDATION_ERROR', 'Request body validation failed.'); return; }
+
+    const { propertyId, leaseId } = paramParsed.data;
+    const b = bodyParsed.data;
+    const { userId: ownerId } = req.rlsCtx;
+
+    const client = await propertiesPool.connect();
+    try {
+      const lease = await withOwnerRLS(client, req.rlsCtx, async (c) => {
+        const existing = await c.query(
+          `SELECT id, security_deposit FROM prop_lease_agreements WHERE id = $1 AND property_id = $2`,
+          [leaseId, propertyId],
+        );
+        if (existing.rows.length === 0) throw Object.assign(new Error('Lease not found.'), { status: 404, code: 'LEASE_NOT_FOUND' });
+
+        const deposit = Number(existing.rows[0].security_deposit ?? 0);
+        const depositStatus = b.refunded_amount >= deposit - b.deductions
+          ? 'FULLY_REFUNDED'
+          : 'PARTIALLY_REFUNDED';
+
+        const result = await c.query(
+          `UPDATE prop_lease_agreements
+           SET  deposit_refunded_amount = $1,
+                deposit_deductions      = $2,
+                deposit_refund_date     = $3,
+                deposit_refund_notes    = $4,
+                deposit_status          = $5,
+                last_modified_at        = now(),
+                last_modified_by        = $6
+           WHERE id = $7
+           RETURNING *`,
+          [b.refunded_amount, b.deductions, b.refund_date, b.notes ?? null, depositStatus, ownerId, leaseId],
+        );
+        return result.rows[0];
+      });
+
+      logger.info({ entity: 'PROPERTIES', action: 'DEPOSIT_REFUNDED', user_id: ownerId, record_id: leaseId });
+      await auditLog(ownerId, 'Lease', 'DEPOSIT_REFUND', leaseId, b);
+      ok(res, lease);
+    } finally { client.release(); }
+  } catch (e) { next(e); }
+});
+
+// ── DELETE /properties/:id ────────────────────────────────────────────────────
+// Owner only. Hard deletes the property if it has no financial records.
+// Returns 409 DEPENDENCY_EXISTS with a blocking summary if records exist.
+
+propertiesRouter.delete('/:id', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    if (!req.rlsCtx.isOwner) { err(res, 403, 'FORBIDDEN', 'This action requires Owner role.'); return; }
+
+    const idParsed = UUIDParam.safeParse(req.params);
+    if (!idParsed.success) { err(res, 422, 'VALIDATION_ERROR', 'Property ID must be a valid UUID.'); return; }
+
+    const { id } = idParsed.data;
+    const { userId: ownerId } = req.rlsCtx;
+
+    const client = await propertiesPool.connect();
+    try {
+      await withOwnerRLS(client, req.rlsCtx, async (c) => {
+        const prop = await c.query(
+          `SELECT id, name FROM prop_properties WHERE id = $1`,
+          [id],
+        ).then(r => r.rows[0] ?? null);
+        if (!prop) throw Object.assign(new Error('Property not found.'), { status: 404, code: 'PROPERTY_NOT_FOUND' });
+
+        const deps = await c.query<{
+          leases: string; rent_payments: string; mortgages: string;
+          maintenance: string; vendor_invoices: string; insurance: string;
+          tax_records: string; inspections: string;
+        }>(
+          `SELECT
+             (SELECT count(*) FROM prop_lease_agreements     WHERE property_id = $1)          AS leases,
+             (SELECT count(*) FROM prop_rent_payments rp
+              JOIN   prop_lease_agreements la ON la.id = rp.lease_id
+              WHERE  la.property_id = $1)                                                     AS rent_payments,
+             (SELECT count(*) FROM prop_mortgage_register    WHERE property_id = $1)          AS mortgages,
+             (SELECT count(*) FROM prop_maintenance_requests WHERE property_id = $1)          AS maintenance,
+             (SELECT count(*) FROM prop_vendor_invoices      WHERE property_id = $1)          AS vendor_invoices,
+             (SELECT count(*) FROM prop_insurance            WHERE property_id = $1)          AS insurance,
+             (SELECT count(*) FROM prop_property_tax         WHERE property_id = $1)          AS tax_records,
+             (SELECT count(*) FROM prop_inspections          WHERE property_id = $1)          AS inspections`,
+          [id],
+        ).then(r => r.rows[0]);
+
+        const blocking: Record<string, number> = {};
+        for (const [k, v] of Object.entries(deps)) {
+          const n = Number(v);
+          if (n > 0) blocking[k] = n;
+        }
+
+        if (Object.keys(blocking).length > 0) {
+          throw Object.assign(
+            new Error('Property has dependent records and cannot be deleted.'),
+            { status: 409, code: 'DEPENDENCY_EXISTS', blocking },
+          );
+        }
+
+        await c.query(`DELETE FROM prop_properties WHERE id = $1`, [id]);
+        return prop.name;
+      }).then(async (name) => {
+        logger.info({ entity: 'PROPERTIES', action: 'PROPERTY_DELETED', user_id: ownerId, record_id: id });
+        await auditLog(ownerId, 'Property', 'DELETE', id, { name });
+      });
+
+      ok(res, { deleted: true, id });
+    } finally { client.release(); }
+  } catch (e: unknown) {
+    const ex = e as { status?: number; code?: string; blocking?: Record<string, number>; message: string };
+    if (ex.status === 404) { err(res, 404, 'PROPERTY_NOT_FOUND', ex.message); return; }
+    if (ex.status === 409) {
+      res.status(409).json({ success: false, data: null, error: ex.message, code: ex.code, blocking: ex.blocking });
+      return;
+    }
+    next(e);
+  }
+});
+
+// ── PATCH /properties/:propertyId/rent-payments/:paymentId/charge-late-fee ───
+// Charges a late fee on an existing payment and marks it as late.
+
+const ChargeLateFeeSchema = z.object({
+  amount:          z.number().positive(),
+  idempotency_key: z.string().uuid(),
+}).strict();
+
+propertiesRouter.patch('/:propertyId/rent-payments/:paymentId/charge-late-fee', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const paramParsed = z.object({ propertyId: z.string().uuid(), paymentId: z.string().uuid() }).safeParse(req.params);
+    if (!paramParsed.success) { err(res, 422, 'VALIDATION_ERROR', 'Invalid path parameters.'); return; }
+
+    const bodyParsed = ChargeLateFeeSchema.safeParse(req.body);
+    if (!bodyParsed.success) { err(res, 422, 'VALIDATION_ERROR', 'Request body validation failed.'); return; }
+
+    const { propertyId, paymentId } = paramParsed.data;
+    const { amount } = bodyParsed.data;
+    const { userId: ownerId } = req.rlsCtx;
+
+    const client = await propertiesPool.connect();
+    try {
+      const payment = await withOwnerRLS(client, req.rlsCtx, async (c) => {
+        const result = await c.query(
+          `UPDATE prop_rent_payments rp
+           SET    late_fee_charged = $1, is_late = true
+           FROM   prop_lease_agreements la
+           WHERE  rp.id = $2
+             AND  la.id = rp.lease_id
+             AND  la.property_id = $3
+           RETURNING rp.*`,
+          [amount, paymentId, propertyId],
+        );
+        return result.rows[0] ?? null;
+      });
+
+      if (!payment) { err(res, 404, 'PAYMENT_NOT_FOUND', 'Rent payment not found.'); return; }
+      logger.info({ entity: 'PROPERTIES', action: 'LATE_FEE_CHARGED', user_id: ownerId, record_id: paymentId, amount });
+      await auditLog(ownerId, 'RentPayment', 'LATE_FEE_CHARGED', paymentId, { amount });
+      ok(res, payment);
+    } finally { client.release(); }
+  } catch (e) { next(e); }
+});
+
+// ── GET /properties/:propertyId/rent-payments/:paymentId/receipt ──────────────
+// Returns structured receipt data for WhatsApp receipt generation on the frontend.
+
+propertiesRouter.get('/:propertyId/rent-payments/:paymentId/receipt', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const paramParsed = z.object({
+      propertyId: z.string().uuid(),
+      paymentId:  z.string().uuid(),
+    }).safeParse(req.params);
+    if (!paramParsed.success) { err(res, 422, 'VALIDATION_ERROR', 'Invalid path parameters.'); return; }
+
+    const { propertyId, paymentId } = paramParsed.data;
+
+    const client = await propertiesPool.connect();
+    try {
+      const receipt = await withOwnerRLS(client, req.rlsCtx, async (c) => {
+        const result = await c.query(
+          `SELECT
+             rp.id,
+             rp.payment_date,
+             rp.period_month,
+             rp.period_year,
+             rp.amount_due,
+             rp.amount_paid,
+             rp.late_fee_charged,
+             rp.payment_method,
+             rp.receipt_number,
+             rp.notes,
+             rp.proof_image_url,
+             rp.created_at,
+             -- Lease details
+             la.id              AS lease_id,
+             la.monthly_rent    AS monthly_rent,
+             -- Tenant details
+             t.full_name        AS tenant_name,
+             t.phone            AS tenant_phone,
+             -- Property details
+             p.name             AS property_name,
+             p.address          AS property_address,
+             -- Unit details (if any)
+             u.unit_number      AS unit_number
+           FROM   prop_rent_payments rp
+           JOIN   prop_lease_agreements la ON la.id = rp.lease_id
+           JOIN   prop_property_tenants t  ON t.id  = la.tenant_id
+           JOIN   prop_properties p        ON p.id  = la.property_id
+           LEFT JOIN prop_units u          ON u.id  = la.unit_id
+           WHERE  rp.id = $1
+             AND  la.property_id = $2`,
+          [paymentId, propertyId],
+        );
+        return result.rows[0] ?? null;
+      });
+
+      if (!receipt) { err(res, 404, 'PAYMENT_NOT_FOUND', 'Rent payment not found.'); return; }
+      logger.info({ entity: 'PROPERTIES', action: 'RECEIPT_FETCHED', user_id: req.rlsCtx.userId, record_id: paymentId });
+      ok(res, receipt);
     } finally { client.release(); }
   } catch (e) { next(e); }
 });

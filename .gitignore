@@ -5,3 +5,17 @@ prod_modules/
 *.log
 uploads/
 scripts/ollama-batch/.env.ollama-batch
+
+# Build artifacts — pre-built tarballs are not source
+*.tar.gz
+
+# MS Office temp lock files
+~$*.docx
+~$*.xlsx
+
+# Data migration — staging payloads and audit logs contain business data
+migration/staging/
+migration/audit/
+
+# ZAP security scan reports contain auth tokens and PII
+security/reports/

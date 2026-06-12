@@ -23,12 +23,13 @@ WORKDIR /app
 COPY package.json ./
 
 # Copy pre-built TypeScript output
-COPY dist ./dist
+# --chown ensures the node user owns all files regardless of host permissions
+COPY --chown=node:node dist ./dist
 
 # Copy pre-installed production node_modules from host.
 # All production dependencies (dotenv, express, jose, pg, zod) are pure JS —
 # no native addons — so Windows-built node_modules run on Alpine without issue.
-COPY prod_modules/node_modules ./node_modules
+COPY --chown=node:node prod_modules/node_modules ./node_modules
 
 # Never run as root
 USER node
