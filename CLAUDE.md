@@ -1,7 +1,7 @@
 # JAG Integrated Business Platform — Claude Session Context
 
 **Owner:** Robert Johnson-Attin | Barataria, Trinidad & Tobago
-**Architecture:** v1.9 | **Current Phase:** 7 (React Frontend) | **Updated:** 2026-06-11
+**Architecture:** v1.9 | **Current Phase:** ALL PHASES COMPLETE — in production | **Updated:** 2026-06-12
 
 ---
 
@@ -11,7 +11,7 @@
 |---|---|---|
 | 0–5 | Infrastructure, all backend modules, security hardening | **COMPLETE** |
 | 6 | Oracle Cloud production deployment, HTTPS auth | **COMPLETE** |
-| 7 | React frontend (`jag-web/`) | **IN PROGRESS — active development** |
+| 7 | React frontend (`jag-web/`) | **COMPLETE** |
 
 **Production endpoints:**
 - API: `https://api.jagcorporate.com/health/ready` → `{"status":"ready"}`
@@ -227,7 +227,7 @@ Step 6 (ZAP baseline) fires automatically when `ZAP_SCAN_PASSWORD` env var is se
 
 ---
 
-## PHASE 7 — REACT FRONTEND PLAN
+## PHASE 7 — REACT FRONTEND (COMPLETE)
 
 **App directory:** `jag-web/` (at repo root, alongside `jag-api/` and `jag-infra/`)
 **Stack:** React 18 + TypeScript + Vite + TailwindCSS + React Query + Keycloak JS adapter
@@ -268,6 +268,19 @@ Step 6 (ZAP baseline) fires automatically when `ZAP_SCAN_PASSWORD` env var is se
 | Properties PATCH | `routes/properties/properties.ts` | `PATCH /:id` — edit name/address/valuation |
 | Net-worth physical assets | `routes/finance/net-worth.ts` | Cross-DB: IMS items+vehicles + property valuations feed into snapshot |
 | File routes | `routes/files/` | MinIO presigned URL helpers |
+| Finance GL | `routes/finance/gl.ts` | Chart of accounts + journal entries |
+| Finance Expenses | `routes/finance/expenses.ts` | Expense submission + approval workflow |
+| Finance Intercompany | `routes/finance/intercompany.ts` | Intercompany charges + eliminations |
+| Finance Insurance | `routes/finance/insurance.ts` | Insurance policies + premiums + claims |
+| Finance Export | `routes/finance/export.ts` | Read-only accountant export views |
+| Finance Reports | `routes/finance/reports.ts` | P&L, balance sheet, cash flow |
+| DragonBridge routes | `routes/dragonbridge/` | clients, orders, quotes, shipments, products, pricing-tiers, suppliers, reconciliations, config |
+| Entertainment routes | `routes/entertainment/` | supplier-invoices, utilities, reports |
+| Club routes | `routes/club/` | members, memberships, tiers, events, credits, chip-float, visitor-log |
+| NLCB routes | `routes/nlcb/` | sessions, settlements, games, scratch-games, scratch-consignments, scratch-session, scratch-pack-purchases, billers, expenses, config |
+| DocVault routes | `routes/docvault/` | Document management |
+| Succession routes | `routes/succession/` | Succession planning |
+| Family routes | `routes/family/` | Family module |
 
 ### Phase 7 Migrations (jag_commercial)
 
@@ -277,6 +290,9 @@ Step 6 (ZAP baseline) fires automatically when `ZAP_SCAN_PASSWORD` env var is se
 | `010_ims_stock_takes.sql` | ims_stock_takes, ims_stock_take_lines |
 | `011_ims_depreciation.sql` | ims_depreciation_schedules, ims_depreciation_entries |
 | `012_vehicles_owner_service.sql` | owner_entity, last_service_date, next_service_date, service_interval_days on ims_vehicles; location_id nullable on ims_items |
+| `013_jabco_crm_client_fk.sql` | FK from jabco tables to crm_contacts for client linkage |
+| `014_crm_contact_phone2.sql` | Adds phone2 VARCHAR(50) to crm_contacts |
+| `015_vehicles_sim_number.sql` | Adds sim_number column to ims_vehicles |
 
 ### Phase 7 Migrations (jag_family)
 
@@ -294,6 +310,10 @@ Step 6 (ZAP baseline) fires automatically when `ZAP_SCAN_PASSWORD` env var is se
 | `006_lease_deposit_refund.sql` | deposit refund fields on prop_lease_agreements |
 | `007_utility_accounts.sql` | prop_utility_accounts |
 | `008_late_fee_lease.sql` | late_fee_type/value/grace_days on leases |
+| `009b_prop_properties_audit_cols.sql` | last_modified_at, last_modified_by audit columns on prop_properties |
+| `009_units.sql` | prop_units table (property sub-unit tracking) |
+| `010_mortgage_last_modified.sql` | last_modified_at, last_modified_by on mortgage table |
+| `011_rent_payment_proof.sql` | proof_photo_url, proof_uploaded_at, proof_uploaded_by on rent payments; receipt token for shareable links |
 
 ### Vehicle Owner Options (VEHICLE_OWNER_OPTIONS const)
 `JAG Holdings`, `JABCO`, `JAG Properties`, `JAG Entertainment`, `JAG Finance`, `Personal — Robert`, `Personal — Brian`, `Other`
@@ -303,11 +323,13 @@ Step 6 (ZAP baseline) fires automatically when `ZAP_SCAN_PASSWORD` env var is se
 ## OPEN ITEMS
 
 - ~~**WiPay webhook**~~ — **REMOVED**: WiPay does not issue webhooks to individuals; rents paid directly to personal bank accounts
-- **Rent proof workflow** — tenants pay via bank transfer + WhatsApp photo proof; staff log payment + upload photo in Properties → Rent Payments tab; receipt generated with WhatsApp share button. Migration: `011_rent_payment_proof.sql` (jag_properties). Backend: receipt endpoint at `GET /properties/:id/rent-payments/:paymentId/receipt`.
+- **Rent proof workflow** — Migration `011_rent_payment_proof.sql` applied. Backend receipt endpoint `GET /properties/:id/rent-payments/:paymentId/receipt` still to be implemented in `routes/properties/tenants-mortgage.ts`.
 - **Ollama** — deferred; set `DRY_RUN=false` + `ollama pull llama3.2` when ready
-- ~~**JAG Entertainment UI** — BAR + Members Club frontend not yet built~~ **DONE (prior session)**
-- ~~**DragonBridge UI** — China sourcing / forex frontend not yet built~~ **DONE (prior session)**
-- ~~**JAG Finance advanced** — intercompany eliminations UI, insurance UI not yet built~~ **DONE (2026-06-11)**
+- **Data population** — B3 Leases (new leases needed — all expired), A2 Chart of Accounts, A3 FX Rates not yet populated in production
+- **JAG Plantations / JAG Trading** — future phases; placeholder pages exist in frontend
+- ~~**JAG Entertainment UI** — BAR + Members Club frontend not yet built~~ **DONE**
+- ~~**DragonBridge UI** — China sourcing / forex frontend not yet built~~ **DONE**
+- ~~**JAG Finance advanced** — intercompany eliminations UI, insurance UI not yet built~~ **DONE**
 
 ---
 
