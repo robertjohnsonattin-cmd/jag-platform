@@ -312,16 +312,16 @@ export default function BankStatementsPanel() {
                       <td className="px-4 py-2 text-slate-400 text-xs whitespace-nowrap">{fmt(job.created_at)}</td>
                       <td className="px-4 py-2 text-slate-400 text-xs whitespace-nowrap">{fmt(job.completed_at)}</td>
                       <td className="px-4 py-2 text-right">
-                        {job.status === 'FAILED' && (
+                        {['COMPLETE', 'PARTIAL', 'FAILED'].includes(job.status) && (
                           <button
-                            className="text-xs text-blue-400 hover:text-blue-300 transition-colors"
+                            className="text-xs text-red-400 hover:text-red-300 transition-colors"
                             onClick={() =>
-                              financeApi.requeueBankStatementJob(job.id).then(() =>
+                              financeApi.deleteBankStatementJob(job.id).then(() =>
                                 qc.invalidateQueries({ queryKey: ['bank-statement-jobs'] })
                               )
                             }
                           >
-                            Requeue
+                            Delete
                           </button>
                         )}
                       </td>

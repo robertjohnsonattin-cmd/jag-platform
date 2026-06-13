@@ -79,6 +79,7 @@ const CONFIG = {
 
 const pool = new Pool({ connectionString: CONFIG.dbUrl });
 
+
 const minio = new MinioClient({
   endPoint:  CONFIG.minio.endpoint,
   port:      CONFIG.minio.port,
@@ -125,7 +126,7 @@ async function withOwner<T>(client: PoolClient, fn: (c: PoolClient) => Promise<T
   }
 }
 
-// ── MinIO download ────────────────────────────────────────────────────────────
+// ── MinIO helpers ─────────────────────────────────────────────────────────────
 
 async function downloadObject(objectKey: string): Promise<Buffer> {
   const stream = await minio.getObject(CONFIG.minio.bucket, objectKey);
@@ -135,6 +136,15 @@ async function downloadObject(objectKey: string): Promise<Buffer> {
     stream.on('end', () => resolve(Buffer.concat(chunks)));
     stream.on('error', reject);
   });
+}
+
+async function deleteObject(objectKey: string): Promise<void> {
+  try {
+    await minio.removeObject(CONFIG.minio.bucket, objectKey);
+    console.log(`  Deleted from MinIO: ${objectKey}`);
+  } catch (e) {
+    console.warn(`  [warn] MinIO delete failed for ${objectKey}: ${(e as Error).message}`);
+  }
 }
 
 // ── Text extraction ───────────────────────────────────────────────────────────
@@ -317,7 +327,7 @@ async function processJob(job: StatementJob): Promise<void> {
     console.log(`  Ollama returned ${transactions.length} transactions`);
 
     if (CONFIG.dryRun) {
-      console.log('  DRY RUN — skipping DB writes');
+      console.log('  DRY RUN — skipping DB writes and MinIO delete');
       console.log('  Sample:', JSON.stringify(transactions.slice(0, 2), null, 2));
       await withOwner(client, (c) =>
         c.query(
@@ -346,6 +356,9 @@ async function processJob(job: StatementJob): Promise<void> {
       )
     );
     console.log(`  Job → ${status}`);
+
+    // Auto-delete source file — transactions are in the DB, original file no longer needed
+    await deleteObject(job.storage_path);
   } catch (e) {
     const msg = (e as Error).message ?? String(e);
     console.error(`  [error] ${msg}`);
@@ -358,6 +371,8 @@ async function processJob(job: StatementJob): Promise<void> {
           [job.id, msg.slice(0, 2000)],
         )
       );
+      // Also delete on failure — no point keeping the file if processing failed
+      await deleteObject(job.storage_path);
     } catch { /* ignore secondary failure */ }
   } finally {
     client.release();

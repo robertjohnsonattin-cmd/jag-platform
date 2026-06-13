@@ -240,8 +240,8 @@ export const financeApi = {
     return api.get<BankStatementJob[]>(`/finance/bank-statements${qs}`)
   },
 
-  requeueBankStatementJob: (id: string) =>
-    api.post<BankStatementJob>(`/finance/bank-statements/${id}/requeue`, {}),
+  deleteBankStatementJob: (id: string) =>
+    api.delete<{ deleted: boolean }>(`/finance/bank-statements/${id}`),
 
   getConsolidated: (params: { period_year: number; period_month?: number }) => {
     const qs = '?' + new URLSearchParams(Object.fromEntries(

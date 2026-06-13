@@ -1,7 +1,7 @@
 // POST   /api/v1/finance/bank-statements/upload    — upload a statement file, enqueue job
 // GET    /api/v1/finance/bank-statements            — list jobs (newest first)
 // GET    /api/v1/finance/bank-statements/:id        — job detail + status
-// POST   /api/v1/finance/bank-statements/:id/requeue — requeue a FAILED job
+// DELETE /api/v1/finance/bank-statements/:id        — delete job record + MinIO object (terminal states only)
 
 import path from 'path';
 import { Router, type Request, type Response, type NextFunction } from 'express';
@@ -174,10 +174,12 @@ bankStatementsRouter.get('/:id', async (req: Request, res: Response, next: NextF
   } catch (e) { next(e); }
 });
 
-// ── POST /bank-statements/:id/requeue ─────────────────────────────────────────
-// Resets a FAILED job back to PENDING so the next batch run picks it up.
+// ── DELETE /bank-statements/:id ───────────────────────────────────────────────
+// Deletes the MinIO object and the job record.
+// Only allowed for terminal states: COMPLETE, PARTIAL, FAILED.
+// Transactions already imported are NOT deleted.
 
-bankStatementsRouter.post('/:id/requeue', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+bankStatementsRouter.delete('/:id', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const parsed = UUIDParam.safeParse(req.params);
     if (!parsed.success) { err(res, 422, 'VALIDATION_ERROR', 'Invalid UUID.'); return; }
@@ -185,20 +187,32 @@ bankStatementsRouter.post('/:id/requeue', async (req: Request, res: Response, ne
 
     const client = await familyPool.connect();
     try {
-      const row = await withOwnerRLS(client, req.rlsCtx, (c) =>
-        c.query(
-          `UPDATE fin_bank_statement_jobs
-           SET status = 'PENDING', started_at = NULL, completed_at = NULL,
-               error_detail = NULL, rows_parsed = 0, rows_imported = 0,
-               rows_skipped = 0, updated_at = now()
-           WHERE id = $1 AND status = 'FAILED'
-           RETURNING *`,
-          [parsed.data.id],
-        ).then(r => r.rows[0] ?? null),
+      const job = await withOwnerRLS(client, req.rlsCtx, (c) =>
+        c.query(`SELECT * FROM fin_bank_statement_jobs WHERE id = $1`, [parsed.data.id])
+          .then(r => r.rows[0] ?? null),
       );
-      if (!row) { err(res, 404, 'NOT_FOUND', 'Job not found or not in FAILED status.'); return; }
-      logger.info({ entity: 'FINANCE', action: 'BANK_STATEMENT_REQUEUED', user_id: ownerId, record_id: row.id });
-      ok(res, row);
+      if (!job) { err(res, 404, 'NOT_FOUND', 'Job not found.'); return; }
+
+      const terminal = ['COMPLETE', 'PARTIAL', 'FAILED'];
+      if (!terminal.includes(job.status)) {
+        err(res, 409, 'CONFLICT', `Cannot delete a job in ${job.status} status. Wait for it to finish.`);
+        return;
+      }
+
+      // Delete MinIO object — log failure but don't block the record deletion
+      try {
+        await minioClient.removeObject(BUCKET_STATEMENTS, job.storage_path);
+        logger.info({ entity: 'MINIO', action: 'OBJECT_DELETED', bucket: BUCKET_STATEMENTS, key: job.storage_path });
+      } catch (minioErr) {
+        logger.warn({ entity: 'MINIO', action: 'OBJECT_DELETE_FAILED', key: job.storage_path, error: (minioErr as Error).message });
+      }
+
+      await withOwnerRLS(client, req.rlsCtx, (c) =>
+        c.query(`DELETE FROM fin_bank_statement_jobs WHERE id = $1`, [parsed.data.id]),
+      );
+
+      logger.info({ entity: 'FINANCE', action: 'BANK_STATEMENT_DELETED', user_id: ownerId, record_id: parsed.data.id });
+      ok(res, { deleted: true });
     } finally { client.release(); }
   } catch (e) { next(e); }
 });
