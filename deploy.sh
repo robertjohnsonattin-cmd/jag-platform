@@ -136,7 +136,7 @@ fi
 if [[ $SKIP_FRONTEND -eq 0 ]]; then
   info "Step 7/7 — Uploading frontend dist to VM…"
   # Clear old dist and upload fresh build
-  $SSH_CMD "$VM_HOST" "rm -rf $VM_WEB_DIST && mkdir -p $VM_WEB_DIST"
+  $SSH_CMD "$VM_HOST" "find ${VM_WEB_DIST:?} -mindepth 1 -delete 2>/dev/null; mkdir -p $VM_WEB_DIST"
   $SCP_CMD -r "$SCRIPT_DIR/jag-web/dist/." "$VM_HOST:$VM_WEB_DIST/" || fail "SCP of frontend dist failed."
   info "Frontend deployed to $VM_WEB_DIST."
 else
