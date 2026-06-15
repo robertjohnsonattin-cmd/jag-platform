@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
 import { financeApi } from '../api/finance'
 import { propertiesApi } from '../api/properties'
 import { imsApi } from '../api/ims'
@@ -11,19 +12,9 @@ import type { Expense } from '../types/expenses'
 
 const CONSOLIDATED = '00000000-0000-0000-0000-000000000000'
 
-const CATEGORY_LABELS: Record<string, string> = {
-  SALARY: 'Salary', DIVIDEND: 'Dividend', RENTAL_INCOME: 'Rental Income',
-  INTEREST_INCOME: 'Interest', TRANSFER_IN: 'Transfer In',
-  OPERATING_EXPENSE: 'Operating', PAYROLL: 'Payroll', TAX_PAYMENT: 'Tax',
-  LOAN_REPAYMENT: 'Loan Repayment', INVESTMENT_PURCHASE: 'Investment',
-  INVESTMENT_SALE: 'Inv. Sale', TRANSFER_OUT: 'Transfer Out',
-  PERSONAL_EXPENSE: 'Personal', UTILITIES: 'Utilities', INSURANCE: 'Insurance',
-  ENTERTAINMENT: 'Entertainment', TRAVEL: 'Travel', MEDICAL: 'Medical',
-  EDUCATION: 'Education', CHARITY: 'Charity', UNCLASSIFIED: 'Unclassified',
-}
-
 export default function Dashboard() {
   const navigate = useNavigate()
+  const { t } = useTranslation()
 
   const { data: snapshots = [] } = useQuery({
     queryKey: ['finance', 'net-worth'],
@@ -68,6 +59,15 @@ export default function Dashboard() {
     staleTime: 60_000,
   })
 
+  const { data: fxRates = [] } = useQuery({
+    queryKey: ['finance', 'fx-rates'],
+    queryFn: financeApi.getFxRates,
+    staleTime: 60_000,
+  })
+
+  const rateMap: Record<string, number> = { TTD: 1 }
+  for (const fx of fxRates) rateMap[fx.currency] = parseFloat(fx.rate_to_ttd)
+
   const { data: jabcoProjects } = useQuery({
     queryKey: ['jabco', 'projects', 'active'],
     queryFn: () => jabcoApi.getProjects({ status: 'ACTIVE', limit: 1 }),
@@ -88,10 +88,8 @@ export default function Dashboard() {
     .filter(s => s.owner_entity_id !== CONSOLIDATED)
     .sort((a, b) => parseFloat(b.net_worth_ttd) - parseFloat(a.net_worth_ttd))
 
-  // Total liquid balance across all accounts
   const totalLiquid = accounts.reduce((s, a) => s + parseFloat(a.current_balance), 0)
 
-  // Accounts grouped by entity for the balance strip
   const accountsByEntity = accounts.reduce<Record<string, number>>((acc, a) => {
     acc[a.owner_entity_id] = (acc[a.owner_entity_id] ?? 0) + parseFloat(a.current_balance)
     return acc
@@ -99,15 +97,13 @@ export default function Dashboard() {
 
   const today = new Date().toLocaleDateString('en-TT', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
 
-  // Asset composition — live values
   const totalPropertyValue = properties.reduce((s, p) => s + parseFloat(p.current_valuation ?? '0'), 0)
   const totalImsAssets     = parseFloat(String(imsValuation?.summary.total_asset_value ?? 0))
   const totalImsStock      = parseFloat(String(imsValuation?.summary.total_stock_value ?? 0))
   const totalImsValue      = totalImsAssets + totalImsStock
-  const totalInvestments   = investments.reduce((s, i) => s + parseFloat(i.current_value_ttd), 0)
+  const totalInvestments   = investments.reduce((s, i) => s + parseFloat(i.current_value_ttd) * (rateMap[i.currency ?? 'TTD'] ?? 1), 0)
   const liveTotalAssets    = totalLiquid + totalPropertyValue + totalImsValue + totalInvestments
 
-  // Operational KPI derived values
   const arrearsCount    = arrears.length
   const arrearsTotal    = arrears.reduce((s, r) => s + parseFloat(r.balance_owed), 0)
   const expiringLeases  = leaseExpiry.filter(l => l.days_remaining <= 90).length
@@ -117,46 +113,45 @@ export default function Dashboard() {
 
   return (
     <div>
-      {/* Header */}
       <div className="flex items-baseline justify-between mb-8">
-        <h1 className="text-2xl font-semibold">Dashboard</h1>
+        <h1 className="text-2xl font-semibold">{t('dashboard.title')}</h1>
         <p className="text-sm text-slate-500">{today}</p>
       </div>
 
       {/* Operational KPI strip */}
       <div className="grid grid-cols-5 gap-3 mb-6">
         <OpsCard
-          label="Rent Arrears"
+          label={t('dashboard.rentArrears')}
           value={arrearsCount}
-          sub={arrearsCount > 0 ? fmtTTD(arrearsTotal) + ' owed' : 'All clear'}
+          sub={arrearsCount > 0 ? t('dashboard.owed', { amount: fmtTTD(arrearsTotal) }) : t('dashboard.allClear')}
           status={arrearsCount > 0 ? 'warn' : 'ok'}
           onClick={() => navigate('/properties')}
         />
         <OpsCard
-          label="Leases Expiring"
+          label={t('dashboard.leasesExpiring')}
           value={expiringLeases}
-          sub={expiringLeases > 0 ? 'within 90 days' : 'No expiries soon'}
+          sub={expiringLeases > 0 ? t('dashboard.within90Days') : t('dashboard.noExpiries')}
           status={expiringLeases > 0 ? 'warn' : 'ok'}
           onClick={() => navigate('/properties')}
         />
         <OpsCard
-          label="Low / Out of Stock"
+          label={t('dashboard.lowOutOfStock')}
           value={lowStockCount}
-          sub={lowStockCount > 0 ? 'items need attention' : 'Stock healthy'}
+          sub={lowStockCount > 0 ? t('dashboard.itemsNeedAttention') : t('dashboard.stockHealthy')}
           status={lowStockCount > 0 ? 'warn' : 'ok'}
           onClick={() => navigate('/inventory')}
         />
         <OpsCard
-          label="Active Projects"
+          label={t('dashboard.activeProjects')}
           value={activeProjects}
-          sub="JABCO"
+          sub={t('dashboard.jabcoLabel')}
           status="neutral"
           onClick={() => navigate('/jabco')}
         />
         <OpsCard
-          label="Expenses Pending"
+          label={t('dashboard.expensesPending')}
           value={pendingExpCount}
-          sub={pendingExpCount > 0 ? 'awaiting approval' : 'Nothing pending'}
+          sub={pendingExpCount > 0 ? t('dashboard.awaitingApproval') : t('dashboard.nothingPending')}
           status={pendingExpCount > 0 ? 'warn' : 'ok'}
           onClick={() => navigate('/expenses')}
         />
@@ -166,21 +161,21 @@ export default function Dashboard() {
       {consolidated ? (
         <div className="grid grid-cols-3 gap-4 mb-8">
           <StatCard
-            label="Consolidated Net Worth"
+            label={t('dashboard.consolidatedNetWorth')}
             value={fmtTTD(consolidated.net_worth_ttd)}
-            sub={`as of ${fmtDate(consolidated.snapshot_date)}`}
+            sub={t('dashboard.asOf', { date: fmtDate(consolidated.snapshot_date) })}
             accent="blue"
             onClick={() => navigate('/finance')}
           />
           <StatCard
-            label="Total Assets (live)"
+            label={t('dashboard.totalAssetsLive')}
             value={fmtTTD(liveTotalAssets)}
-            sub={`Cash ${fmtTTD(totalLiquid)} · Props ${fmtTTD(totalPropertyValue)} · Inv ${fmtTTD(totalInvestments)}`}
+            sub={t('dashboard.cashPropsInv', { cash: fmtTTD(totalLiquid), props: fmtTTD(totalPropertyValue), inv: fmtTTD(totalInvestments) })}
             accent="green"
             onClick={() => navigate('/finance')}
           />
           <StatCard
-            label="Total Liabilities"
+            label={t('dashboard.totalLiabilities')}
             value={fmtTTD(consolidated.total_liabilities_ttd)}
             sub=" "
             accent="red"
@@ -194,46 +189,42 @@ export default function Dashboard() {
       )}
 
       <div className="grid grid-cols-3 gap-6">
-        {/* Left column — entity net worth + account balances */}
         <div className="col-span-2 space-y-6">
-
-          {/* Asset composition — live breakdown */}
-          <Section title="Asset Composition (Live)">
+          <Section title={t('dashboard.assetComposition')}>
             <div className="divide-y divide-slate-700">
               <AssetRow
-                label="Cash & Bank Accounts"
+                label={t('dashboard.cashAndBankAccounts')}
                 value={totalLiquid}
-                sub={`${accounts.length} account${accounts.length !== 1 ? 's' : ''}`}
+                sub={t('dashboard.accountCount', { count: accounts.length })}
                 onClick={() => navigate('/finance')}
               />
               <AssetRow
-                label="Property Portfolio"
+                label={t('dashboard.propertyPortfolio')}
                 value={totalPropertyValue}
-                sub={`${properties.length} propert${properties.length !== 1 ? 'ies' : 'y'}`}
+                sub={t('dashboard.propertyCount', { count: properties.length })}
                 onClick={() => navigate('/properties')}
               />
               <AssetRow
-                label="Investments"
+                label={t('dashboard.investments')}
                 value={totalInvestments}
-                sub={`${investments.length} holding${investments.length !== 1 ? 's' : ''}`}
+                sub={t('dashboard.holdingCount', { count: investments.length })}
                 onClick={() => navigate('/finance')}
               />
               <AssetRow
-                label="IMS — Fixed Assets & Stock"
+                label={t('dashboard.imsAssetsStock')}
                 value={totalImsValue}
-                sub={`Fixed ${fmtTTD(totalImsAssets)} · Stock ${fmtTTD(totalImsStock)}`}
+                sub={t('dashboard.fixedAndStock', { fixed: fmtTTD(totalImsAssets), stock: fmtTTD(totalImsStock) })}
                 onClick={() => navigate('/inventory')}
               />
               <div className="flex justify-between items-center py-3">
-                <span className="text-sm font-semibold text-slate-200">Total</span>
+                <span className="text-sm font-semibold text-slate-200">{t('dashboard.totalRow')}</span>
                 <span className="text-sm font-semibold font-mono text-blue-300">{fmtTTD(liveTotalAssets)}</span>
               </div>
             </div>
           </Section>
 
-          {/* Entity net worth breakdown */}
           {entitySnapshots.length > 0 && (
-            <Section title="Net Worth by Entity">
+            <Section title={t('dashboard.netWorthByEntity')}>
               <div className="space-y-2">
                 {entitySnapshots.map(s => {
                   const nw = parseFloat(s.net_worth_ttd)
@@ -260,9 +251,8 @@ export default function Dashboard() {
             </Section>
           )}
 
-          {/* Account balances by entity */}
           {Object.keys(accountsByEntity).length > 0 && (
-            <Section title="Bank Balances by Entity">
+            <Section title={t('dashboard.bankBalancesByEntity')}>
               <div className="divide-y divide-slate-700">
                 {Object.entries(accountsByEntity)
                   .sort(([,a],[,b]) => b - a)
@@ -275,7 +265,7 @@ export default function Dashboard() {
                     </div>
                   ))}
                 <div className="flex justify-between items-center py-2.5">
-                  <span className="text-sm text-slate-400 font-semibold">Total</span>
+                  <span className="text-sm text-slate-400 font-semibold">{t('dashboard.totalRow')}</span>
                   <span className={`text-sm font-mono font-semibold ${totalLiquid < 0 ? 'text-red-400' : 'text-blue-300'}`}>
                     {fmtTTD(totalLiquid)}
                   </span>
@@ -285,21 +275,20 @@ export default function Dashboard() {
           )}
         </div>
 
-        {/* Right column — recent transactions + approved expenses */}
         <div className="space-y-6">
-          <Section title="Recent Transactions">
+          <Section title={t('dashboard.recentTransactions')}>
             {recentTxns.length === 0 ? (
-              <p className="text-slate-500 text-sm">No transactions yet.</p>
+              <p className="text-slate-500 text-sm">{t('dashboard.noTransactions')}</p>
             ) : (
               <div className="space-y-0 divide-y divide-slate-700">
-                {recentTxns.map(t => <TxnRow key={t.id} txn={t} />)}
+                {recentTxns.map(txn => <TxnRow key={txn.id} txn={txn} />)}
               </div>
             )}
           </Section>
 
-          <Section title="Recently Approved Expenses">
+          <Section title={t('dashboard.recentlyApprovedExpenses')}>
             {recentApprovedExpenses.length === 0 ? (
-              <p className="text-slate-500 text-sm">No approved expenses yet.</p>
+              <p className="text-slate-500 text-sm">{t('dashboard.noApprovedExpenses')}</p>
             ) : (
               <div className="space-y-0 divide-y divide-slate-700">
                 {recentApprovedExpenses.map(e => <ExpenseRow key={e.id} expense={e} />)}
@@ -313,6 +302,7 @@ export default function Dashboard() {
 }
 
 function TxnRow({ txn }: { txn: FinTransaction }) {
+  const { t } = useTranslation()
   const amt = parseFloat(txn.amount)
   const isCredit = amt > 0
   return (
@@ -327,7 +317,7 @@ function TxnRow({ txn }: { txn: FinTransaction }) {
         </span>
       </div>
       <span className="inline-block mt-1 text-xs text-slate-500 bg-slate-700/50 rounded px-1.5 py-0.5">
-        {CATEGORY_LABELS[txn.category] ?? txn.category}
+        {t(`dashboard.categories.${txn.category}`, txn.category)}
       </span>
     </div>
   )

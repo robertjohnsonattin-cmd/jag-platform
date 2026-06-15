@@ -1,5 +1,6 @@
 // GET    /api/v1/finance/fx-rates
 // POST   /api/v1/finance/fx-rates
+// POST   /api/v1/finance/fx-rates/sync               — pull live rates from open.er-api.com
 // GET    /api/v1/finance/fx-rates/:currency/latest
 // GET    /api/v1/finance/fx-rates/:currency          (history for a currency)
 //
@@ -76,6 +77,60 @@ fxRatesRouter.post('/', async (req: Request, res: Response, next: NextFunction):
       logger.info({ entity: 'FINANCE', action: 'FX_RATE_UPSERTED', user_id: ownerId, currency: b.currency, rate_date: b.rate_date });
       ok(res, rec, 201);
     } finally { client.release(); }
+  } catch (e) { next(e); }
+});
+
+// ── POST /fx-rates/sync ───────────────────────────────────────────────────────
+// Pull live rates from open.er-api.com and upsert for today's date.
+// Body (optional): { currencies: ['USD','CNY','CAD'] }  — defaults to all three.
+
+const DEFAULT_SYNC_CURRENCIES = ['USD', 'CNY', 'CAD'];
+const ER_BASE = 'https://open.er-api.com/v6/latest';
+
+const SyncSchema = z.object({
+  currencies: z.array(z.string().length(3).regex(/^[A-Z]{3}$/)).optional(),
+}).strict();
+
+fxRatesRouter.post('/sync', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const parsed = SyncSchema.safeParse(req.body ?? {});
+    if (!parsed.success) { err(res, 422, 'VALIDATION_ERROR', 'Invalid request body.'); return; }
+
+    const currencies = parsed.data.currencies ?? DEFAULT_SYNC_CURRENCIES;
+    const today = new Date().toISOString().slice(0, 10);
+    const { ownerId } = req.rlsCtx;
+    const results: { currency: string; rate_to_ttd: number; rate_date: string }[] = [];
+    const errors: { currency: string; reason: string }[] = [];
+
+    for (const cur of currencies) {
+      try {
+        const resp = await fetch(`${ER_BASE}/${cur}`, { signal: AbortSignal.timeout(10_000) });
+        if (!resp.ok) { errors.push({ currency: cur, reason: `HTTP ${resp.status} from open.er-api.com` }); continue; }
+        const data = await resp.json() as { rates?: Record<string, number> };
+        const rate = data.rates?.TTD;
+        if (!rate) { errors.push({ currency: cur, reason: 'TTD not in response' }); continue; }
+
+        const client = await familyPool.connect();
+        try {
+          const row = await withOwnerRLS(client, req.rlsCtx, (c) =>
+            c.query(
+              `INSERT INTO fin_fx_rates (currency, rate_date, rate_to_ttd, source)
+               VALUES ($1, $2, $3, 'OPEN_ER_API')
+               ON CONFLICT (currency, rate_date) DO UPDATE
+                 SET rate_to_ttd = EXCLUDED.rate_to_ttd, source = EXCLUDED.source
+               RETURNING currency, rate_date, rate_to_ttd`,
+              [cur, today, rate],
+            ).then(r => r.rows[0]),
+          );
+          results.push(row);
+          logger.info({ entity: 'FINANCE', action: 'FX_RATE_SYNCED', user_id: ownerId, currency: cur, rate_to_ttd: rate });
+        } finally { client.release(); }
+      } catch (fetchErr) {
+        errors.push({ currency: cur, reason: fetchErr instanceof Error ? fetchErr.message : 'Unknown error' });
+      }
+    }
+
+    ok(res, { synced: results, errors }, errors.length === 0 ? 200 : 207);
   } catch (e) { next(e); }
 });
 

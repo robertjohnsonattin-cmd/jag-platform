@@ -6,7 +6,7 @@ import type {
   IntercompanyCharge, IntercompanyElimination,
   InsurancePolicyType, InsuranceAssetType, PremiumFrequency,
   IntercompanyChargeType,
-  BankStatementJob,
+  BankStatementJob, DocumentJob,
 } from '../types/finance'
 
 export const financeApi = {
@@ -44,6 +44,7 @@ export const financeApi = {
   ),
 
   getFxRates: () => api.get<FxRate[]>('/finance/fx-rates'),
+  syncFxRates: (currencies?: string[]) => api.post<{ synced: { currency: string; rate_to_ttd: string; rate_date: string }[]; errors: { currency: string; reason: string }[] }>('/finance/fx-rates/sync', currencies ? { currencies } : {}),
 
   createAccount: (data: {
     owner_entity_id: string; account_name: string; institution_name: string
@@ -242,6 +243,29 @@ export const financeApi = {
 
   deleteBankStatementJob: (id: string) =>
     api.delete<{ deleted: boolean }>(`/finance/bank-statements/${id}`),
+
+  uploadDocumentJob: (file: File, doc_type: string, idempotency_key: string) => {
+    const form = new FormData()
+    form.append('document', file)
+    form.append('doc_type', doc_type)
+    form.append('idempotency_key', idempotency_key)
+    return api.postForm<DocumentJob>('/finance/document-jobs/upload', form)
+  },
+
+  getDocumentJobs: (params?: { doc_type?: string; status?: string; limit?: number; offset?: number }) => {
+    const qs = params
+      ? '?' + new URLSearchParams(
+          Object.fromEntries(Object.entries(params).filter(([, v]) => v !== undefined).map(([k, v]) => [k, String(v)]))
+        ).toString()
+      : ''
+    return api.get<DocumentJob[]>(`/finance/document-jobs${qs}`)
+  },
+
+  approveDocumentJob: (id: string, body: { owner_entity_id: string; overrides?: Record<string, unknown> }) =>
+    api.post<{ approved: boolean; target_record_ids: string[] }>(`/finance/document-jobs/${id}/approve`, body),
+
+  deleteDocumentJob: (id: string) =>
+    api.delete<{ deleted: boolean }>(`/finance/document-jobs/${id}`),
 
   getConsolidated: (params: { period_year: number; period_month?: number }) => {
     const qs = '?' + new URLSearchParams(Object.fromEntries(

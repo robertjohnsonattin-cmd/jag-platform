@@ -37,7 +37,7 @@ KC_PASSWORD="${KC_PASSWORD:?KC_PASSWORD env var is required}"
 API_BASE="${JAG_API_URL:-https://api.jagcorporate.com/api/v1}"
 ER_BASE="https://open.er-api.com/v6/latest"
 
-IFS=' ' read -r -a CURRENCIES <<< "${CURRENCIES:-USD CNY}"
+IFS=' ' read -r -a CURRENCIES <<< "${CURRENCIES:-USD CNY CAD}"
 
 TODAY=$(date +%Y-%m-%d)
 EXIT_CODE=0
