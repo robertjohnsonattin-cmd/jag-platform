@@ -267,6 +267,12 @@ export const financeApi = {
   deleteDocumentJob: (id: string) =>
     api.delete<{ deleted: boolean }>(`/finance/document-jobs/${id}`),
 
+  triggerBatch: () =>
+    api.post<{ triggered: boolean; triggered_at: string }>('/finance/document-jobs/trigger', {}),
+
+  getBatchTriggerStatus: () =>
+    api.get<{ pending: boolean; triggered_at: string | null }>('/finance/document-jobs/trigger/status'),
+
   getConsolidated: (params: { period_year: number; period_month?: number }) => {
     const qs = '?' + new URLSearchParams(Object.fromEntries(
       Object.entries(params).filter(([, v]) => v !== undefined).map(([k, v]) => [k, String(v)])
