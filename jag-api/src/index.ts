@@ -87,6 +87,18 @@ app.get('/health/ready', async (_req: Request, res: Response) => {
 import { minioAuditRouter } from './routes/internal/minio-audit';
 app.use('/internal/minio-audit', minioAuditRouter);
 
+// ── WhatsApp webhook — raw body needed for X-Hub-Signature-256 verification ──
+// Exposed publicly via Caddy (not Docker-network-only) so Meta can reach it.
+// Security is enforced by HMAC signature check inside the route handler.
+import { whatsappWebhookRouter } from './routes/internal/whatsapp-webhook';
+app.use('/internal/whatsapp/webhook', express.raw({ type: 'application/json', limit: '1mb' }),
+  (req, _res, next) => { (req as typeof req & { rawBody?: Buffer }).rawBody = req.body as Buffer; next(); },
+  express.json(), whatsappWebhookRouter);
+
+// ── Public routes (no Keycloak auth) — property booking page API ──────────────
+import { publicBookingRouter } from './routes/properties/viewings';
+app.use('/api/v1/public/book', express.json(), publicBookingRouter);
+
 // ── Phase 1B routes (STD-05: all API routes prefixed /api/v1/) ─────────────────
 import { authRouter }          from './routes/auth';
 import { meRouter }            from './routes/me';

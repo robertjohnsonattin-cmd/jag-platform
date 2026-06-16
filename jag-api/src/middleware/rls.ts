@@ -1,9 +1,5 @@
-import { PoolClient } from 'pg';
+import type { Pool, PoolClient } from 'pg';
 
-// RLS session context extracted from a verified Keycloak JWT.
-// Route handlers must resolve keycloakSub → users.id before calling withTenantRLS/withOwnerRLS.
-// Phase 1B: add jag_user_id and jag_tenant_id custom Keycloak mappers so the JWT carries
-// these directly, removing the DB lookup at request start.
 export interface RLSContext {
   userId: string;          // jag_core.users.id (internal UUID, not Keycloak sub)
   tenantId: string;        // jag_core.tenants.id
@@ -21,6 +17,10 @@ function setLocal(client: PoolClient, name: string, value: string): Promise<unkn
   return client.query('SELECT set_config($1, $2, true)', [name, value]);
 }
 
+function isPoolClient(p: Pool | PoolClient): p is PoolClient {
+  return typeof (p as PoolClient).release === 'function';
+}
+
 // Wraps a callback in a transaction with tenant-scoped RLS session variables.
 // Use for: jag_core, jag_commercial, jag_entertainment.
 export async function withTenantRLS<T>(
@@ -33,7 +33,6 @@ export async function withTenantRLS<T>(
     await setLocal(client, 'app.current_tenant_id', ctx.tenantId);
     await setLocal(client, 'app.current_user_id', ctx.userId);
     if (ctx.isOwner) {
-      // Enables Owner bypass on audit_log (see policy definition in migration 000003).
       await setLocal(client, 'app.bypass_rls', 'true');
     }
     const result = await fn(client);
@@ -45,22 +44,58 @@ export async function withTenantRLS<T>(
   }
 }
 
-// Wraps a callback in a transaction with owner-scoped RLS session variables.
-// Use for: jag_family, jag_properties.
+// Overload 1: existing pattern — caller manages pool checkout lifecycle
 export async function withOwnerRLS<T>(
   client: PoolClient,
   ctx: RLSContext,
   fn: (client: PoolClient) => Promise<T>,
+): Promise<T>;
+// Overload 2: convenience pattern — pool + ownerId string; checkout handled internally
+export async function withOwnerRLS<T>(
+  pool: Pool,
+  ownerId: string,
+  fn: (client: PoolClient) => Promise<T>,
+): Promise<T>;
+// Implementation
+export async function withOwnerRLS<T>(
+  poolOrClient: Pool | PoolClient,
+  ctxOrOwnerId: RLSContext | string,
+  fn: (client: PoolClient) => Promise<T>,
 ): Promise<T> {
-  await client.query('BEGIN');
-  try {
-    await setLocal(client, 'app.current_owner_id', ctx.ownerId);
-    await setLocal(client, 'app.current_user_id', ctx.userId);
-    const result = await fn(client);
-    await client.query('COMMIT');
-    return result;
-  } catch (err) {
-    await client.query('ROLLBACK');
-    throw err;
+  if (isPoolClient(poolOrClient)) {
+    // Overload 1: caller-managed client
+    const client = poolOrClient;
+    const ctx = ctxOrOwnerId as RLSContext;
+    await client.query('BEGIN');
+    try {
+      await setLocal(client, 'app.current_owner_id', ctx.ownerId);
+      await setLocal(client, 'app.current_user_id', ctx.userId);
+      const result = await fn(client);
+      await client.query('COMMIT');
+      return result;
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    }
+  } else {
+    // Overload 2: auto-checkout from pool
+    const pool = poolOrClient as Pool;
+    const ownerId = ctxOrOwnerId as string;
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      try {
+        await setLocal(client, 'app.current_owner_id', ownerId);
+        await setLocal(client, 'app.current_user_id', ownerId);
+        const result = await fn(client);
+        await client.query('COMMIT');
+        return result;
+      } catch (err) {
+        await client.query('ROLLBACK');
+        throw err;
+      }
+    } finally {
+      client.release();
+    }
   }
 }

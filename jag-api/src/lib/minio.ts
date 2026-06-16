@@ -87,6 +87,11 @@ export async function getObjectStat(bucket: string, key: string): Promise<{ size
   };
 }
 
+export async function getPresignedPutUrl(bucket: string, key: string, expirySeconds = 900): Promise<string> {
+  await ensureBucket(bucket);
+  return minioClient.presignedPutObject(bucket, key, expirySeconds);
+}
+
 export async function deleteObject(bucket: string, key: string): Promise<void> {
   try {
     await minioClient.removeObject(bucket, key);

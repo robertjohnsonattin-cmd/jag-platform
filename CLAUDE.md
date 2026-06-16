@@ -1,7 +1,7 @@
 # JAG Integrated Business Platform — Claude Session Context
 
 **Owner:** Robert Johnson-Attin | Barataria, Trinidad & Tobago
-**Architecture:** v1.9 | **Current Phase:** ALL PHASES COMPLETE — in production | **Updated:** 2026-06-15 (session 9)
+**Architecture:** v1.9 | **Current Phase:** ALL PHASES COMPLETE — in production | **Updated:** 2026-06-16 (session 11)
 
 ---
 
@@ -391,6 +391,18 @@ All financial documents (loan statements, investment portfolios, insurance polic
 | Finance insurance policy history | `routes/finance/insurance.ts` | `GET /policies/:id/history`; `POST /policies/:id/history` (manual backfill); auto-insert into `fin_insurance_policy_history` on every PATCH; table (migration 011 jag_family) |
 | Property valuation history | `routes/properties/properties.ts` | `GET /:id/valuation-history`; `POST /:id/valuation-history` (manual backfill); auto-insert into `prop_valuation_history` only when `current_valuation` is in PATCH body; table (migration 012 jag_properties) |
 | Internal MinIO audit webhook | `routes/internal/minio-audit.ts` | Receives MinIO `audit_webhook:loki` POSTs; validates `Bearer $MINIO_AUDIT_TOKEN`; logs to Loki via structured logger; mounted at `/internal/minio-audit` (no Keycloak, Docker-network-only) |
+| Tenancy enquiries | `routes/properties/enquiries.ts` | Prospect enquiry CRUD + WhatsApp reply; stage lifecycle |
+| Tenancy viewings | `routes/properties/viewings.ts` | Viewing scheduling, Google Calendar events, status PATCH; `/send-reminders` + `/send-post-viewing-links` batch; public booking router (`/public/book/:slug`) |
+| Tenancy applications | `routes/properties/applications.ts` | Application CRUD + decide (APPROVE/REJECT) + generate tenancy agreement PDF |
+| Tenancy deposits | `routes/properties/deposits.ts` | Deposit CRUD + receipt PDF + refund workflow |
+| Tenancy rent schedule | `routes/properties/rent-schedule.ts` | Schedule CRUD + record payment + `/send-reminders` batch |
+| Tenancy handover | `routes/properties/handover.ts` | ENTRY/EXIT checklist CRUD + sign-off endpoints |
+| Tenancy maintenance | `routes/properties/maintenance-tickets.ts` | P1–P4 tickets + ticket updates + `/check-sla` batch; contractors CRUD |
+| Tenancy renewals | `routes/properties/renewals.ts` | Renewal notices + tenant response + process-renew/vacate; `/send-notices` D-60/D-30/D-14 batch |
+| Tenancy WhatsApp | `routes/properties/whatsapp-send.ts` | Outbound template send; `routes/internal/whatsapp-webhook.ts` inbound webhook (Meta verify + message store) |
+| Tenancy listing | `routes/properties/listing.ts` | Unit listing CRUD + Ollama AI rent suggestion + SMS broadcast |
+| Google Calendar lib | `src/lib/google-calendar.ts` | `getAvailableSlots()` + `createCalendarEvent()` + `deleteCalendarEvent()` via Google Calendar v3 API (service account); `google-auth-library` npm dep |
+| WhatsApp lib | `src/lib/whatsapp.ts` | `sendTemplate()` + `sendText()` via Meta Cloud API |
 
 ### Phase 7 Migrations (jag_commercial)
 
@@ -429,6 +441,16 @@ All financial documents (loan statements, investment portfolios, insurance polic
 | `010_mortgage_last_modified.sql` | last_modified_at, last_modified_by on mortgage table |
 | `011_rent_payment_proof.sql` | proof_photo_url, proof_uploaded_at, proof_uploaded_by on rent payments; receipt token for shareable links |
 | `012_valuation_history.sql` | `prop_valuation_history` append-only table; FK → `prop_properties(id) ON DELETE CASCADE`; tracks valuation_ttd; same RLS + index pattern |
+| `013_enquiries.sql` | `prop_enquiries` — prospect enquiry tracking (channel, stage, phone, email) |
+| `014_viewings.sql` | `prop_viewings` — scheduled viewings, Google Calendar event ID, status lifecycle |
+| `015_applications.sql` | `prop_applications` — tenancy applications with employment/reference/income fields |
+| `016_deposits.sql` | `prop_deposits` — security deposits with refund workflow |
+| `017_rent_schedule.sql` | `prop_rent_schedule` — generated rent schedule periods, payment recording, reminder tracking |
+| `018_handover_checklists.sql` | `prop_handover_checklists` — ENTRY/EXIT checklists with condition items JSONB, meter readings, key issuance |
+| `019_maintenance_tickets.sql` | `prop_maintenance_tickets`, `prop_ticket_updates`, `prop_contractors` — P1–P4 tickets, SLA breach flag, update log, contractor directory |
+| `020_whatsapp_messages.sql` | `prop_wa_conversations`, `prop_wa_messages` — WhatsApp thread + message store (INBOUND/OUTBOUND) |
+| `021_renewal_notices.sql` | `prop_renewal_notices` — lease renewal tracking with D-60/D-30/D-14 notice timestamps |
+| `022_unit_enhancements.sql` | `prop_units` additions: `listing_status`, `booking_slug` (unique), rent suggestion columns; `prop_listings` table |
 
 ### VM Cron Scripts (`jag-infra/scripts/`)
 
@@ -437,15 +459,24 @@ All financial documents (loan statements, investment portfolios, insurance polic
 | `backup-databases.sh` | 02:00 | 22:00 prev. day | pg_dump all 5 DBs |
 | `fx-rates-sync.sh` | 10:00 | 06:00 | Seed USD + CNY → TTD rates from open.er-api.com |
 | `cleanup-stale-statements.sh` | 07:00 | 03:00 | Delete PENDING bank statement jobs + MinIO objects older than 7 days |
+| `rent-reminders.sh` | 07:00 | 03:00 | Send WhatsApp rent reminders for UPCOMING/LATE rent schedule periods (3-day window) |
+| `viewing-reminders.sh` | 00:00 * | 20:00 * | Hourly — send WhatsApp viewing reminders for viewings in next 2h |
+| `post-viewing-app-link.sh` | 00:30 * | 20:30 * | Hourly (at :30) — send application link to COMPLETED viewings in last 24h |
+| `renewal-notices.sh` | 08:00 | 04:00 | Send D-60/D-30/D-14 WhatsApp renewal notices for expiring leases |
+| `sla-monitor.sh` | */30 * | every 30 min | Mark open maintenance tickets where SLA hours exceeded; creates BREACH update log |
 | `setup-minio-policy.sh` | one-time | — | Create `jag-app-buckets` IAM policy + attach to jag_app user; re-run after MinIO data wipe |
 | `fdw-rotate-password.sh` | manual | — | Resync FDW USER MAPPING passwords after jag_app PG credential rotation |
 
 ### Local Extraction Script (`scripts/doc-import/`)
 Path 2 local extraction — reads PDFs from local hard drive, Ollama extracts, posts to API. **File never uploaded to cloud.**
-- Build: `npm run build` in `scripts/doc-import/`
+- Build: `npm install && npm run build` in `scripts/doc-import/` (uses local `npx tsc` — global tsc not required)
 - Usage: `node dist/extract.js --type <bank-statement|loan|investment|insurance> --file "C:/JAG Filing/..." [--entity <uuid>] [--account <uuid>] [--dry-run]`
 - Config: `scripts/doc-import/.env.doc-import` — `KC_USERNAME`, `KC_PASSWORD` (never commit), `JAG_API_URL`, `OLLAMA_URL`, `OLLAMA_MODEL`
 - Auth: Keycloak ROPC (password grant) — token cached per run with 30s early-expiry buffer
+- **PDF extraction:** uses `pdf-parse` v1.1.1 — handles FlateDecode-compressed PDFs (e.g. Microsoft Reporting Services output). The old latin1 byte-scan is replaced; raw binary PDFs now decode correctly.
+- **TTCD pre-parser (investment type only):** if the PDF matches the Trinidad & Tobago Central Depository (TTCD/TTSE) statement layout (`Closing Balance:` + `Net Movement:` markers), the script bypasses Ollama entirely and parses all holdings programmatically — 100% accuracy, ~2 seconds. Known TTSE tickers hardcoded in `TTSE_TICKERS` array for clean name splitting (add new tickers there when encountered).
+- **Ollama settings:** `num_ctx: 16384` (prevents truncation on longer prompts), timeout 600 s, 2-attempt retry, robust JSON extractor (brace-depth scanner handles prose before/after JSON).
+- **Running KC_PASSWORD at runtime (don't store in file):** `$env:KC_PASSWORD = "xxx"; node dist/extract.js ...`
 
 ### Vehicle Owner Options (VEHICLE_OWNER_OPTIONS const)
 `JAG Holdings`, `JABCO`, `JAG Properties`, `JAG Entertainment`, `JAG Finance`, `Personal — Robert`, `Personal — Brian`, `Other`
@@ -491,6 +522,9 @@ Path 2 local extraction — reads PDFs from local hard drive, Ollama extracts, p
 - ~~**CALYPSO MACRO INDEX FUND validation error**~~ — **FIXED 2026-06-15 (session 9)**: `maturity_date: Invalid` Zod error caused by PG DATE column arriving as ISO datetime string (`'2025-12-31T00:00:00.000Z'`); frontend was initializing `maturity` state with raw value (showing empty in date input but submitting the full ISO string, failing `^\d{4}-\d{2}-\d{2}$`). Fix: slice to 10 chars in `useState` init (same pattern as `valuedDate` for `last_valued_at`); added regex guard before submit. Deployed.
 - ~~**6 TTSE stocks investment_type + institution_name**~~ — **DONE 2026-06-15 (session 9)**: corrected via Update modal after CALYPSO fix unblocked it
 - ~~**History principle across loans, insurance, properties**~~ — **DONE 2026-06-15 (session 8)**: 3 migrations (010 jag_family, 011 jag_family, 012 jag_properties) ran on VM; backend PATCH auto-insert + GET/POST history endpoints on loans.ts, insurance.ts, properties.ts; types LoanBalanceHistory, InsurancePolicyHistory, PropertyValuationHistory; API client methods; History button + modal in LoansPanel, InsurancePanel, PropertiesPanel. Deployed.
+- ~~**Path 2 investment import — Phillip Ajack TTCD statement**~~ — **DONE 2026-06-15 (session 10)**: First live Path 2 import from local hard drive. PDF was FlateDecode-compressed (pdf-parse v1.1.1 added). TTCD programmatic pre-parser written and shipped — 10 TTSE holdings (AHL, AMCL, MASSY, NEL, NFM, PLD, RFHL, SBTT, UCL, WCO) imported to entity Phillip Ajack (00000000-0000-0000-0001-000000000010), total TTD 1,529,126.52. File remained on local desktop.
+- ~~**Full commit + deploy (sessions 8–10)**~~ — **DONE 2026-06-15 (session 10)**: commit `e56037c` — 74 files, 7445 insertions; deploy.sh all 7 steps passed; API + frontend live at jagcorporate.com.
+- ~~**JAG Property Tenancy Module (full lifecycle)**~~ — **DONE 2026-06-16 (session 11)**: Complete tenancy lifecycle Advertising → Enquiry → Viewing → Application → Lease → Handover → Rent Collection → Maintenance → Renewal/Exit. 12 new backend routes (`applications`, `deposits`, `enquiries`, `handover`, `listing`, `maintenance-tickets`, `renewals`, `rent-schedule`, `viewings`, `whatsapp-send`, `internal/whatsapp-webhook`); 10 new frontend panels; `jag-web/src/api/tenancy.ts`; 10 new jag_properties migrations (013–022); 5 VM cron scripts (rent-reminders, viewing-reminders, renewal-notices, sla-monitor, post-viewing-app-link). `google-auth-library` installed for Google Calendar booking slots. `response.ts` extended with dual-mode overloads (`ok(data)` + `ok(res,data,status)` both valid). `rls.ts` extended with Pool+ownerId overload. Deployed — all 7 deploy steps passed.
 
 ---
 
