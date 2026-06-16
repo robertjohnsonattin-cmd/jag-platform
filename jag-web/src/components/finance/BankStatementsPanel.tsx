@@ -1,21 +1,18 @@
 import { useCallback, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useTranslation } from 'react-i18next'
 import { financeApi } from '../../api/finance'
 import type { BankStatementJob, BankStatementJobStatus } from '../../types/finance'
-
-// ── Types ─────────────────────────────────────────────────────────────────────
 
 type UploadState = 'idle' | 'uploading' | 'done' | 'error'
 
 interface StagedFile {
-  key: string       // unique local key
+  key: string
   file: File
   accountId: string
   state: UploadState
   errorMsg: string | null
 }
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
 
 const STATUS_STYLES: Record<BankStatementJobStatus, string> = {
   PENDING:    'bg-yellow-500/20 text-yellow-300',
@@ -43,9 +40,8 @@ function isAllowed(f: File) {
   return ALLOWED_EXTS.includes(ext)
 }
 
-// ── Component ─────────────────────────────────────────────────────────────────
-
 export default function BankStatementsPanel() {
+  const { t } = useTranslation()
   const qc = useQueryClient()
   const inputRef = useRef<HTMLInputElement>(null)
 
@@ -66,8 +62,6 @@ export default function BankStatementsPanel() {
       return data?.some(j => j.status === 'PENDING' || j.status === 'PROCESSING') ? 10_000 : false
     },
   })
-
-  // ── Staging ────────────────────────────────────────────────────────────────
 
   const addFiles = useCallback((files: FileList | File[]) => {
     const arr = Array.from(files).filter(isAllowed)
@@ -104,8 +98,6 @@ export default function BankStatementsPanel() {
   const setAccount = (key: string, accountId: string) =>
     setStaged(prev => prev.map(s => s.key === key ? { ...s, accountId } : s))
 
-  // ── Upload all ─────────────────────────────────────────────────────────────
-
   const uploadAll = async () => {
     const ready = staged.filter(s => s.accountId && s.state === 'idle')
     if (!ready.length) return
@@ -130,8 +122,6 @@ export default function BankStatementsPanel() {
 
   const clearDone = () => setStaged(prev => prev.filter(s => s.state !== 'done'))
 
-  // ── Derived ────────────────────────────────────────────────────────────────
-
   const readyCount   = staged.filter(s => s.accountId && s.state === 'idle').length
   const unassigned   = staged.filter(s => !s.accountId && s.state === 'idle').length
   const doneCount    = staged.filter(s => s.state === 'done').length
@@ -139,12 +129,10 @@ export default function BankStatementsPanel() {
 
   const inp = 'bg-slate-700 border border-slate-600 rounded px-2 py-1 text-xs text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500'
 
-  // ── Render ─────────────────────────────────────────────────────────────────
-
   return (
     <div className="space-y-6">
 
-      {/* ── Drop zone ── */}
+      {/* Drop zone */}
       <div
         className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors ${
           dragging ? 'border-blue-400 bg-blue-500/10' : 'border-slate-600 hover:border-slate-500'
@@ -163,20 +151,20 @@ export default function BankStatementsPanel() {
           onChange={onInputChange}
         />
         <p className="text-slate-300 text-sm font-medium">
-          {dragging ? 'Drop files here' : 'Drag & drop bank statements here, or click to browse'}
+          {dragging ? t('bankStatements.dropActive') : t('bankStatements.dropzone')}
         </p>
-        <p className="text-slate-500 text-xs mt-1">PDF, CSV, TXT — up to 20 MB each — multiple files supported</p>
+        <p className="text-slate-500 text-xs mt-1">{t('bankStatements.dropzoneHint')}</p>
       </div>
 
-      {/* ── Staging queue ── */}
+      {/* Staging queue */}
       {staged.length > 0 && (
         <div className="bg-slate-800 border border-slate-700 rounded-lg overflow-hidden">
           <div className="px-4 py-3 border-b border-slate-700 flex items-center justify-between gap-4">
             <div className="flex items-center gap-3 text-xs text-slate-400">
-              <span>{staged.length} file{staged.length !== 1 ? 's' : ''}</span>
-              {unassigned > 0 && <span className="text-yellow-400">{unassigned} need account assignment</span>}
-              {doneCount  > 0 && <span className="text-green-400">{doneCount} uploaded</span>}
-              {errorCount > 0 && <span className="text-red-400">{errorCount} failed</span>}
+              <span>{staged.length}</span>
+              {unassigned > 0 && <span className="text-yellow-400">{unassigned} {t('bankStatements.needAccount')}</span>}
+              {doneCount  > 0 && <span className="text-green-400">{doneCount} {t('bankStatements.uploaded')}</span>}
+              {errorCount > 0 && <span className="text-red-400">{errorCount} {t('bankStatements.failed')}</span>}
             </div>
             <div className="flex items-center gap-2">
               {doneCount > 0 && (
@@ -184,7 +172,7 @@ export default function BankStatementsPanel() {
                   className="text-xs text-slate-400 hover:text-slate-200 transition-colors"
                   onClick={clearDone}
                 >
-                  Clear done
+                  {t('bankStatements.clearDone')}
                 </button>
               )}
               <button
@@ -192,7 +180,7 @@ export default function BankStatementsPanel() {
                 disabled={readyCount === 0 || uploading}
                 onClick={uploadAll}
               >
-                {uploading ? 'Uploading…' : `Upload ${readyCount > 0 ? readyCount : 'All'}`}
+                {uploading ? t('bankStatements.uploading') : `${t('bankStatements.upload')} ${readyCount > 0 ? readyCount : ''}`}
               </button>
             </div>
           </div>
@@ -200,8 +188,6 @@ export default function BankStatementsPanel() {
           <div className="divide-y divide-slate-700/50">
             {staged.map(s => (
               <div key={s.key} className="px-4 py-2 flex items-center gap-3">
-
-                {/* Status icon */}
                 <div className="w-5 flex-shrink-0 text-center">
                   {s.state === 'idle'      && <span className="text-slate-500 text-xs">○</span>}
                   {s.state === 'uploading' && <span className="text-blue-400 text-xs animate-pulse">↑</span>}
@@ -209,7 +195,6 @@ export default function BankStatementsPanel() {
                   {s.state === 'error'     && <span className="text-red-400 text-xs">✗</span>}
                 </div>
 
-                {/* File name + size */}
                 <div className="flex-1 min-w-0">
                   <p className="text-sm text-slate-200 truncate" title={s.file.name}>{s.file.name}</p>
                   {s.errorMsg
@@ -218,25 +203,23 @@ export default function BankStatementsPanel() {
                   }
                 </div>
 
-                {/* Account selector */}
                 <select
                   className={`w-52 flex-shrink-0 ${inp} ${!s.accountId && s.state === 'idle' ? 'border-yellow-600' : ''}`}
                   value={s.accountId}
                   disabled={s.state !== 'idle'}
                   onChange={e => setAccount(s.key, e.target.value)}
                 >
-                  <option value="">— assign account —</option>
+                  <option value="">— {t('bankStatements.assignAccount')} —</option>
                   {accounts.map(a => (
                     <option key={a.id} value={a.id}>{a.account_name} · {a.institution_name}</option>
                   ))}
                 </select>
 
-                {/* Remove */}
                 {s.state === 'idle' && (
                   <button
                     className="text-slate-500 hover:text-red-400 transition-colors text-sm flex-shrink-0"
                     onClick={() => removeStaged(s.key)}
-                    title="Remove"
+                    title={t('bankStatements.remove')}
                   >
                     ×
                   </button>
@@ -247,26 +230,24 @@ export default function BankStatementsPanel() {
         </div>
       )}
 
-      {/* ── Jobs history ── */}
+      {/* Jobs history */}
       <div className="bg-slate-800 border border-slate-700 rounded-lg overflow-hidden">
         <div className="px-5 py-3 border-b border-slate-700 flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-slate-200">Processing History</h2>
+          <h2 className="text-sm font-semibold text-slate-200">{t('bankStatements.processingHistory')}</h2>
           <button
             className="text-xs text-slate-400 hover:text-slate-200 transition-colors"
             onClick={() => qc.invalidateQueries({ queryKey: ['bank-statement-jobs'] })}
           >
-            Refresh
+            {t('common.refresh')}
           </button>
         </div>
 
         {jobsLoading && (
-          <p className="text-sm text-slate-400 px-5 py-6">Loading…</p>
+          <p className="text-sm text-slate-400 px-5 py-6">{t('common.loading')}</p>
         )}
 
         {!jobsLoading && jobs.length === 0 && (
-          <p className="text-sm text-slate-400 px-5 py-6">
-            No jobs yet — drop some files above to get started.
-          </p>
+          <p className="text-sm text-slate-400 px-5 py-6">{t('bankStatements.noJobs')}</p>
         )}
 
         {!jobsLoading && jobs.length > 0 && (
@@ -274,14 +255,14 @@ export default function BankStatementsPanel() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-xs text-slate-400 border-b border-slate-700">
-                  <th className="px-4 py-2 text-left font-medium">File</th>
-                  <th className="px-4 py-2 text-left font-medium">Account</th>
-                  <th className="px-4 py-2 text-left font-medium">Status</th>
-                  <th className="px-4 py-2 text-right font-medium">Parsed</th>
-                  <th className="px-4 py-2 text-right font-medium">Imported</th>
-                  <th className="px-4 py-2 text-right font-medium">Skipped</th>
-                  <th className="px-4 py-2 text-left font-medium">Uploaded</th>
-                  <th className="px-4 py-2 text-left font-medium">Completed</th>
+                  <th className="px-4 py-2 text-left font-medium">{t('bankStatements.colFile')}</th>
+                  <th className="px-4 py-2 text-left font-medium">{t('bankStatements.colAccount')}</th>
+                  <th className="px-4 py-2 text-left font-medium">{t('bankStatements.colStatus')}</th>
+                  <th className="px-4 py-2 text-right font-medium">{t('bankStatements.colParsed')}</th>
+                  <th className="px-4 py-2 text-right font-medium">{t('bankStatements.colImported')}</th>
+                  <th className="px-4 py-2 text-right font-medium">{t('bankStatements.colSkipped')}</th>
+                  <th className="px-4 py-2 text-left font-medium">{t('bankStatements.colUploaded')}</th>
+                  <th className="px-4 py-2 text-left font-medium">{t('bankStatements.colCompleted')}</th>
                   <th className="px-4 py-2" />
                 </tr>
               </thead>
@@ -298,7 +279,7 @@ export default function BankStatementsPanel() {
                       </td>
                       <td className="px-4 py-2">
                         <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${STATUS_STYLES[job.status]}`}>
-                          {job.status}
+                          {t(`bankStatements.statuses.${job.status}`, job.status)}
                         </span>
                         {job.error_detail && (
                           <span className="block text-xs text-red-400 mt-0.5 max-w-[200px] truncate" title={job.error_detail}>
@@ -321,7 +302,7 @@ export default function BankStatementsPanel() {
                               )
                             }
                           >
-                            Delete
+                            {t('common.delete')}
                           </button>
                         )}
                       </td>
@@ -334,10 +315,10 @@ export default function BankStatementsPanel() {
         )}
       </div>
 
-      {/* ── Info ── */}
+      {/* Info */}
       <div className="bg-slate-800/50 border border-slate-700 rounded-lg p-4 text-xs text-slate-400 space-y-1">
-        <p><span className="text-slate-200 font-medium">How it works:</span> Uploaded files are queued and processed by the local Ollama AI batch at 02:00 each morning.</p>
-        <p>Parsed transactions land in Finance → Transactions marked for review. To run immediately:</p>
+        <p><span className="text-slate-200 font-medium">{t('bankStatements.howItWorks')}</span> {t('bankStatements.howItWorksDetail')}</p>
+        <p>{t('bankStatements.howItWorksDetail2')}</p>
         <code className="block bg-slate-900 rounded px-3 py-1.5 text-slate-300 mt-1">
           Start-ScheduledTask -TaskName "JAG-Ollama-Batch"
         </code>

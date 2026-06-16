@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useTranslation } from 'react-i18next'
 import { glApi } from '../../api/gl'
 import { entityName, fmtTTD, fmtDate } from '../../lib/entities'
 import type { EntryStatus, JournalEntry } from '../../types/gl'
@@ -11,6 +12,7 @@ const STATUS_STYLES: Record<EntryStatus, string> = {
 }
 
 export default function JournalEntries() {
+  const { t } = useTranslation()
   const qc = useQueryClient()
   const [selected, setSelected] = useState<JournalEntry | null>(null)
   const [status, setStatus] = useState('')
@@ -63,44 +65,44 @@ export default function JournalEntries() {
         {/* Filters */}
         <div className="flex flex-wrap gap-3 mb-4">
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Status</label>
+            <label className="block text-xs text-slate-400 mb-1">{t('common.status')}</label>
             <select
               value={status}
               onChange={e => { setStatus(e.target.value); setPage(0) }}
               className="bg-slate-700 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500"
             >
-              <option value="">All</option>
-              <option value="DRAFT">Draft</option>
-              <option value="POSTED">Posted</option>
-              <option value="VOID">Void</option>
+              <option value="">{t('journalEntries.all')}</option>
+              <option value="DRAFT">{t('journalEntries.draft')}</option>
+              <option value="POSTED">{t('journalEntries.posted')}</option>
+              <option value="VOID">{t('journalEntries.void')}</option>
             </select>
           </div>
           <div>
-            <label className="block text-xs text-slate-400 mb-1">From</label>
+            <label className="block text-xs text-slate-400 mb-1">{t('common.from')}</label>
             <input type="date" value={dateFrom} onChange={e => { setDateFrom(e.target.value); setPage(0) }}
               className="bg-slate-700 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500" />
           </div>
           <div>
-            <label className="block text-xs text-slate-400 mb-1">To</label>
+            <label className="block text-xs text-slate-400 mb-1">{t('common.to')}</label>
             <input type="date" value={dateTo} onChange={e => { setDateTo(e.target.value); setPage(0) }}
               className="bg-slate-700 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500" />
           </div>
         </div>
 
-        {isLoading && <p className="text-slate-400 text-sm">Loading…</p>}
-        {!isLoading && entries.length === 0 && <p className="text-slate-400 text-sm">No journal entries found.</p>}
+        {isLoading && <p className="text-slate-400 text-sm">{t('common.loading')}</p>}
+        {!isLoading && entries.length === 0 && <p className="text-slate-400 text-sm">{t('journalEntries.noEntries')}</p>}
 
         {entries.length > 0 && (
           <div className="rounded-lg overflow-hidden border border-slate-700">
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-slate-700/50 text-slate-400 text-xs uppercase tracking-wide">
-                  <th className="text-left px-4 py-2">Date</th>
-                  <th className="text-left px-4 py-2">Reference</th>
-                  <th className="text-left px-4 py-2">Description</th>
-                  <th className="text-left px-4 py-2">Entity</th>
-                  <th className="text-right px-4 py-2">Debit</th>
-                  <th className="text-center px-4 py-2">Status</th>
+                  <th className="text-left px-4 py-2">{t('journalEntries.colDate')}</th>
+                  <th className="text-left px-4 py-2">{t('journalEntries.colRef')}</th>
+                  <th className="text-left px-4 py-2">{t('journalEntries.colDescription')}</th>
+                  <th className="text-left px-4 py-2">{t('journalEntries.colEntity')}</th>
+                  <th className="text-right px-4 py-2">{t('journalEntries.colDebit')}</th>
+                  <th className="text-center px-4 py-2">{t('journalEntries.colStatus')}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-700">
@@ -127,10 +129,14 @@ export default function JournalEntries() {
 
         <div className="flex justify-between items-center mt-4">
           <button disabled={page === 0} onClick={() => setPage(p => p - 1)}
-            className="px-3 py-1.5 text-xs text-slate-400 hover:text-white disabled:opacity-30 border border-slate-600 rounded">← Prev</button>
-          <span className="text-xs text-slate-500">Page {page + 1}</span>
+            className="px-3 py-1.5 text-xs text-slate-400 hover:text-white disabled:opacity-30 border border-slate-600 rounded">
+            {t('common.prev')}
+          </button>
+          <span className="text-xs text-slate-500">{t('common.page')} {page + 1}</span>
           <button disabled={entries.length < PAGE_SIZE} onClick={() => setPage(p => p + 1)}
-            className="px-3 py-1.5 text-xs text-slate-400 hover:text-white disabled:opacity-30 border border-slate-600 rounded">Next →</button>
+            className="px-3 py-1.5 text-xs text-slate-400 hover:text-white disabled:opacity-30 border border-slate-600 rounded">
+            {t('common.next')}
+          </button>
         </div>
       </div>
 
@@ -146,14 +152,13 @@ export default function JournalEntries() {
             <span className={`text-xs px-2 py-0.5 rounded border ${STATUS_STYLES[selected.status]}`}>{selected.status}</span>
           </div>
 
-          {/* Lines */}
           {detail?.lines && detail.lines.length > 0 && (
             <table className="w-full text-xs mb-4">
               <thead>
                 <tr className="text-slate-500 border-b border-slate-700">
-                  <th className="text-left pb-1">Account</th>
-                  <th className="text-right pb-1">Dr</th>
-                  <th className="text-right pb-1">Cr</th>
+                  <th className="text-left pb-1">{t('journalEntries.colAccount')}</th>
+                  <th className="text-right pb-1">{t('journalEntries.colDr')}</th>
+                  <th className="text-right pb-1">{t('journalEntries.colCr')}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-700/50">
@@ -174,7 +179,7 @@ export default function JournalEntries() {
               </tbody>
               <tfoot className="border-t border-slate-600 text-slate-400 font-semibold">
                 <tr>
-                  <td className="pt-2 text-xs">Total</td>
+                  <td className="pt-2 text-xs">{t('journalEntries.colTotal')}</td>
                   <td className="pt-2 text-right font-mono">{fmtTTD(selected.total_debit_ttd)}</td>
                   <td className="pt-2 text-right font-mono">{fmtTTD(selected.total_credit_ttd)}</td>
                 </tr>
@@ -191,13 +196,13 @@ export default function JournalEntries() {
                   disabled={posting}
                   className="flex-1 px-3 py-1.5 bg-green-700 hover:bg-green-600 disabled:opacity-50 text-white text-xs rounded transition-colors"
                 >
-                  {posting ? 'Posting…' : 'Post Entry'}
+                  {posting ? t('journalEntries.posting') : t('journalEntries.postEntry')}
                 </button>
                 <button
                   onClick={() => setShowVoidModal(true)}
                   className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-300 text-xs rounded transition-colors"
                 >
-                  Void
+                  {t('journalEntries.voidEntry')}
                 </button>
               </>
             )}
@@ -206,7 +211,7 @@ export default function JournalEntries() {
                 onClick={() => setShowVoidModal(true)}
                 className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-300 text-xs rounded transition-colors"
               >
-                Void Entry
+                {t('journalEntries.voidEntry')}
               </button>
             )}
           </div>
@@ -214,11 +219,11 @@ export default function JournalEntries() {
           {/* Void modal */}
           {showVoidModal && (
             <div className="mt-3 border border-red-800 rounded p-3 bg-red-950/30">
-              <p className="text-xs text-red-400 mb-2 font-medium">Void reason (required)</p>
+              <p className="text-xs text-red-400 mb-2 font-medium">{t('journalEntries.voidReason')}</p>
               <input
                 value={voidReason}
                 onChange={e => setVoidReason(e.target.value)}
-                placeholder="Entered in error…"
+                placeholder={t('journalEntries.voidReasonPlaceholder')}
                 className="w-full bg-slate-700 border border-slate-600 rounded px-2 py-1.5 text-xs text-slate-100 mb-2 focus:outline-none focus:ring-1 focus:ring-red-500"
               />
               <div className="flex gap-2">
@@ -227,10 +232,12 @@ export default function JournalEntries() {
                   disabled={voiding || !voidReason.trim()}
                   className="flex-1 px-3 py-1.5 bg-red-700 hover:bg-red-600 disabled:opacity-50 text-white text-xs rounded"
                 >
-                  {voiding ? 'Voiding…' : 'Confirm Void'}
+                  {voiding ? t('journalEntries.voiding') : t('journalEntries.confirmVoid')}
                 </button>
                 <button onClick={() => setShowVoidModal(false)}
-                  className="px-3 py-1.5 bg-slate-700 text-slate-300 text-xs rounded">Cancel</button>
+                  className="px-3 py-1.5 bg-slate-700 text-slate-300 text-xs rounded">
+                  {t('common.cancel')}
+                </button>
               </div>
             </div>
           )}

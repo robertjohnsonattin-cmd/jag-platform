@@ -27,33 +27,61 @@ import {
 
 export const documentJobsRouter = Router();
 
-// ── In-memory batch trigger flag ──────────────────────────────────────────────
-// Lightweight signal: workstation polls /trigger/status every 2 min.
-// Resets on API restart (acceptable — user just clicks again).
-let triggerPending = false;
+// ── SSE push trigger ──────────────────────────────────────────────────────────
+// When user clicks "Process Now", the API pushes a trigger event to the
+// workstation via SSE. Zero polling — the workstation connects once on login
+// and receives the event instantly.
+const sseClients = new Set<Response>();
 let triggeredAt: Date | null = null;
+
+// GET /listen — workstation connects here on startup and holds the connection
+documentJobsRouter.get('/listen', (req: Request, res: Response): void => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+
+  sseClients.add(res);
+  logger.info({ entity: 'FINANCE', action: 'SSE_CONNECTED', user_id: req.rlsCtx.ownerId, clients: sseClients.size });
+
+  // Heartbeat every 30s keeps the connection alive through proxies/load balancers
+  const heartbeat = setInterval(() => {
+    res.write('event: heartbeat\ndata: {}\n\n');
+  }, 30_000);
+
+  req.on('close', () => {
+    sseClients.delete(res);
+    clearInterval(heartbeat);
+    logger.info({ entity: 'FINANCE', action: 'SSE_DISCONNECTED', clients: sseClients.size });
+  });
+});
 
 // POST /trigger — UI calls this when user clicks "Process Now"
 documentJobsRouter.post('/trigger', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    triggerPending = true;
     triggeredAt = new Date();
-    logger.info({ entity: 'FINANCE', action: 'BATCH_TRIGGER_SET', user_id: req.rlsCtx.ownerId });
-    ok(res, { triggered: true, triggered_at: triggeredAt });
+    logger.info({ entity: 'FINANCE', action: 'BATCH_TRIGGER_SET', user_id: req.rlsCtx.ownerId, sse_clients: sseClients.size });
+
+    // Push instantly to all connected workstation listeners
+    const payload = JSON.stringify({ triggered_at: triggeredAt });
+    for (const client of sseClients) {
+      client.write(`event: trigger\ndata: ${payload}\n\n`);
+    }
+
+    ok(res, { triggered: true, triggered_at: triggeredAt, sse_clients: sseClients.size });
   } catch (e) { next(e); }
 });
 
-// GET /trigger/status — workstation polls this
+// GET /trigger/status — kept for UI polling fallback
 documentJobsRouter.get('/trigger/status', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    ok(res, { pending: triggerPending, triggered_at: triggeredAt ?? null });
+    ok(res, { pending: triggeredAt !== null, triggered_at: triggeredAt ?? null });
   } catch (e) { next(e); }
 });
 
 // POST /trigger/clear — workstation calls after batch completes
 documentJobsRouter.post('/trigger/clear', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    triggerPending = false;
     triggeredAt = null;
     logger.info({ entity: 'FINANCE', action: 'BATCH_TRIGGER_CLEARED', user_id: req.rlsCtx.ownerId });
     ok(res, { cleared: true });

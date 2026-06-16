@@ -5,6 +5,11 @@ prod_modules/
 *.log
 uploads/
 scripts/ollama-batch/.env.ollama-batch
+scripts/ollama-batch/.jag-kc-credentials
+scripts/doc-import/.env.doc-import
+
+# Claude Code internal state
+.claude/worktrees/
 
 # Build artifacts — pre-built tarballs are not source
 *.tar.gz

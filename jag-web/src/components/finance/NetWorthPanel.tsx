@@ -1,10 +1,12 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useTranslation } from 'react-i18next'
 import { financeApi } from '../../api/finance'
 import { entityName, fmtTTD, fmtDate } from '../../lib/entities'
 
 const CONSOLIDATED_ID = '00000000-0000-0000-0000-000000000000'
 
 export default function NetWorthPanel() {
+  const { t } = useTranslation()
   const qc = useQueryClient()
 
   const { data: snapshots = [], isLoading } = useQuery({
@@ -19,7 +21,7 @@ export default function NetWorthPanel() {
     },
   })
 
-  if (isLoading) return <p className="text-slate-400 text-sm">Loading…</p>
+  if (isLoading) return <p className="text-slate-400 text-sm">{t('common.loading')}</p>
 
   const consolidated = snapshots.find((s) => s.owner_entity_id === CONSOLIDATED_ID)
   const entities = snapshots
@@ -28,28 +30,26 @@ export default function NetWorthPanel() {
 
   return (
     <div>
-      {/* Consolidated summary cards */}
       {consolidated && (
         <div className="grid grid-cols-3 gap-4 mb-6">
-          <SummaryCard label="Net Worth" value={fmtTTD(consolidated.net_worth_ttd)} color="blue" />
-          <SummaryCard label="Total Assets" value={fmtTTD(consolidated.total_assets_ttd)} color="green" />
-          <SummaryCard label="Total Liabilities" value={fmtTTD(consolidated.total_liabilities_ttd)} color="red" />
+          <SummaryCard label={t('finance.netWorth.summaryNetWorth')} value={fmtTTD(consolidated.net_worth_ttd)} color="blue" />
+          <SummaryCard label={t('finance.netWorth.summaryAssets')} value={fmtTTD(consolidated.total_assets_ttd)} color="green" />
+          <SummaryCard label={t('finance.netWorth.summaryLiabilities')} value={fmtTTD(consolidated.total_liabilities_ttd)} color="red" />
         </div>
       )}
 
-      {/* Per-entity breakdown */}
       {entities.length > 0 && (
         <div className="rounded-lg overflow-hidden border border-slate-700 mb-6">
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-slate-700/50 text-slate-400 text-xs uppercase tracking-wide">
-                <th className="text-left px-4 py-2">Entity</th>
-                <th className="text-right px-4 py-2">Assets</th>
-                <th className="text-right px-4 py-2">Liabilities</th>
-                <th className="text-right px-4 py-2">Net Worth</th>
-                <th className="text-right px-4 py-2">Liquid</th>
-                <th className="text-right px-4 py-2">Investments</th>
-                <th className="text-right px-4 py-2">Snapshot Date</th>
+                <th className="text-left px-4 py-2">{t('finance.netWorth.colEntity')}</th>
+                <th className="text-right px-4 py-2">{t('finance.netWorth.colAssets')}</th>
+                <th className="text-right px-4 py-2">{t('finance.netWorth.colLiabilities')}</th>
+                <th className="text-right px-4 py-2">{t('finance.netWorth.colNetWorth')}</th>
+                <th className="text-right px-4 py-2">{t('finance.netWorth.colLiquid')}</th>
+                <th className="text-right px-4 py-2">{t('finance.netWorth.colInvestments')}</th>
+                <th className="text-right px-4 py-2">{t('finance.netWorth.colSnapshotDate')}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-700">
@@ -57,27 +57,13 @@ export default function NetWorthPanel() {
                 const nw = parseFloat(s.net_worth_ttd)
                 return (
                   <tr key={s.id} className="hover:bg-slate-700/30 transition-colors">
-                    <td className="px-4 py-3 font-medium text-slate-100">
-                      {entityName(s.owner_entity_id)}
-                    </td>
-                    <td className="px-4 py-3 text-right font-mono text-slate-300">
-                      {fmtTTD(s.total_assets_ttd)}
-                    </td>
-                    <td className="px-4 py-3 text-right font-mono text-red-400">
-                      {fmtTTD(s.total_liabilities_ttd)}
-                    </td>
-                    <td className={`px-4 py-3 text-right font-mono font-semibold ${nw >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                      {fmtTTD(s.net_worth_ttd)}
-                    </td>
-                    <td className="px-4 py-3 text-right font-mono text-slate-400">
-                      {fmtTTD(s.liquid_assets_ttd)}
-                    </td>
-                    <td className="px-4 py-3 text-right font-mono text-slate-400">
-                      {fmtTTD(s.investment_assets_ttd)}
-                    </td>
-                    <td className="px-4 py-3 text-right text-slate-500 text-xs">
-                      {fmtDate(s.snapshot_date)}
-                    </td>
+                    <td className="px-4 py-3 font-medium text-slate-100">{entityName(s.owner_entity_id)}</td>
+                    <td className="px-4 py-3 text-right font-mono text-slate-300">{fmtTTD(s.total_assets_ttd)}</td>
+                    <td className="px-4 py-3 text-right font-mono text-red-400">{fmtTTD(s.total_liabilities_ttd)}</td>
+                    <td className={`px-4 py-3 text-right font-mono font-semibold ${nw >= 0 ? 'text-green-400' : 'text-red-400'}`}>{fmtTTD(s.net_worth_ttd)}</td>
+                    <td className="px-4 py-3 text-right font-mono text-slate-400">{fmtTTD(s.liquid_assets_ttd)}</td>
+                    <td className="px-4 py-3 text-right font-mono text-slate-400">{fmtTTD(s.investment_assets_ttd)}</td>
+                    <td className="px-4 py-3 text-right text-slate-500 text-xs">{fmtDate(s.snapshot_date)}</td>
                   </tr>
                 )
               })}
@@ -87,7 +73,7 @@ export default function NetWorthPanel() {
       )}
 
       {snapshots.length === 0 && (
-        <p className="text-slate-400 text-sm mb-4">No snapshots yet. Take one to see your net worth.</p>
+        <p className="text-slate-400 text-sm mb-4">{t('finance.netWorth.noSnapshots')}</p>
       )}
 
       <button
@@ -95,7 +81,7 @@ export default function NetWorthPanel() {
         disabled={isPending}
         className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-sm rounded-lg transition-colors"
       >
-        {isPending ? 'Computing…' : 'Take Snapshot Now'}
+        {isPending ? t('finance.netWorth.computing') : t('finance.netWorth.takeSnapshot')}
       </button>
     </div>
   )

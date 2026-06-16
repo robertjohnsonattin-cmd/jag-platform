@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useTranslation } from 'react-i18next'
 import { expensesApi } from '../api/expenses'
 import { glApi } from '../api/gl'
 import { fmtTTD, fmtDate, entityName } from '../lib/entities'
@@ -35,9 +36,30 @@ function fmt(v: string | null | undefined) {
   return v ? fmtTTD(v) : '—'
 }
 
+const cls = 'w-full bg-slate-700 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500'
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <label className="block text-xs text-slate-400 mb-1">{label}</label>
+      {children}
+    </div>
+  )
+}
+
+function Row({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div className="flex justify-between items-start gap-2">
+      <span className="text-xs text-slate-400 shrink-0">{label}</span>
+      <span className="text-sm text-slate-100 text-right">{value}</span>
+    </div>
+  )
+}
+
 // ── Create Expense Modal ──────────────────────────────────────────────────────
 
 function CreateModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
+  const { t } = useTranslation()
   const [form, setForm] = useState({
     owner_entity_id: ENTITY_OPTIONS[0].id,
     expense_date: new Date().toISOString().slice(0, 10),
@@ -58,7 +80,7 @@ function CreateModal({ onClose, onCreated }: { onClose: () => void; onCreated: (
       payee_name: form.payee_name || undefined,
       amount: Number(form.amount),
       currency: form.currency,
-      amount_ttd: Number(form.amount), // 1:1 for TTD; FX handled later
+      amount_ttd: Number(form.amount),
       payment_method: form.payment_method,
       category: form.category,
       notes: form.notes || undefined,
@@ -73,48 +95,48 @@ function CreateModal({ onClose, onCreated }: { onClose: () => void; onCreated: (
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
       <div className="bg-slate-800 border border-slate-700 rounded-xl w-full max-w-lg p-6 shadow-2xl">
-        <h2 className="text-lg font-semibold mb-5">New Expense</h2>
+        <h2 className="text-lg font-semibold mb-5">{t('expenses.createTitle')}</h2>
 
         <div className="space-y-3">
-          <Field label="Entity">
+          <Field label={t('expenses.entityField')}>
             <select value={form.owner_entity_id} onChange={set('owner_entity_id')} className={cls}>
               {ENTITY_OPTIONS.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
             </select>
           </Field>
           <div className="grid grid-cols-2 gap-3">
-            <Field label="Date">
+            <Field label={t('expenses.dateField')}>
               <input type="date" value={form.expense_date} onChange={set('expense_date')} className={cls} />
             </Field>
-            <Field label="Payment Method">
+            <Field label={t('expenses.paymentMethodField')}>
               <select value={form.payment_method} onChange={set('payment_method')} className={cls}>
                 {PAYMENT_METHODS.map(m => <option key={m}>{m}</option>)}
               </select>
             </Field>
           </div>
-          <Field label="Description">
-            <input value={form.description} onChange={set('description')} placeholder="e.g. Office supplies" className={cls} />
+          <Field label={t('expenses.descriptionField')}>
+            <input value={form.description} onChange={set('description')} placeholder={t('expenses.descriptionPlaceholder')} className={cls} />
           </Field>
           <div className="grid grid-cols-2 gap-3">
-            <Field label="Payee">
-              <input value={form.payee_name} onChange={set('payee_name')} placeholder="Optional" className={cls} />
+            <Field label={t('expenses.payeeField')}>
+              <input value={form.payee_name} onChange={set('payee_name')} placeholder={t('expenses.payeeOptional')} className={cls} />
             </Field>
-            <Field label="Category">
+            <Field label={t('expenses.categoryField')}>
               <select value={form.category} onChange={set('category')} className={cls}>
                 {CATEGORIES.map(c => <option key={c}>{c}</option>)}
               </select>
             </Field>
           </div>
           <div className="grid grid-cols-2 gap-3">
-            <Field label="Amount">
+            <Field label={t('expenses.amountField')}>
               <input type="number" min="0" step="0.01" value={form.amount} onChange={set('amount')} placeholder="0.00" className={cls} />
             </Field>
-            <Field label="Currency">
+            <Field label={t('expenses.currencyField')}>
               <select value={form.currency} onChange={set('currency')} className={cls}>
                 <option>TTD</option><option>USD</option><option>EUR</option><option>GBP</option>
               </select>
             </Field>
           </div>
-          <Field label="Notes">
+          <Field label={t('expenses.notesField')}>
             <textarea value={form.notes} onChange={set('notes')} rows={2} className={`${cls} resize-none`} />
           </Field>
         </div>
@@ -122,13 +144,13 @@ function CreateModal({ onClose, onCreated }: { onClose: () => void; onCreated: (
         {error && <p className="text-red-400 text-xs mt-3">{(error as Error).message}</p>}
 
         <div className="flex gap-3 mt-5 justify-end">
-          <button onClick={onClose} className="px-4 py-2 text-sm text-slate-400 hover:text-slate-200">Cancel</button>
+          <button onClick={onClose} className="px-4 py-2 text-sm text-slate-400 hover:text-slate-200">{t('common.cancel')}</button>
           <button
             onClick={() => create()}
             disabled={isPending || !form.description || !form.amount}
             className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded-lg transition-colors"
           >
-            {isPending ? 'Saving…' : 'Save as Draft'}
+            {isPending ? t('common.saving') : t('expenses.saveDraft')}
           </button>
         </div>
       </div>
@@ -139,6 +161,7 @@ function CreateModal({ onClose, onCreated }: { onClose: () => void; onCreated: (
 // ── Approve Modal ─────────────────────────────────────────────────────────────
 
 function ApproveModal({ expense, onClose, onDone }: { expense: Expense; onClose: () => void; onDone: () => void }) {
+  const { t } = useTranslation()
   const [debitId, setDebitId]   = useState(expense.gl_debit_account_id ?? '')
   const [creditId, setCreditId] = useState('')
 
@@ -163,22 +186,24 @@ function ApproveModal({ expense, onClose, onDone }: { expense: Expense; onClose:
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
       <div className="bg-slate-800 border border-slate-700 rounded-xl w-full max-w-md p-6 shadow-2xl">
-        <h2 className="text-lg font-semibold mb-1">Approve Expense</h2>
+        <h2 className="text-lg font-semibold mb-1">{t('expenses.approveTitle')}</h2>
         <p className="text-sm text-slate-400">{expense.description} — {fmtTTD(expense.amount_ttd)}</p>
-        <p className="text-xs text-slate-500 mb-5">GL accounts filtered to <span className="text-slate-300">{entityName(expense.owner_entity_id)}</span></p>
+        <p className="text-xs text-slate-500 mb-5">
+          {t('expenses.glFiltered', { entity: entityName(expense.owner_entity_id) })}
+        </p>
 
         <div className="space-y-3">
-          <Field label="Debit Account (Expense)">
+          <Field label={t('expenses.debitAccount')}>
             <select value={debitId} onChange={e => setDebitId(e.target.value)} className={cls}>
-              <option value="">Select…</option>
+              <option value="">{t('expenses.selectAccount')}</option>
               {expenseAccounts.map(a => (
                 <option key={a.id} value={a.id}>{a.account_code} — {a.account_name}</option>
               ))}
             </select>
           </Field>
-          <Field label="Credit Account (bank, credit card, or accrued liability)">
+          <Field label={t('expenses.creditAccount')}>
             <select value={creditId} onChange={e => setCreditId(e.target.value)} className={cls}>
-              <option value="">Select…</option>
+              <option value="">{t('expenses.selectAccount')}</option>
               {paymentAccounts.map(a => (
                 <option key={a.id} value={a.id}>{a.account_code} — {a.account_name}</option>
               ))}
@@ -189,13 +214,13 @@ function ApproveModal({ expense, onClose, onDone }: { expense: Expense; onClose:
         {error && <p className="text-red-400 text-xs mt-3">{(error as Error).message}</p>}
 
         <div className="flex gap-3 mt-5 justify-end">
-          <button onClick={onClose} className="px-4 py-2 text-sm text-slate-400 hover:text-slate-200">Cancel</button>
+          <button onClick={onClose} className="px-4 py-2 text-sm text-slate-400 hover:text-slate-200">{t('common.cancel')}</button>
           <button
             onClick={() => approve()}
             disabled={isPending || !debitId || !creditId}
             className="px-4 py-2 text-sm bg-green-700 hover:bg-green-600 disabled:opacity-50 text-white rounded-lg transition-colors"
           >
-            {isPending ? 'Approving…' : 'Approve & Post GL'}
+            {isPending ? t('expenses.approving') : t('expenses.approvePost')}
           </button>
         </div>
       </div>
@@ -206,6 +231,7 @@ function ApproveModal({ expense, onClose, onDone }: { expense: Expense; onClose:
 // ── Reject Modal ──────────────────────────────────────────────────────────────
 
 function RejectModal({ expense, onClose, onDone }: { expense: Expense; onClose: () => void; onDone: () => void }) {
+  const { t } = useTranslation()
   const [reason, setReason] = useState('')
 
   const { mutate: reject, isPending, error } = useMutation({
@@ -216,26 +242,26 @@ function RejectModal({ expense, onClose, onDone }: { expense: Expense; onClose: 
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
       <div className="bg-slate-800 border border-slate-700 rounded-xl w-full max-w-md p-6 shadow-2xl">
-        <h2 className="text-lg font-semibold mb-1">Reject Expense</h2>
+        <h2 className="text-lg font-semibold mb-1">{t('expenses.rejectTitle')}</h2>
         <p className="text-sm text-slate-400 mb-5">{expense.description}</p>
-        <Field label="Rejection reason">
+        <Field label={t('expenses.rejectionReason')}>
           <textarea
             value={reason}
             onChange={e => setReason(e.target.value)}
             rows={3}
-            placeholder="Explain why this expense is rejected…"
+            placeholder={t('expenses.rejectionPlaceholder')}
             className={`${cls} resize-none`}
           />
         </Field>
         {error && <p className="text-red-400 text-xs mt-3">{(error as Error).message}</p>}
         <div className="flex gap-3 mt-5 justify-end">
-          <button onClick={onClose} className="px-4 py-2 text-sm text-slate-400 hover:text-slate-200">Cancel</button>
+          <button onClick={onClose} className="px-4 py-2 text-sm text-slate-400 hover:text-slate-200">{t('common.cancel')}</button>
           <button
             onClick={() => reject()}
             disabled={isPending || !reason.trim()}
             className="px-4 py-2 text-sm bg-red-700 hover:bg-red-600 disabled:opacity-50 text-white rounded-lg transition-colors"
           >
-            {isPending ? 'Rejecting…' : 'Reject'}
+            {isPending ? t('expenses.rejecting') : t('expenses.reject')}
           </button>
         </div>
       </div>
@@ -246,6 +272,7 @@ function RejectModal({ expense, onClose, onDone }: { expense: Expense; onClose: 
 // ── Reverse Modal ─────────────────────────────────────────────────────────────
 
 function ReverseModal({ expense, onClose, onDone }: { expense: Expense; onClose: () => void; onDone: () => void }) {
+  const { t } = useTranslation()
   const [reason, setReason] = useState('')
 
   const { mutate: reverse, isPending, error } = useMutation({
@@ -256,29 +283,27 @@ function ReverseModal({ expense, onClose, onDone }: { expense: Expense; onClose:
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
       <div className="bg-slate-800 border border-slate-700 rounded-xl w-full max-w-md p-6 shadow-2xl">
-        <h2 className="text-lg font-semibold mb-1">Void & Reverse Entry</h2>
+        <h2 className="text-lg font-semibold mb-1">{t('expenses.voidTitle')}</h2>
         <p className="text-sm text-slate-400 mb-1">{expense.description} — {fmtTTD(expense.amount_ttd)}</p>
-        <p className="text-xs text-slate-500 mb-5">
-          This will void the original GL entry and post an equal reversing entry. Both entries remain visible in the ledger. The expense moves to <span className="text-purple-300">REVERSED</span>.
-        </p>
-        <Field label="Reversal reason (required for audit trail)">
+        <p className="text-xs text-slate-500 mb-5">{t('expenses.voidDescription')}</p>
+        <Field label={t('expenses.reversalReason')}>
           <textarea
             value={reason}
             onChange={e => setReason(e.target.value)}
             rows={3}
-            placeholder="e.g. Incorrect GL account selected on approval — reposted to correct account."
+            placeholder={t('expenses.reversalPlaceholder')}
             className={`${cls} resize-none`}
           />
         </Field>
         {error && <p className="text-red-400 text-xs mt-3">{(error as Error).message}</p>}
         <div className="flex gap-3 mt-5 justify-end">
-          <button onClick={onClose} className="px-4 py-2 text-sm text-slate-400 hover:text-slate-200">Cancel</button>
+          <button onClick={onClose} className="px-4 py-2 text-sm text-slate-400 hover:text-slate-200">{t('common.cancel')}</button>
           <button
             onClick={() => reverse()}
             disabled={isPending || !reason.trim()}
             className="px-4 py-2 text-sm bg-purple-700 hover:bg-purple-600 disabled:opacity-50 text-white rounded-lg transition-colors"
           >
-            {isPending ? 'Reversing…' : 'Void & Reverse'}
+            {isPending ? t('expenses.reversing') : t('expenses.voidReverse')}
           </button>
         </div>
       </div>
@@ -289,6 +314,7 @@ function ReverseModal({ expense, onClose, onDone }: { expense: Expense; onClose:
 // ── Detail Panel ──────────────────────────────────────────────────────────────
 
 function DetailPanel({ expense, onClose }: { expense: Expense; onClose: () => void }) {
+  const { t } = useTranslation()
   const qc = useQueryClient()
   const [showApprove, setShowApprove] = useState(false)
   const [showReject, setShowReject]   = useState(false)
@@ -313,29 +339,29 @@ function DetailPanel({ expense, onClose }: { expense: Expense; onClose: () => vo
       </div>
 
       <div className="space-y-2 mb-4 text-sm">
-        <Row label="Amount" value={
+        <Row label={t('expenses.detailAmount')} value={
           expense.currency === 'TTD'
             ? fmtTTD(expense.amount_ttd)
             : `${expense.currency} ${parseFloat(expense.amount).toLocaleString('en-TT', { minimumFractionDigits: 2 })} (${fmtTTD(expense.amount_ttd)})`
         } />
-        <Row label="Entity"  value={entityName(expense.owner_entity_id)} />
-        <Row label="Category" value={expense.category} />
-        <Row label="Method"  value={expense.payment_method} />
-        <Row label="Status"  value={<span className={`text-xs px-2 py-0.5 rounded border ${STATUS_STYLES[expense.status]}`}>{expense.status}</span>} />
-        {expense.submitted_at && <Row label="Submitted" value={fmtDate(expense.submitted_at)} />}
-        {expense.approved_at  && <Row label={expense.status === 'REJECTED' ? 'Rejected at' : 'Approved at'} value={fmtDate(expense.approved_at)} />}
+        <Row label={t('expenses.detailEntity')}   value={entityName(expense.owner_entity_id)} />
+        <Row label={t('expenses.detailCategory')} value={expense.category} />
+        <Row label={t('expenses.detailMethod')}   value={expense.payment_method} />
+        <Row label={t('expenses.detailStatus')}   value={<span className={`text-xs px-2 py-0.5 rounded border ${STATUS_STYLES[expense.status]}`}>{expense.status}</span>} />
+        {expense.submitted_at && <Row label={t('expenses.detailSubmitted')} value={fmtDate(expense.submitted_at)} />}
+        {expense.approved_at  && <Row label={expense.status === 'REJECTED' ? t('expenses.detailRejectedAt') : t('expenses.detailApprovedAt')} value={fmtDate(expense.approved_at)} />}
         {expense.rejection_reason && (
           <div className="p-2.5 rounded bg-red-950/40 border border-red-900 text-xs text-red-300">
-            <p className="font-medium mb-0.5">Rejection reason</p>
+            <p className="font-medium mb-0.5">{t('expenses.detailRejectionReason')}</p>
             <p>{expense.rejection_reason}</p>
           </div>
         )}
-        {expense.journal_entry_id && <Row label="GL Entry" value={<span className="font-mono text-xs text-slate-400">{expense.journal_entry_id.slice(0, 8)}…</span>} />}
+        {expense.journal_entry_id && <Row label={t('expenses.detailGlEntry')} value={<span className="font-mono text-xs text-slate-400">{expense.journal_entry_id.slice(0, 8)}…</span>} />}
         {expense.notes && (
           <div className="p-2.5 rounded bg-slate-700/40 text-xs text-slate-300">{expense.notes}</div>
         )}
         {expense.receipt_filename && (
-          <Row label="Receipt" value={<span className="text-blue-400 text-xs">{expense.receipt_filename}</span>} />
+          <Row label={t('expenses.detailReceipt')} value={<span className="text-blue-400 text-xs">{expense.receipt_filename}</span>} />
         )}
       </div>
 
@@ -347,7 +373,7 @@ function DetailPanel({ expense, onClose }: { expense: Expense; onClose: () => vo
             disabled={submitting}
             className="w-full px-3 py-2 bg-blue-700 hover:bg-blue-600 disabled:opacity-50 text-white text-sm rounded-lg transition-colors"
           >
-            {submitting ? 'Submitting…' : 'Submit for Approval'}
+            {submitting ? t('expenses.submitting') : t('expenses.submitForApproval')}
           </button>
         )}
         {expense.status === 'SUBMITTED' && (
@@ -356,13 +382,13 @@ function DetailPanel({ expense, onClose }: { expense: Expense; onClose: () => vo
               onClick={() => setShowApprove(true)}
               className="w-full px-3 py-2 bg-green-700 hover:bg-green-600 text-white text-sm rounded-lg transition-colors"
             >
-              Approve & Post GL
+              {t('expenses.approvePost')}
             </button>
             <button
               onClick={() => setShowReject(true)}
               className="w-full px-3 py-2 bg-red-800 hover:bg-red-700 text-white text-sm rounded-lg transition-colors"
             >
-              Reject
+              {t('expenses.reject')}
             </button>
           </>
         )}
@@ -371,7 +397,7 @@ function DetailPanel({ expense, onClose }: { expense: Expense; onClose: () => vo
             onClick={() => setShowReverse(true)}
             className="w-full px-3 py-2 bg-purple-800 hover:bg-purple-700 text-white text-sm rounded-lg transition-colors"
           >
-            Void &amp; Reverse
+            {t('expenses.voidReverse')}
           </button>
         )}
       </div>
@@ -385,27 +411,8 @@ function DetailPanel({ expense, onClose }: { expense: Expense; onClose: () => vo
 
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
-const cls = 'w-full bg-slate-700 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500'
-
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <label className="block text-xs text-slate-400 mb-1">{label}</label>
-      {children}
-    </div>
-  )
-}
-
-function Row({ label, value }: { label: string; value: React.ReactNode }) {
-  return (
-    <div className="flex justify-between items-start gap-2">
-      <span className="text-xs text-slate-400 shrink-0">{label}</span>
-      <span className="text-sm text-slate-100 text-right">{value}</span>
-    </div>
-  )
-}
-
 export default function Expenses() {
+  const { t } = useTranslation()
   const qc = useQueryClient()
   const [statusFilter, setStatusFilter]   = useState('')
   const [entityFilter, setEntityFilter]   = useState('')
@@ -426,50 +433,48 @@ export default function Expenses() {
     }),
   })
 
-  // Keep selected in sync with fresh data
   const selectedFresh = selected ? (expenses.find(e => e.id === selected.id) ?? selected) : null
-
   const submitted = expenses.filter(e => e.status === 'SUBMITTED').length
 
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-semibold">Expenses</h1>
+          <h1 className="text-2xl font-semibold">{t('expenses.title')}</h1>
           {submitted > 0 && (
-            <p className="text-sm text-yellow-400 mt-0.5">{submitted} pending approval</p>
+            <p className="text-sm text-yellow-400 mt-0.5">{t('expenses.pendingApproval', { count: submitted })}</p>
           )}
         </div>
         <button
           onClick={() => setShowCreate(true)}
           className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm rounded-lg transition-colors"
         >
-          + New Expense
+          {t('expenses.newExpense')}
         </button>
       </div>
 
       {/* Filters */}
       <div className="flex flex-wrap gap-3 mb-5">
         <div>
-          <label className="block text-xs text-slate-400 mb-1">Status</label>
+          <label className="block text-xs text-slate-400 mb-1">{t('expenses.statusFilter')}</label>
           <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="bg-slate-700 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500">
-            <option value="">All</option>
+            <option value="">{t('common.all')}</option>
             <option>DRAFT</option><option>SUBMITTED</option><option>APPROVED</option><option>REJECTED</option>
           </select>
         </div>
         <div>
-          <label className="block text-xs text-slate-400 mb-1">Entity</label>
+          <label className="block text-xs text-slate-400 mb-1">{t('expenses.entityFilter')}</label>
           <select value={entityFilter} onChange={e => setEntityFilter(e.target.value)} className="bg-slate-700 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500">
-            <option value="">All</option>
+            <option value="">{t('common.all')}</option>
             {ENTITY_OPTIONS.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
           </select>
         </div>
         <div>
-          <label className="block text-xs text-slate-400 mb-1">From</label>
+          <label className="block text-xs text-slate-400 mb-1">{t('common.from')}</label>
           <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="bg-slate-700 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500" />
         </div>
         <div>
-          <label className="block text-xs text-slate-400 mb-1">To</label>
+          <label className="block text-xs text-slate-400 mb-1">{t('common.to')}</label>
           <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="bg-slate-700 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500" />
         </div>
       </div>
@@ -477,9 +482,9 @@ export default function Expenses() {
       <div className="flex gap-6">
         {/* Expense list */}
         <div className="flex-1 min-w-0">
-          {isLoading && <p className="text-slate-400 text-sm">Loading…</p>}
+          {isLoading && <p className="text-slate-400 text-sm">{t('expenses.loading')}</p>}
           {!isLoading && expenses.length === 0 && (
-            <p className="text-slate-500 text-sm">No expenses found. Create one to get started.</p>
+            <p className="text-slate-500 text-sm">{t('expenses.noExpenses')}</p>
           )}
 
           {expenses.length > 0 && (
@@ -487,12 +492,12 @@ export default function Expenses() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-slate-700/50 text-slate-400 text-xs uppercase tracking-wide">
-                    <th className="text-left px-4 py-2">Date</th>
-                    <th className="text-left px-4 py-2">Description</th>
-                    <th className="text-left px-4 py-2">Entity</th>
-                    <th className="text-left px-4 py-2">Category</th>
-                    <th className="text-right px-4 py-2">Amount</th>
-                    <th className="text-center px-4 py-2">Status</th>
+                    <th className="text-left px-4 py-2">{t('expenses.colDate')}</th>
+                    <th className="text-left px-4 py-2">{t('expenses.colDescription')}</th>
+                    <th className="text-left px-4 py-2">{t('expenses.colEntity')}</th>
+                    <th className="text-left px-4 py-2">{t('expenses.colCategory')}</th>
+                    <th className="text-right px-4 py-2">{t('expenses.colAmount')}</th>
+                    <th className="text-center px-4 py-2">{t('expenses.colStatus')}</th>
                     <th className="px-4 py-2" />
                   </tr>
                 </thead>
@@ -519,7 +524,7 @@ export default function Expenses() {
                           <button
                             onClick={ev => { ev.stopPropagation(); setDeletingExpense(e) }}
                             className="text-slate-600 hover:text-red-400 transition-colors"
-                            title="Delete expense"
+                            title={t('common.delete')}
                           >&#x1F5D1;</button>
                         )}
                       </td>
@@ -528,7 +533,7 @@ export default function Expenses() {
                 </tbody>
                 <tfoot className="border-t border-slate-600 bg-slate-700/20 text-xs text-slate-400 font-semibold">
                   <tr>
-                    <td colSpan={4} className="px-4 py-2">Total ({expenses.length})</td>
+                    <td colSpan={4} className="px-4 py-2">{t('expenses.totalRow', { count: expenses.length })}</td>
                     <td className="px-4 py-2 text-right font-mono text-slate-200">
                       {fmtTTD(expenses.reduce((s, e) => s + parseFloat(e.amount_ttd), 0))}
                     </td>

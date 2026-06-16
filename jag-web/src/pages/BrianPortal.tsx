@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { useTranslation } from 'react-i18next'
 import { brianApi } from '../api/brian'
 import { useAuth } from '../auth/AuthProvider'
 import type { BrianModule } from '../api/brian'
@@ -25,12 +26,13 @@ const fmtM = (v: number | string | null | undefined) => v == null ? '—' : `TTD
 // ── Module views ──────────────────────────────────────────────────────────────
 
 function JabcoView() {
+  const { t } = useTranslation()
   const { data } = useQuery({ queryKey: ['brian-jabco-projects'], queryFn: () => jabcoApi.getProjects({}) })
   const projects = data?.projects ?? []
   return (
     <div className="space-y-3">
-      <h2 className="text-white font-semibold text-lg">JABCO Projects</h2>
-      {projects.length === 0 && <p className="text-slate-400 text-sm">No projects.</p>}
+      <h2 className="text-white font-semibold text-lg">{t('brianPortal.jabcoProjects')}</h2>
+      {projects.length === 0 && <p className="text-slate-400 text-sm">{t('brianPortal.noProjects')}</p>}
       {projects.map(p => (
         <div key={p.id} className="bg-slate-800 border border-slate-700 rounded-lg px-4 py-3">
           <div className="flex items-center justify-between gap-3">
@@ -50,11 +52,12 @@ function JabcoView() {
 }
 
 function PropertiesView() {
+  const { t } = useTranslation()
   const { data: properties = [] } = useQuery({ queryKey: ['brian-properties'], queryFn: () => propertiesApi.getProperties() })
   return (
     <div className="space-y-3">
-      <h2 className="text-white font-semibold text-lg">Properties</h2>
-      {(properties as Property[]).length === 0 && <p className="text-slate-400 text-sm">No properties.</p>}
+      <h2 className="text-white font-semibold text-lg">{t('brianPortal.properties')}</h2>
+      {(properties as Property[]).length === 0 && <p className="text-slate-400 text-sm">{t('brianPortal.noProperties')}</p>}
       {(properties as Property[]).map(p => (
         <div key={p.id} className="bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 flex justify-between items-center gap-3">
           <div>
@@ -63,7 +66,7 @@ function PropertiesView() {
           </div>
           <div className="text-right shrink-0">
             <p className="text-white text-sm">{p.current_valuation ? fmtM(parseFloat(p.current_valuation)) : '—'}</p>
-            <p className="text-slate-400 text-xs">{p.is_rented ? 'Rented' : 'Vacant'}</p>
+            <p className="text-slate-400 text-xs">{p.is_rented ? t('propertiesPanel.rented') : t('propertiesPanel.vacant')}</p>
           </div>
         </div>
       ))}
@@ -72,17 +75,18 @@ function PropertiesView() {
 }
 
 function InventoryView() {
+  const { t } = useTranslation()
   const { data } = useQuery({ queryKey: ['brian-ims'], queryFn: () => imsApi.getItems({ limit: 50 }) })
   const items = data?.items ?? []
   return (
     <div className="space-y-3">
-      <h2 className="text-white font-semibold text-lg">Inventory</h2>
-      {items.length === 0 && <p className="text-slate-400 text-sm">No items.</p>}
+      <h2 className="text-white font-semibold text-lg">{t('brianPortal.inventory')}</h2>
+      {items.length === 0 && <p className="text-slate-400 text-sm">{t('brianPortal.noItems')}</p>}
       {items.map(item => (
         <div key={item.id} className="bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 flex justify-between items-center gap-3">
           <div>
             <p className="text-white font-medium">{item.name}</p>
-            <p className="text-slate-400 text-sm">{item.location_code} · {item.category_name ?? 'Uncategorised'}</p>
+            <p className="text-slate-400 text-sm">{item.location_code} · {item.category_name ?? t('brianPortal.uncategorised')}</p>
           </div>
           <div className="text-right shrink-0">
             <p className="text-white text-sm">{item.quantity_on_hand} {item.unit_of_measure}</p>
@@ -95,6 +99,7 @@ function InventoryView() {
 }
 
 function CRMView() {
+  const { t } = useTranslation()
   const [search, setSearch] = useState('')
   const { data } = useQuery({
     queryKey: ['brian-crm', search],
@@ -104,17 +109,17 @@ function CRMView() {
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-3">
-        <h2 className="text-white font-semibold text-lg">CRM — Companies</h2>
+        <h2 className="text-white font-semibold text-lg">{t('brianPortal.crmCompanies')}</h2>
         <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search…" className="bg-slate-700 border border-slate-600 rounded px-3 py-1.5 text-white text-sm w-48" />
       </div>
-      {companies.length === 0 && <p className="text-slate-400 text-sm">No companies.</p>}
+      {companies.length === 0 && <p className="text-slate-400 text-sm">{t('brianPortal.noCompanies')}</p>}
       {companies.map(co => (
         <div key={co.id} className="bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 flex justify-between items-center gap-3">
           <div>
             <p className="text-white font-medium">{co.name}</p>
             <p className="text-slate-400 text-sm">{co.industry ?? '—'} · {co.country}</p>
           </div>
-          <p className="text-slate-400 text-sm shrink-0">{co.contact_count} contacts</p>
+          <p className="text-slate-400 text-sm shrink-0">{co.contact_count} {t('brianPortal.contacts')}</p>
         </div>
       ))}
     </div>
@@ -122,9 +127,10 @@ function CRMView() {
 }
 
 function ComingSoonView({ module }: { module: string }) {
+  const { t } = useTranslation()
   return (
     <div className="flex items-center justify-center h-48">
-      <p className="text-slate-500 text-sm">{module} view coming soon.</p>
+      <p className="text-slate-500 text-sm">{t('brianPortal.comingSoon', { module })}</p>
     </div>
   )
 }
@@ -161,6 +167,7 @@ function ModuleView({ module }: { module: BrianModule }) {
 // ── Portal shell ──────────────────────────────────────────────────────────────
 
 export default function BrianPortal() {
+  const { t } = useTranslation()
   const { logout } = useAuth()
   const [activeModule, setActiveModule] = useState<BrianModule | null>(null)
 
@@ -174,7 +181,7 @@ export default function BrianPortal() {
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-screen bg-slate-900 text-slate-400 text-sm">
-        Loading portal…
+        {t('brianPortal.loading')}
       </div>
     )
   }
@@ -187,12 +194,12 @@ export default function BrianPortal() {
       <aside className="w-56 shrink-0 bg-slate-800 border-r border-slate-700 flex flex-col">
         <div className="px-5 py-5 border-b border-slate-700">
           <p className="text-white font-bold text-base">JAG Holdings</p>
-          <p className="text-slate-400 text-xs mt-0.5">Brian's Portal</p>
+          <p className="text-slate-400 text-xs mt-0.5">{t('brianPortal.title')}</p>
         </div>
 
         <nav className="flex-1 overflow-y-auto py-3">
           {accessible.length === 0 && (
-            <p className="px-5 text-slate-500 text-xs py-4">No modules granted yet.</p>
+            <p className="px-5 text-slate-500 text-xs py-4">{t('brianPortal.noModules')}</p>
           )}
           {accessible.map(p => (
             <button
@@ -206,7 +213,7 @@ export default function BrianPortal() {
             >
               <span>{MODULE_LABELS[p.module]}</span>
               {p.access_level === 'READ' && (
-                <span className="text-xs text-blue-400 shrink-0">Read</span>
+                <span className="text-xs text-blue-400 shrink-0">{t('brianPortal.read')}</span>
               )}
             </button>
           ))}
@@ -217,7 +224,7 @@ export default function BrianPortal() {
             onClick={logout}
             className="w-full text-left text-slate-400 hover:text-white text-sm transition-colors"
           >
-            Sign out
+            {t('brianPortal.signOut')}
           </button>
         </div>
       </aside>
@@ -226,7 +233,7 @@ export default function BrianPortal() {
       <main className="flex-1 overflow-y-auto">
         {current === null ? (
           <div className="flex items-center justify-center h-full text-slate-500 text-sm">
-            No modules have been granted access yet. Contact Robert.
+            {t('brianPortal.noAccess')}
           </div>
         ) : (
           <div className="p-6 max-w-3xl">

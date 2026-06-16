@@ -12,3 +12,5 @@ RUN xcaddy build \
 FROM caddy:2
 
 COPY --from=builder /usr/bin/caddy /usr/bin/caddy
+
+RUN mkdir -p /opt/jag/jag-web/dist

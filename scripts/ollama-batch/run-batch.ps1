@@ -12,7 +12,9 @@ $VmHost     = "ubuntu@150.136.151.64"
 
 function Log($msg) {
   $ts = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
-  "$ts  $msg" | Tee-Object -FilePath $LogFile -Append
+  $line = "$ts  $msg"
+  Write-Host $line
+  Add-Content -Path $LogFile -Value $line -ErrorAction SilentlyContinue
 }
 
 Log "===== JAG Ollama Batch run starting ====="

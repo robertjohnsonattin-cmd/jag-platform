@@ -1,28 +1,47 @@
 import { useState } from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
 import { useAuth } from '../auth/AuthProvider'
+import i18n from '../i18n'
 
 const NAV = [
-  { to: '/dashboard', label: 'Dashboard' },
-  { to: '/finance', label: 'Finance' },
-  { to: '/ledger', label: 'Ledger' },
-  { to: '/reports', label: 'Reports' },
-  { to: '/expenses', label: 'Expenses' },
-  { to: '/properties', label: 'Properties' },
-  { to: '/jabco', label: 'JABCO' },
-  { to: '/inventory', label: 'Inventory' },
-  { to: '/purchasing', label: 'Purchasing' },
-  { to: '/crm', label: 'CRM' },
-  { to: '/entertainment', label: 'Entertainment' },
-  { to: '/dragonbridge', label: 'DragonBridge' },
-  { to: '/nlcb', label: 'NLCB Booth' },
-  { to: '/docvault', label: 'DocVault' },
-  { to: '/lifestyle', label: 'Lifestyle' },
-  { to: '/brian-admin', label: "Brian's Portal" },
+  { to: '/dashboard',     key: 'nav.dashboard' },
+  { to: '/finance',       key: 'nav.finance' },
+  { to: '/ledger',        key: 'nav.ledger' },
+  { to: '/reports',       key: 'nav.reports' },
+  { to: '/expenses',      key: 'nav.expenses' },
+  { to: '/properties',    key: 'nav.properties' },
+  { to: '/jabco',         key: 'nav.jabco' },
+  { to: '/inventory',     key: 'nav.inventory' },
+  { to: '/purchasing',    key: 'nav.purchasing' },
+  { to: '/crm',           key: 'nav.crm' },
+  { to: '/entertainment', key: 'nav.entertainment' },
+  { to: '/dragonbridge',  key: 'nav.dragonbridge' },
+  { to: '/nlcb',          key: 'nav.nlcb' },
+  { to: '/docvault',      key: 'nav.docvault' },
+  { to: '/lifestyle',     key: 'nav.lifestyle' },
+  { to: '/brian-admin',   key: 'nav.brianPortal' },
 ]
+
+function LangToggle() {
+  const { t } = useTranslation()
+  const current = i18n.language
+  const next = current === 'en' ? 'zh-CN' : 'en'
+  const label = current === 'en' ? '中文' : 'EN'
+  return (
+    <button
+      onClick={() => i18n.changeLanguage(next)}
+      className="text-xs text-slate-400 hover:text-white transition-colors"
+      title={t('common.language')}
+    >
+      {label}
+    </button>
+  )
+}
 
 export default function AppShell() {
   const { logout } = useAuth()
+  const { t } = useTranslation()
   const [sidebarOpen, setSidebarOpen] = useState(false)
 
   return (
@@ -42,11 +61,13 @@ export default function AppShell() {
         }`}
       >
         <div className="px-5 py-4 border-b border-slate-700 flex items-center justify-between">
-          <span className="text-sm font-semibold tracking-widest text-slate-400 uppercase">JAG Holdings</span>
+          <span className="text-sm font-semibold tracking-widest text-slate-400 uppercase">
+            {t('nav.jagHoldings')}
+          </span>
           <button
             className="md:hidden text-slate-400 hover:text-white p-1"
             onClick={() => setSidebarOpen(false)}
-            aria-label="Close navigation"
+            aria-label={t('nav.closeNav')}
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -54,7 +75,7 @@ export default function AppShell() {
           </button>
         </div>
         <nav className="flex-1 py-4 space-y-0.5 overflow-y-auto">
-          {NAV.map(({ to, label }) => (
+          {NAV.map(({ to, key }) => (
             <NavLink
               key={to}
               to={to}
@@ -67,17 +88,18 @@ export default function AppShell() {
                 }`
               }
             >
-              {label}
+              {t(key)}
             </NavLink>
           ))}
         </nav>
-        <div className="px-5 py-4 border-t border-slate-700">
+        <div className="px-5 py-4 border-t border-slate-700 flex items-center justify-between">
           <button
             onClick={logout}
             className="text-xs text-slate-400 hover:text-white transition-colors"
           >
-            Sign out
+            {t('common.signOut')}
           </button>
+          <LangToggle />
         </div>
       </aside>
 
@@ -88,13 +110,16 @@ export default function AppShell() {
           <button
             onClick={() => setSidebarOpen(true)}
             className="text-slate-400 hover:text-white"
-            aria-label="Open navigation"
+            aria-label={t('nav.openNav')}
           >
             <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
             </svg>
           </button>
-          <span className="text-sm font-semibold tracking-widest text-slate-400 uppercase">JAG Holdings</span>
+          <span className="text-sm font-semibold tracking-widest text-slate-400 uppercase flex-1">
+            {t('nav.jagHoldings')}
+          </span>
+          <LangToggle />
         </header>
 
         <main className="flex-1 overflow-y-auto p-4 md:p-8">

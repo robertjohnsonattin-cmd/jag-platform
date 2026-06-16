@@ -4,40 +4,48 @@
 # Checks the JAG API for a pending batch trigger set from the platform UI.
 # When triggered, runs run-batch.ps1 immediately and clears the flag.
 
-$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$EnvFile   = Join-Path $ScriptDir ".env.ollama-batch"
-$LogFile   = Join-Path $ScriptDir "poll-trigger.log"
+$ScriptDir  = Split-Path -Parent $MyInvocation.MyCommand.Path
+$CredsFile  = Join-Path $ScriptDir ".jag-kc-credentials"
+$LogFile    = Join-Path $ScriptDir "poll-trigger.log"
 
 function Log($msg) {
   $ts = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
   "$ts  $msg" | Tee-Object -FilePath $LogFile -Append
 }
 
-# ── Load env file ─────────────────────────────────────────────────────────────
-if (-not (Test-Path $EnvFile)) {
-  Log "ERROR: $EnvFile not found."
+# ── Load DPAPI-encrypted credentials ─────────────────────────────────────────
+if (-not (Test-Path $CredsFile)) {
+  Log "ERROR: $CredsFile not found. Run setup-credentials.ps1 first."
   exit 1
 }
 
-foreach ($line in Get-Content $EnvFile) {
+$creds = @{}
+foreach ($line in Get-Content $CredsFile) {
   if ($line -match '^\s*#' -or $line -notmatch '=') { continue }
   $parts = $line -split '=', 2
-  $key   = $parts[0].Trim()
-  $val   = $parts[1].Trim()
-  Set-Item "Env:\$key" $val
+  $creds[$parts[0].Trim()] = $parts[1].Trim()
 }
 
-$ApiBase      = $env:JAG_API_URL ?? "https://api.jagcorporate.com/api/v1"
-$KcUrl        = "https://auth.jagcorporate.com/realms/jag/protocol/openid-connect/token"
-$KcClientId   = "jag-api"
-$KcClientSecret = $env:KC_CLIENT_SECRET ?? "FIjMqEPT35gr3TRvh6FDdCTnMAX2FAGMjTVHuljqcBU"
-$KcUsername   = $env:KC_USERNAME
-$KcPassword   = $env:KC_PASSWORD
-
-if (-not $KcUsername -or -not $KcPassword) {
-  Log "ERROR: KC_USERNAME and KC_PASSWORD must be set in .env.ollama-batch"
+$KcUsername = $creds['USERNAME']
+try {
+  $SecurePass = $creds['ENCRYPTED_PASSWORD'] | ConvertTo-SecureString
+  $KcPassword = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
+    [Runtime.InteropServices.Marshal]::SecureStringToBSTR($SecurePass)
+  )
+} catch {
+  Log "ERROR: Failed to decrypt credentials. Re-run setup-credentials.ps1."
   exit 1
 }
+
+if (-not $KcUsername -or -not $KcPassword) {
+  Log "ERROR: Credentials incomplete. Re-run setup-credentials.ps1."
+  exit 1
+}
+
+$ApiBase        = "https://api.jagcorporate.com/api/v1"
+$KcUrl          = "https://auth.jagcorporate.com/realms/jag/protocol/openid-connect/token"
+$KcClientId     = "jag-api"
+$KcClientSecret = "FIjMqEPT35gr3TRvh6FDdCTnMAX2FAGMjTVHuljqcBU"
 
 # ── Get Keycloak token ────────────────────────────────────────────────────────
 try {

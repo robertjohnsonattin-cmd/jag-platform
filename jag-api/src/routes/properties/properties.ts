@@ -4,6 +4,8 @@
 // GET    /api/v1/properties/:id
 // PATCH  /api/v1/properties/:id
 // DELETE /api/v1/properties/:id                  (Owner only — hard delete if no financial records)
+// GET    /api/v1/properties/:id/valuation-history
+// POST   /api/v1/properties/:id/valuation-history — manual backfill
 // GET    /api/v1/properties/:id/leases
 // GET    /api/v1/properties/:id/rent-payments
 // POST   /api/v1/properties/:id/rent-payments
@@ -405,19 +407,92 @@ propertiesRouter.patch('/:id', async (req: Request, res: Response, next: NextFun
 
     const client = await propertiesPool.connect();
     try {
-      const property = await withOwnerRLS(client, req.rlsCtx, (c) =>
-        c.query(
+      const property = await withOwnerRLS(client, req.rlsCtx, async (c) => {
+        const updated = await c.query(
           `UPDATE prop_properties SET ${setClauses.join(', ')}
            WHERE id = ${push(id)} AND is_active = true
            RETURNING *`,
           params,
-        ).then(r => r.rows[0] ?? null),
-      );
+        ).then(r => r.rows[0] ?? null);
+        if (!updated) return null;
+
+        if (b.current_valuation !== undefined) {
+          await c.query(
+            `INSERT INTO prop_valuation_history
+               (property_id, owner_id, as_of_date, valuation_ttd)
+             VALUES ($1,$2,CURRENT_DATE,$3)`,
+            [updated.id, ownerId, b.current_valuation],
+          );
+        }
+        return updated;
+      });
 
       if (!property) { err(res, 404, 'PROPERTY_NOT_FOUND', 'Property not found.'); return; }
       logger.info({ entity: 'PROPERTIES', action: 'PROPERTY_UPDATED', user_id: ownerId, record_id: id });
       await auditLog(ownerId, 'Property', 'UPDATE', id, b);
       ok(res, property);
+    } finally { client.release(); }
+  } catch (e) { next(e); }
+});
+
+// ── GET /properties/:id/valuation-history ────────────────────────────────────
+
+const ValuationHistoryBackfillSchema = z.object({
+  as_of_date:    z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  valuation_ttd: z.number().positive(),
+  notes:         z.string().max(2000).optional(),
+}).strict();
+
+propertiesRouter.get('/:id/valuation-history', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const parsed = UUIDParam.safeParse(req.params);
+    if (!parsed.success) { err(res, 422, 'VALIDATION_ERROR', 'Invalid UUID.'); return; }
+
+    const client = await propertiesPool.connect();
+    try {
+      const rows = await withOwnerRLS(client, req.rlsCtx, (c) =>
+        c.query(
+          `SELECT * FROM prop_valuation_history WHERE property_id = $1 ORDER BY as_of_date DESC, recorded_at DESC`,
+          [parsed.data.id],
+        ).then(r => r.rows),
+      );
+      ok(res, rows);
+    } finally { client.release(); }
+  } catch (e) { next(e); }
+});
+
+// ── POST /properties/:id/valuation-history (manual backfill) ─────────────────
+
+propertiesRouter.post('/:id/valuation-history', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const idParsed = UUIDParam.safeParse(req.params);
+    if (!idParsed.success) { err(res, 422, 'VALIDATION_ERROR', 'Invalid UUID.'); return; }
+
+    const bodyParsed = ValuationHistoryBackfillSchema.safeParse(req.body);
+    if (!bodyParsed.success) { err(res, 422, 'VALIDATION_ERROR', 'Request body validation failed.'); return; }
+
+    const b = bodyParsed.data;
+    const { userId: ownerId } = req.rlsCtx;
+
+    const client = await propertiesPool.connect();
+    try {
+      const row = await withOwnerRLS(client, req.rlsCtx, async (c) => {
+        const { rows: check } = await c.query(
+          `SELECT id FROM prop_properties WHERE id = $1 AND is_active = true`, [idParsed.data.id]
+        );
+        if (!check.length) return null;
+
+        return c.query(
+          `INSERT INTO prop_valuation_history
+             (property_id, owner_id, as_of_date, valuation_ttd, notes)
+           VALUES ($1,$2,$3,$4,$5)
+           RETURNING *`,
+          [idParsed.data.id, ownerId, b.as_of_date, b.valuation_ttd, b.notes ?? null],
+        ).then(r => r.rows[0]);
+      });
+      if (!row) { err(res, 404, 'PROPERTY_NOT_FOUND', 'Property not found.'); return; }
+      logger.info({ entity: 'PROPERTIES', action: 'VALUATION_HISTORY_BACKFILL', user_id: ownerId, record_id: idParsed.data.id });
+      ok(res, row, 201);
     } finally { client.release(); }
   } catch (e) { next(e); }
 });

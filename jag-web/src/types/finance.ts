@@ -55,7 +55,41 @@ export interface FxRate {
 
 export type InvestmentType =
   | 'EQUITY' | 'BOND' | 'MUTUAL_FUND' | 'ETF' | 'UNIT_TRUST'
-  | 'REAL_ESTATE' | 'PRIVATE_EQUITY' | 'CASH_EQUIVALENT' | 'OTHER'
+  | 'REAL_ESTATE' | 'PRIVATE_EQUITY' | 'CASH_EQUIVALENT' | 'ANNUITY' | 'OTHER'
+
+export interface InvestmentValuation {
+  id: string
+  investment_id: string
+  as_of_date: string
+  units_held: string | null
+  price_per_unit: string | null
+  current_value_ttd: string
+  unrealised_gain_ttd: string | null
+  notes: string | null
+  recorded_at: string
+}
+
+export interface LoanBalanceHistory {
+  id: string
+  loan_id: string
+  as_of_date: string
+  outstanding_balance: string
+  interest_rate: string | null
+  monthly_payment: string | null
+  notes: string | null
+  recorded_at: string
+}
+
+export interface InsurancePolicyHistory {
+  id: string
+  policy_id: string
+  as_of_date: string
+  coverage_amount_ttd: string
+  premium_amount_ttd: string
+  expiry_date: string | null
+  notes: string | null
+  recorded_at: string
+}
 
 export interface Investment {
   id: string
@@ -64,12 +98,15 @@ export interface Investment {
   investment_type: InvestmentType
   asset_name: string
   ticker_symbol: string | null
-  quantity: string | null
-  cost_basis_ttd: string | null
+  units_held: string | null
+  average_cost_per_unit: string | null
+  current_price: string | null
   current_value_ttd: string
   unrealised_gain_ttd: string | null
   institution_name: string | null
+  purchase_date: string | null
   maturity_date: string | null
+  last_valued_at: string | null
   currency: string
   notes: string | null
   created_at: string
@@ -271,6 +308,24 @@ export interface IntercompanyElimination {
 }
 
 export type BankStatementJobStatus = 'PENDING' | 'PROCESSING' | 'COMPLETE' | 'PARTIAL' | 'FAILED'
+
+export type DocumentJobStatus = 'PENDING' | 'PROCESSING' | 'REVIEW' | 'APPROVED' | 'FAILED'
+export type DocumentJobType   = 'LOAN' | 'INVESTMENT' | 'INSURANCE'
+
+export interface DocumentJob {
+  id:                string
+  doc_type:          DocumentJobType
+  status:            DocumentJobStatus
+  file_name:         string
+  mime_type:         string
+  extracted_data:    Record<string, unknown> | null
+  target_record_ids: string[] | null
+  error_detail:      string | null
+  started_at:        string | null
+  completed_at:      string | null
+  created_at:        string
+  updated_at:        string
+}
 
 export interface BankStatementJob {
   id: string

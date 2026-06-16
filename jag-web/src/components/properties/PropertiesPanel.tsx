@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useTranslation } from 'react-i18next'
 import { propertiesApi } from '../../api/properties'
 import { filesApi } from '../../api/files'
 import { useAuth } from '../../auth/AuthProvider'
@@ -11,6 +12,7 @@ import type {
   InsurancePolicy, PropertyTaxRecord, Inspection,
   Lease, PropertyDocument,
   UtilityAccount, Unit, RentPayment, RentReceipt,
+  PropertyValuationHistory,
 } from '../../types/properties'
 
 const cls = 'w-full bg-slate-700 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500'
@@ -59,6 +61,7 @@ const PAY_METHODS = ['BANK_TRANSFER','CASH','CHEQUE','OTHER','WIPAY'] as const
 
 // ─── Add Property Modal ───────────────────────────────────────────────────────
 function AddPropertyModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
+  const { t } = useTranslation()
   const [form, setForm] = useState({
     name: '', property_code: '', address_line1: '', address_line2: '', city: '',
     country: 'Trinidad and Tobago',
@@ -98,82 +101,82 @@ function AddPropertyModal({ onClose, onCreated }: { onClose: () => void; onCreat
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
       <div className="bg-slate-800 border border-slate-700 rounded-xl w-full max-w-lg p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
-        <h2 className="text-lg font-semibold mb-4 text-white">Add Property</h2>
+        <h2 className="text-lg font-semibold mb-4 text-white">{t('propertiesPanel.addProperty')}</h2>
         <div className="space-y-3">
           <div className="flex gap-3">
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Property Name *</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.propertyName')}</label>
               <input value={form.name} onChange={set('name')} className={cls} placeholder="e.g. Chaguanas House" />
             </div>
             <div className="w-36">
-              <label className="block text-xs text-slate-400 mb-1">Code *</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.code')}</label>
               <input value={form.property_code} onChange={set('property_code')} className={cls} placeholder="PROP-001" />
             </div>
           </div>
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Address Line 1</label>
+            <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.addressLine1')}</label>
             <input value={form.address_line1} onChange={set('address_line1')} className={cls} />
           </div>
           <div className="flex gap-3">
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">City</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.city')}</label>
               <input value={form.city} onChange={set('city')} className={cls} />
             </div>
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Country</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.country')}</label>
               <input value={form.country} onChange={set('country')} className={cls} />
             </div>
           </div>
           <div className="flex gap-3">
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Type</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('common.type')}</label>
               <select value={form.property_type} onChange={set('property_type')} className={cls}>
-                {PROP_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                {PROP_TYPES.map(tp => <option key={tp} value={tp}>{t(`propertiesPanel.propTypes.${tp}`, tp)}</option>)}
               </select>
             </div>
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Tenure</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.tenure')}</label>
               <select value={form.tenure_type} onChange={set('tenure_type')} className={cls}>
-                {TENURE_TYPES.map(t => <option key={t} value={t}>{t.replace(/_/g,' ')}</option>)}
+                {TENURE_TYPES.map(tn => <option key={tn} value={tn}>{t(`propertiesPanel.tenureTypes.${tn}`, tn.replace(/_/g,' '))}</option>)}
               </select>
             </div>
           </div>
           <div className="flex gap-3">
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Bedrooms</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.bedrooms')}</label>
               <input type="number" min="0" step="1" value={form.bedrooms} onChange={set('bedrooms')} className={cls} />
             </div>
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Bathrooms</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.bathrooms')}</label>
               <input type="number" min="0" step="0.5" value={form.bathrooms} onChange={set('bathrooms')} className={cls} />
             </div>
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Floor Area (m²)</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.floorArea')}</label>
               <input type="number" step="0.01" value={form.floor_area_sqm} onChange={set('floor_area_sqm')} className={cls} />
             </div>
           </div>
           <div className="flex gap-3">
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Purchase Price (TTD)</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.purchasePrice')}</label>
               <input type="number" step="0.01" value={form.purchase_price} onChange={set('purchase_price')} className={cls} />
             </div>
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Purchase Date</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.purchaseDate')}</label>
               <input type="date" value={form.purchase_date} onChange={set('purchase_date')} className={cls} />
             </div>
           </div>
           <div className="flex gap-3">
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Current Valuation (TTD)</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.currentValuation')}</label>
               <input type="number" step="0.01" value={form.current_valuation} onChange={set('current_valuation')} className={cls} />
             </div>
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Valuation Date</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.valuationDate')}</label>
               <input type="date" value={form.valuation_date} onChange={set('valuation_date')} className={cls} />
             </div>
           </div>
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Notes</label>
+            <label className="block text-xs text-slate-400 mb-1">{t('common.notes')}</label>
             <textarea value={form.notes} onChange={set('notes')} rows={2} className={cls} />
           </div>
           {error && <p className="text-red-400 text-xs">{error instanceof Error ? error.message : 'Failed.'}</p>}
@@ -181,9 +184,9 @@ function AddPropertyModal({ onClose, onCreated }: { onClose: () => void; onCreat
         <div className="flex gap-3 mt-5">
           <button onClick={() => mutate()} disabled={isPending || !form.name || !form.property_code}
             className="flex-1 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-sm rounded-lg transition-colors">
-            {isPending ? 'Saving…' : 'Add Property'}
+            {isPending ? t('common.saving') : t('propertiesPanel.addProperty')}
           </button>
-          <button onClick={onClose} className="px-4 py-2 text-slate-400 hover:text-white text-sm transition-colors">Cancel</button>
+          <button onClick={onClose} className="px-4 py-2 text-slate-400 hover:text-white text-sm transition-colors">{t('common.cancel')}</button>
         </div>
       </div>
     </div>
@@ -192,6 +195,7 @@ function AddPropertyModal({ onClose, onCreated }: { onClose: () => void; onCreat
 
 // ─── Add Lease Modal ──────────────────────────────────────────────────────────
 function AddLeaseModal({ propertyId, onClose, onCreated }: { propertyId: string; onClose: () => void; onCreated: () => void }) {
+  const { t } = useTranslation()
   const { data: tenants = [] } = useQuery({ queryKey: ['properties', 'tenants'], queryFn: () => propertiesApi.getTenants() })
   const { data: units = [] } = useQuery({ queryKey: ['properties', propertyId, 'units'], queryFn: () => propertiesApi.getUnits(propertyId) })
   const [form, setForm] = useState({
@@ -227,27 +231,27 @@ function AddLeaseModal({ propertyId, onClose, onCreated }: { propertyId: string;
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
       <div className="bg-slate-800 border border-slate-700 rounded-xl w-full max-w-md p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
-        <h2 className="text-lg font-semibold mb-4 text-white">Add Lease</h2>
+        <h2 className="text-lg font-semibold mb-4 text-white">{t('propertiesPanel.addLease')}</h2>
         <div className="space-y-3">
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Tenant *</label>
+            <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.tenant')}</label>
             <select value={form.tenant_id} onChange={set('tenant_id')} className={cls}>
-              <option value="">— select tenant —</option>
-              {tenants.map(t => (
-                <option key={t.id} value={t.id}>
-                  {t.is_company ? t.company_name : `${t.first_name} ${t.last_name ?? ''}`}
+              <option value="">— {t('propertiesPanel.selectTenant')} —</option>
+              {tenants.map(tn => (
+                <option key={tn.id} value={tn.id}>
+                  {tn.is_company ? tn.company_name : `${tn.first_name} ${tn.last_name ?? ''}`}
                 </option>
               ))}
             </select>
           </div>
           {units.length > 0 && (
             <div>
-              <label className="block text-xs text-slate-400 mb-1">Unit (optional)</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.unitOptional')}</label>
               <select value={form.unit_id} onChange={set('unit_id')} className={cls}>
                 <option value="">— whole property / no unit —</option>
                 {units.map((u: Unit) => (
                   <option key={u.id} value={u.id}>
-                    Unit {u.unit_number}{u.floor != null ? ` · Floor ${u.floor}` : ''}{u.bedrooms != null ? ` · ${u.bedrooms}BR` : ''}
+                    {t('propertiesPanel.unitLbl')} {u.unit_number}{u.floor != null ? ` · Floor ${u.floor}` : ''}{u.bedrooms != null ? ` · ${u.bedrooms}BR` : ''}
                   </option>
                 ))}
               </select>
@@ -255,9 +259,9 @@ function AddLeaseModal({ propertyId, onClose, onCreated }: { propertyId: string;
           )}
           <div className="flex gap-3">
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Lease Type</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.leaseType')}</label>
               <select value={form.lease_type} onChange={set('lease_type')} className={cls}>
-                {['RESIDENTIAL','COMMERCIAL','SHORT_TERM','OTHER'].map(t => <option key={t} value={t}>{t}</option>)}
+                {['RESIDENTIAL','COMMERCIAL','SHORT_TERM','OTHER'].map(lt => <option key={lt} value={lt}>{lt}</option>)}
               </select>
             </div>
             <div className="w-20">
@@ -267,50 +271,50 @@ function AddLeaseModal({ propertyId, onClose, onCreated }: { propertyId: string;
           </div>
           <div className="flex gap-3">
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Start Date *</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.leaseStart')}</label>
               <input type="date" value={form.start_date} onChange={set('start_date')} className={cls} />
             </div>
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">End Date (blank = m-t-m)</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.leaseEnd')}</label>
               <input type="date" value={form.end_date} onChange={set('end_date')} className={cls} />
             </div>
           </div>
           <div className="flex gap-3">
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Monthly Rent *</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.monthlyRent')}</label>
               <input type="number" step="0.01" value={form.monthly_rent} onChange={set('monthly_rent')} className={cls} />
             </div>
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Security Deposit</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.securityDeposit')}</label>
               <input type="number" step="0.01" value={form.security_deposit} onChange={set('security_deposit')} className={cls} />
             </div>
             <div className="w-24">
-              <label className="block text-xs text-slate-400 mb-1">Due Day</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.dueDay')}</label>
               <input type="number" min="1" max="28" value={form.payment_due_day} onChange={set('payment_due_day')} className={cls} />
             </div>
           </div>
           <div className="border-t border-slate-700 pt-3">
-            <p className="text-xs text-slate-400 mb-2 font-medium">Late Fee Policy</p>
+            <p className="text-xs text-slate-400 mb-2 font-medium">{t('propertiesPanel.lateFeePolicy')}</p>
             <div className="flex gap-3">
               <div className="flex-1">
-                <label className="block text-xs text-slate-400 mb-1">Type</label>
+                <label className="block text-xs text-slate-400 mb-1">{t('common.type')}</label>
                 <select value={form.late_fee_type} onChange={set('late_fee_type')} className={cls}>
-                  <option value="NONE">None</option>
-                  <option value="FIXED">Fixed Amount</option>
-                  <option value="PERCENT">% of Rent</option>
+                  <option value="NONE">{t('propertiesPanel.lateFeeNone')}</option>
+                  <option value="FIXED">{t('propertiesPanel.lateFeeFixed')}</option>
+                  <option value="PERCENT">{t('propertiesPanel.lateFeePct')}</option>
                 </select>
               </div>
               {form.late_fee_type !== 'NONE' && (
                 <div className="flex-1">
                   <label className="block text-xs text-slate-400 mb-1">
-                    {form.late_fee_type === 'PERCENT' ? 'Percent (%)' : 'Amount (TTD)'}
+                    {form.late_fee_type === 'PERCENT' ? t('propertiesPanel.lateFeePctField') : t('propertiesPanel.lateFeePctAmountField')}
                   </label>
                   <input type="number" step="0.01" min="0" value={form.late_fee_value} onChange={set('late_fee_value')} className={cls} />
                 </div>
               )}
               {form.late_fee_type !== 'NONE' && (
                 <div className="w-24">
-                  <label className="block text-xs text-slate-400 mb-1">Grace Days</label>
+                  <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.lateGraceDays')}</label>
                   <input type="number" min="0" value={form.late_fee_grace_days} onChange={set('late_fee_grace_days')} className={cls} />
                 </div>
               )}
@@ -321,9 +325,9 @@ function AddLeaseModal({ propertyId, onClose, onCreated }: { propertyId: string;
         <div className="flex gap-3 mt-5">
           <button onClick={() => mutate()} disabled={isPending || !form.tenant_id || !form.start_date || !form.monthly_rent}
             className="flex-1 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-sm rounded-lg transition-colors">
-            {isPending ? 'Saving…' : 'Add Lease'}
+            {isPending ? t('common.saving') : t('propertiesPanel.addLeaseBtn')}
           </button>
-          <button onClick={onClose} className="px-4 py-2 text-slate-400 hover:text-white text-sm transition-colors">Cancel</button>
+          <button onClick={onClose} className="px-4 py-2 text-slate-400 hover:text-white text-sm transition-colors">{t('common.cancel')}</button>
         </div>
       </div>
     </div>
@@ -336,6 +340,7 @@ function RecordPaymentModal({ propertyId, onClose, onRecorded }: {
   onClose: () => void
   onRecorded: (paymentId: string) => void
 }) {
+  const { t } = useTranslation()
   const { token } = useAuth()
   const { data: leases = [] } = useQuery({
     queryKey: ['properties', propertyId, 'leases'],
@@ -410,10 +415,10 @@ function RecordPaymentModal({ propertyId, onClose, onRecorded }: {
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
       <div className="bg-slate-800 border border-slate-700 rounded-xl w-full max-w-md p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
-        <h2 className="text-lg font-semibold mb-4 text-white">Record Rent Payment</h2>
+        <h2 className="text-lg font-semibold mb-4 text-white">{t('propertiesPanel.recordRentPayment')}</h2>
         <div className="space-y-3">
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Lease *</label>
+            <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.leaseSel')}</label>
             <select value={form.lease_id} onChange={handleLeaseChange} className={cls}>
               <option value="">— select lease —</option>
               {leases.map(l => (
@@ -425,66 +430,66 @@ function RecordPaymentModal({ propertyId, onClose, onRecorded }: {
           </div>
           <div className="flex gap-3">
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Payment Date *</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.paymentDate')}</label>
               <input type="date" value={form.payment_date} onChange={set('payment_date')} className={cls} />
             </div>
           </div>
           <div className="flex gap-3">
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Period Month</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.periodMonth')}</label>
               <select value={form.period_month} onChange={set('period_month')} className={cls}>
                 {MONTHS.map((m, i) => <option key={i+1} value={i+1}>{m}</option>)}
               </select>
             </div>
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Period Year</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.periodYear')}</label>
               <input type="number" min="2020" value={form.period_year} onChange={set('period_year')} className={cls} />
             </div>
           </div>
           <div className="flex gap-3">
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Amount Due *</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.amountDue')}</label>
               <input type="number" step="0.01" value={form.amount_due} onChange={set('amount_due')} className={cls} />
             </div>
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Amount Paid *</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.amountPaid')}</label>
               <input type="number" step="0.01" value={form.amount_paid} onChange={set('amount_paid')} className={cls} />
             </div>
           </div>
           {isPartial && (
             <p className="text-yellow-400 text-xs bg-yellow-900/20 border border-yellow-800 rounded px-2 py-1">
-              ⚠ Partial payment — balance of {fmtTTD(String(parseFloat(form.amount_due) - parseFloat(form.amount_paid)))} remains outstanding.
+              ⚠ {t('propertiesPanel.partialPayment')} — balance of {fmtTTD(String(parseFloat(form.amount_due) - parseFloat(form.amount_paid)))} remains outstanding.
             </p>
           )}
           <div className="flex gap-3">
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Method</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.colMethod')}</label>
               <select value={form.payment_method} onChange={set('payment_method')} className={cls}>
                 {PAY_METHODS.map(m => <option key={m} value={m}>{m.replace(/_/g,' ')}</option>)}
               </select>
             </div>
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Receipt No.</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.receiptNo')}</label>
               <input value={form.receipt_number} onChange={set('receipt_number')} className={cls} />
             </div>
             <div className="w-28">
-              <label className="block text-xs text-slate-400 mb-1">Late Fee</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.lateFee')}</label>
               <input type="number" step="0.01" value={form.late_fee_charged} onChange={set('late_fee_charged')} className={cls} />
             </div>
           </div>
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Notes</label>
+            <label className="block text-xs text-slate-400 mb-1">{t('common.notes')}</label>
             <textarea rows={2} value={form.notes} onChange={set('notes')} className={cls} placeholder="Optional notes" />
           </div>
 
           {/* WhatsApp proof photo upload */}
           <div className="border border-slate-600 rounded-lg p-3 bg-slate-700/30">
-            <label className="block text-xs text-slate-300 font-medium mb-2">📎 Payment Proof (WhatsApp photo)</label>
+            <label className="block text-xs text-slate-300 font-medium mb-2">{t('propertiesPanel.paymentProof')}</label>
             {proofKey ? (
               <div className="flex items-center gap-2">
                 <span className="text-xs text-green-400">✓ {proofName ?? 'Photo uploaded'}</span>
                 <button type="button" onClick={() => { setProofKey(null); setProofName(null) }}
-                  className="text-xs text-slate-500 hover:text-red-400 transition-colors">Remove</button>
+                  className="text-xs text-slate-500 hover:text-red-400 transition-colors">{t('propertiesPanel.remove')}</button>
               </div>
             ) : (
               <div>
@@ -493,10 +498,10 @@ function RecordPaymentModal({ propertyId, onClose, onRecorded }: {
                   <span className={`inline-block px-3 py-1.5 text-xs rounded-lg border transition-colors ${
                     uploading ? 'bg-slate-600 border-slate-500 text-slate-400' : 'bg-slate-700 hover:bg-slate-600 border-slate-600 text-slate-200 cursor-pointer'
                   }`}>
-                    {uploading ? 'Uploading…' : '📷 Select photo'}
+                    {uploading ? t('propertiesPanel.uploadingLabel') : t('propertiesPanel.selectPhoto')}
                   </span>
                 </label>
-                <p className="text-xs text-slate-500 mt-1">Select the bank transfer screenshot from WhatsApp</p>
+                <p className="text-xs text-slate-500 mt-1">{t('propertiesPanel.uploadHint')}</p>
               </div>
             )}
             {uploadErr && <p className="text-xs text-red-400 mt-1">{uploadErr}</p>}
@@ -504,7 +509,7 @@ function RecordPaymentModal({ propertyId, onClose, onRecorded }: {
 
           {selectedLease && (
             <p className="text-xs text-slate-500">
-              Lease: {selectedLease.is_company ? selectedLease.company_name : `${selectedLease.first_name} ${selectedLease.last_name ?? ''}`} · Due day {selectedLease.payment_due_day}
+              Lease: {selectedLease.is_company ? selectedLease.company_name : `${selectedLease.first_name} ${selectedLease.last_name ?? ''}`} · {t('propertiesPanel.dueDayLbl')} {selectedLease.payment_due_day}
             </p>
           )}
           {error && <p className="text-red-400 text-xs">{error instanceof Error ? error.message : 'Failed.'}</p>}
@@ -512,9 +517,9 @@ function RecordPaymentModal({ propertyId, onClose, onRecorded }: {
         <div className="flex gap-3 mt-5">
           <button onClick={() => mutate()} disabled={isPending || uploading || !form.lease_id || !form.amount_due || !form.amount_paid}
             className="flex-1 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-sm rounded-lg transition-colors">
-            {isPending ? 'Saving…' : 'Record & Get Receipt'}
+            {isPending ? t('common.saving') : t('propertiesPanel.recordGetReceipt')}
           </button>
-          <button onClick={onClose} className="px-4 py-2 text-slate-400 hover:text-white text-sm transition-colors">Cancel</button>
+          <button onClick={onClose} className="px-4 py-2 text-slate-400 hover:text-white text-sm transition-colors">{t('common.cancel')}</button>
         </div>
       </div>
     </div>
@@ -641,6 +646,7 @@ function ReceiptModal({ propertyId, paymentId, onClose }: {
 
 // ─── Add Maintenance Modal ────────────────────────────────────────────────────
 function AddMaintenanceModal({ propertyId, onClose, onCreated }: { propertyId: string; onClose: () => void; onCreated: () => void }) {
+  const { t } = useTranslation()
   const [form, setForm] = useState({
     category: 'PLUMBING' as typeof MAINT_CATS[number],
     description: '', priority: 'MEDIUM',
@@ -667,43 +673,43 @@ function AddMaintenanceModal({ propertyId, onClose, onCreated }: { propertyId: s
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
       <div className="bg-slate-800 border border-slate-700 rounded-xl w-full max-w-md p-6 shadow-2xl">
-        <h2 className="text-lg font-semibold mb-4 text-white">Add Maintenance Request</h2>
+        <h2 className="text-lg font-semibold mb-4 text-white">{t('propertiesPanel.addMaintenance')}</h2>
         <div className="space-y-3">
           <div className="flex gap-3">
             <div className="flex-1">
               <label className="block text-xs text-slate-400 mb-1">Category</label>
               <select value={form.category} onChange={set('category')} className={cls}>
-                {MAINT_CATS.map(c => <option key={c} value={c}>{c.replace(/_/g,' ')}</option>)}
+                {MAINT_CATS.map(c => <option key={c} value={c}>{t(`propertiesPanel.maintenanceCategories.${c}`, c.replace(/_/g,' '))}</option>)}
               </select>
             </div>
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Priority</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.priority')}</label>
               <select value={form.priority} onChange={set('priority')} className={cls}>
-                {['LOW','MEDIUM','HIGH','URGENT'].map(p => <option key={p} value={p}>{p}</option>)}
+                {['LOW','MEDIUM','HIGH','URGENT'].map(p => <option key={p} value={p}>{t(`propertiesPanel.priorities.${p}`, p)}</option>)}
               </select>
             </div>
           </div>
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Description *</label>
-            <textarea value={form.description} onChange={set('description')} rows={3} className={cls} placeholder="Describe the issue…" />
+            <label className="block text-xs text-slate-400 mb-1">{t('common.description')} *</label>
+            <textarea value={form.description} onChange={set('description')} rows={3} className={cls} placeholder={t('propertiesPanel.describeIssue')} />
           </div>
           <div className="flex gap-3">
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Reported Date</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.reportedDate')}</label>
               <input type="date" value={form.reported_date} onChange={set('reported_date')} className={cls} />
             </div>
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Scheduled Date</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.scheduledDate')}</label>
               <input type="date" value={form.scheduled_date} onChange={set('scheduled_date')} className={cls} />
             </div>
           </div>
           <div className="flex gap-3">
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Assigned To</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.assignedTo')}</label>
               <input value={form.assigned_to} onChange={set('assigned_to')} className={cls} placeholder="Contractor name" />
             </div>
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Est. Cost (TTD)</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.estCost')}</label>
               <input type="number" step="0.01" value={form.estimated_cost} onChange={set('estimated_cost')} className={cls} />
             </div>
           </div>
@@ -712,9 +718,9 @@ function AddMaintenanceModal({ propertyId, onClose, onCreated }: { propertyId: s
         <div className="flex gap-3 mt-5">
           <button onClick={() => mutate()} disabled={isPending || !form.description}
             className="flex-1 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-sm rounded-lg transition-colors">
-            {isPending ? 'Saving…' : 'Add Request'}
+            {isPending ? t('common.saving') : t('propertiesPanel.addRequest')}
           </button>
-          <button onClick={onClose} className="px-4 py-2 text-slate-400 hover:text-white text-sm transition-colors">Cancel</button>
+          <button onClick={onClose} className="px-4 py-2 text-slate-400 hover:text-white text-sm transition-colors">{t('common.cancel')}</button>
         </div>
       </div>
     </div>
@@ -725,6 +731,7 @@ function AddMaintenanceModal({ propertyId, onClose, onCreated }: { propertyId: s
 function UpdateMaintModal({ propertyId, req, onClose, onUpdated }: {
   propertyId: string; req: MaintenanceRequest; onClose: () => void; onUpdated: () => void
 }) {
+  const { t } = useTranslation()
   const [form, setForm] = useState({
     status: req.status,
     assigned_to: req.assigned_to ?? '',
@@ -749,32 +756,32 @@ function UpdateMaintModal({ propertyId, req, onClose, onUpdated }: {
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
       <div className="bg-slate-800 border border-slate-700 rounded-xl w-full max-w-md p-6 shadow-2xl">
-        <h2 className="text-base font-semibold mb-3 text-white">Update Maintenance — <span className="text-slate-400 font-normal text-sm truncate">{req.description}</span></h2>
+        <h2 className="text-base font-semibold mb-3 text-white">{t('propertiesPanel.updateMaintenance')} — <span className="text-slate-400 font-normal text-sm truncate">{req.description}</span></h2>
         <div className="space-y-3">
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Status</label>
+            <label className="block text-xs text-slate-400 mb-1">{t('common.status')}</label>
             <select value={form.status} onChange={set('status')} className={cls}>
               {['OPEN','ASSIGNED','IN_PROGRESS','AWAITING_PARTS','COMPLETED','CLOSED','CANNOT_REPRODUCE'].map(s =>
-                <option key={s} value={s}>{s.replace(/_/g,' ')}</option>
+                <option key={s} value={s}>{t(`propertiesPanel.maintenanceStatuses.${s}`, s.replace(/_/g,' '))}</option>
               )}
             </select>
           </div>
           <div className="flex gap-3">
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Assigned To</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.assignedTo')}</label>
               <input value={form.assigned_to} onChange={set('assigned_to')} className={cls} />
             </div>
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Actual Cost (TTD)</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.actualCost')}</label>
               <input type="number" step="0.01" value={form.actual_cost} onChange={set('actual_cost')} className={cls} />
             </div>
           </div>
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Completed Date</label>
+            <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.completedDate')}</label>
             <input type="date" value={form.completed_date} onChange={set('completed_date')} className={cls} />
           </div>
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Completion Notes</label>
+            <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.completionNotes')}</label>
             <textarea value={form.completion_notes} onChange={set('completion_notes')} rows={2} className={cls} />
           </div>
           {error && <p className="text-red-400 text-xs">{error instanceof Error ? error.message : 'Failed.'}</p>}
@@ -782,9 +789,9 @@ function UpdateMaintModal({ propertyId, req, onClose, onUpdated }: {
         <div className="flex gap-3 mt-5">
           <button onClick={() => mutate()} disabled={isPending}
             className="flex-1 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-sm rounded-lg transition-colors">
-            {isPending ? 'Saving…' : 'Update'}
+            {isPending ? t('common.saving') : t('propertiesPanel.update')}
           </button>
-          <button onClick={onClose} className="px-4 py-2 text-slate-400 hover:text-white text-sm transition-colors">Cancel</button>
+          <button onClick={onClose} className="px-4 py-2 text-slate-400 hover:text-white text-sm transition-colors">{t('common.cancel')}</button>
         </div>
       </div>
     </div>
@@ -793,6 +800,7 @@ function UpdateMaintModal({ propertyId, req, onClose, onUpdated }: {
 
 // ─── Add Mortgage Modal ───────────────────────────────────────────────────────
 function AddMortgageModal({ propertyId, onClose, onCreated }: { propertyId: string; onClose: () => void; onCreated: () => void }) {
+  const { t } = useTranslation()
   const [form, setForm] = useState({
     lender_name: '', account_reference: '',
     mortgage_type: 'FIXED_RATE',
@@ -826,23 +834,23 @@ function AddMortgageModal({ propertyId, onClose, onCreated }: { propertyId: stri
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
       <div className="bg-slate-800 border border-slate-700 rounded-xl w-full max-w-md p-6 shadow-2xl">
-        <h2 className="text-lg font-semibold mb-4 text-white">Add Mortgage</h2>
+        <h2 className="text-lg font-semibold mb-4 text-white">{t('propertiesPanel.addMortgage')}</h2>
         <div className="space-y-3">
           <div className="flex gap-3">
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Lender *</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.lender')}</label>
               <input value={form.lender_name} onChange={set('lender_name')} className={cls} placeholder="e.g. First Citizens Bank" />
             </div>
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Account Ref (partial only)</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.accountRef')}</label>
               <input value={form.account_reference} onChange={set('account_reference')} className={cls} placeholder="last 4 digits" maxLength={50} />
             </div>
           </div>
           <div className="flex gap-3">
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Type</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('common.type')}</label>
               <select value={form.mortgage_type} onChange={set('mortgage_type')} className={cls}>
-                {['FIXED_RATE','VARIABLE_RATE','INTEREST_ONLY'].map(t => <option key={t} value={t}>{t.replace(/_/g,' ')}</option>)}
+                {['FIXED_RATE','VARIABLE_RATE','INTEREST_ONLY'].map(mt => <option key={mt} value={mt}>{t(`propertiesPanel.mortgageTypes.${mt}`, mt.replace(/_/g,' '))}</option>)}
               </select>
             </div>
             <div className="w-20">
@@ -852,35 +860,35 @@ function AddMortgageModal({ propertyId, onClose, onCreated }: { propertyId: stri
           </div>
           <div className="flex gap-3">
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Original Amount *</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.originalAmount')}</label>
               <input type="number" step="0.01" value={form.original_amount} onChange={set('original_amount')} className={cls} />
             </div>
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Outstanding Balance *</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.outstandingBalance')}</label>
               <input type="number" step="0.01" value={form.outstanding_balance} onChange={set('outstanding_balance')} className={cls} />
             </div>
           </div>
           <div className="flex gap-3">
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Interest Rate % *</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.interestRate')}</label>
               <input type="number" step="0.0001" value={form.interest_rate_percent} onChange={set('interest_rate_percent')} className={cls} />
             </div>
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Monthly Payment *</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.monthlyPayment')}</label>
               <input type="number" step="0.01" value={form.monthly_payment} onChange={set('monthly_payment')} className={cls} />
             </div>
             <div className="w-24">
-              <label className="block text-xs text-slate-400 mb-1">Due Day</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.dueDay')}</label>
               <input type="number" min="1" max="28" value={form.payment_due_day} onChange={set('payment_due_day')} className={cls} />
             </div>
           </div>
           <div className="flex gap-3">
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Start Date *</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.leaseStart')}</label>
               <input type="date" value={form.start_date} onChange={set('start_date')} className={cls} />
             </div>
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Maturity Date</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.maturityDate')}</label>
               <input type="date" value={form.maturity_date} onChange={set('maturity_date')} className={cls} />
             </div>
           </div>
@@ -890,9 +898,9 @@ function AddMortgageModal({ propertyId, onClose, onCreated }: { propertyId: stri
           <button onClick={() => mutate()}
             disabled={isPending || !form.lender_name || !form.original_amount || !form.outstanding_balance || !form.interest_rate_percent || !form.monthly_payment || !form.start_date}
             className="flex-1 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-sm rounded-lg transition-colors">
-            {isPending ? 'Saving…' : 'Add Mortgage'}
+            {isPending ? t('common.saving') : t('propertiesPanel.addMortgageBtn')}
           </button>
-          <button onClick={onClose} className="px-4 py-2 text-slate-400 hover:text-white text-sm transition-colors">Cancel</button>
+          <button onClick={onClose} className="px-4 py-2 text-slate-400 hover:text-white text-sm transition-colors">{t('common.cancel')}</button>
         </div>
       </div>
     </div>
@@ -901,6 +909,7 @@ function AddMortgageModal({ propertyId, onClose, onCreated }: { propertyId: stri
 
 // ─── Add Utility Modal ────────────────────────────────────────────────────────
 function AddUtilityModal({ propertyId, onClose, onCreated }: { propertyId: string; onClose: () => void; onCreated: () => void }) {
+  const { t } = useTranslation()
   const [form, setForm] = useState({
     utility_type: 'ELECTRICITY',
     provider: '', bill_date: '', paid_date: '',
@@ -927,43 +936,43 @@ function AddUtilityModal({ propertyId, onClose, onCreated }: { propertyId: strin
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
       <div className="bg-slate-800 border border-slate-700 rounded-xl w-full max-w-md p-6 shadow-2xl">
-        <h2 className="text-lg font-semibold mb-4 text-white">Record Utility Bill</h2>
+        <h2 className="text-lg font-semibold mb-4 text-white">{t('propertiesPanel.recordUtilityBill')}</h2>
         <div className="space-y-3">
           <div className="flex gap-3">
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Type</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('common.type')}</label>
               <select value={form.utility_type} onChange={set('utility_type')} className={cls}>
-                {['ELECTRICITY','WATER','GAS','INTERNET','OTHER'].map(t => <option key={t} value={t}>{t}</option>)}
+                {['ELECTRICITY','WATER','GAS','INTERNET','OTHER'].map(ut => <option key={ut} value={ut}>{ut}</option>)}
               </select>
             </div>
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Provider *</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.provider')}</label>
               <input value={form.provider} onChange={set('provider')} className={cls} placeholder="e.g. TTEC" />
             </div>
           </div>
           <div className="flex gap-3">
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Bill Date *</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.billDate')}</label>
               <input type="date" value={form.bill_date} onChange={set('bill_date')} className={cls} />
             </div>
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Paid Date</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.paidDate')}</label>
               <input type="date" value={form.paid_date} onChange={set('paid_date')} className={cls} />
             </div>
           </div>
           <div className="flex gap-3">
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Amount *</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('common.amount')} *</label>
               <input type="number" step="0.01" value={form.amount} onChange={set('amount')} className={cls} />
             </div>
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">VAT Amount</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.vatAmount')}</label>
               <input type="number" step="0.01" value={form.vat_amount} onChange={set('vat_amount')} className={cls} />
             </div>
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">VAT Code</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.vatCode')}</label>
               <select value={form.vat_code} onChange={set('vat_code')} className={cls}>
-                {['STANDARD','ZERO','EXEMPT'].map(c => <option key={c} value={c}>{c}</option>)}
+                {['STANDARD','ZERO','EXEMPT'].map(vc => <option key={vc} value={vc}>{t(`propertiesPanel.vatCodes.${vc}`, vc)}</option>)}
               </select>
             </div>
           </div>
@@ -972,9 +981,9 @@ function AddUtilityModal({ propertyId, onClose, onCreated }: { propertyId: strin
         <div className="flex gap-3 mt-5">
           <button onClick={() => mutate()} disabled={isPending || !form.provider || !form.bill_date || !form.amount}
             className="flex-1 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-sm rounded-lg transition-colors">
-            {isPending ? 'Saving…' : 'Record Bill'}
+            {isPending ? t('common.saving') : t('propertiesPanel.recordBill')}
           </button>
-          <button onClick={onClose} className="px-4 py-2 text-slate-400 hover:text-white text-sm transition-colors">Cancel</button>
+          <button onClick={onClose} className="px-4 py-2 text-slate-400 hover:text-white text-sm transition-colors">{t('common.cancel')}</button>
         </div>
       </div>
     </div>
@@ -983,6 +992,7 @@ function AddUtilityModal({ propertyId, onClose, onCreated }: { propertyId: strin
 
 // ─── Add Vendor Invoice Modal ─────────────────────────────────────────────────
 function AddInvoiceModal({ propertyId, onClose, onCreated }: { propertyId: string; onClose: () => void; onCreated: () => void }) {
+  const { t } = useTranslation()
   const [form, setForm] = useState({
     vendor_name: '', invoice_ref: '', invoice_date: '', due_date: '',
     amount: '', vat_amount: '0', vat_code: 'STANDARD', notes: '',
@@ -1008,41 +1018,41 @@ function AddInvoiceModal({ propertyId, onClose, onCreated }: { propertyId: strin
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
       <div className="bg-slate-800 border border-slate-700 rounded-xl w-full max-w-md p-6 shadow-2xl">
-        <h2 className="text-lg font-semibold mb-4 text-white">Add Vendor Invoice</h2>
+        <h2 className="text-lg font-semibold mb-4 text-white">{t('propertiesPanel.addVendorInvoice')}</h2>
         <div className="space-y-3">
           <div className="flex gap-3">
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Vendor *</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.vendor')}</label>
               <input value={form.vendor_name} onChange={set('vendor_name')} className={cls} />
             </div>
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Invoice Ref</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.invoiceRef')}</label>
               <input value={form.invoice_ref} onChange={set('invoice_ref')} className={cls} />
             </div>
           </div>
           <div className="flex gap-3">
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Invoice Date *</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.invoiceDate')}</label>
               <input type="date" value={form.invoice_date} onChange={set('invoice_date')} className={cls} />
             </div>
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Due Date</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.dueDate')}</label>
               <input type="date" value={form.due_date} onChange={set('due_date')} className={cls} />
             </div>
           </div>
           <div className="flex gap-3">
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Amount *</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('common.amount')} *</label>
               <input type="number" step="0.01" value={form.amount} onChange={set('amount')} className={cls} />
             </div>
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">VAT Amount</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.vatAmount')}</label>
               <input type="number" step="0.01" value={form.vat_amount} onChange={set('vat_amount')} className={cls} />
             </div>
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">VAT Code</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.vatCode')}</label>
               <select value={form.vat_code} onChange={set('vat_code')} className={cls}>
-                {['STANDARD','ZERO','EXEMPT'].map(c => <option key={c} value={c}>{c}</option>)}
+                {['STANDARD','ZERO','EXEMPT'].map(vc => <option key={vc} value={vc}>{t(`propertiesPanel.vatCodes.${vc}`, vc)}</option>)}
               </select>
             </div>
           </div>
@@ -1051,9 +1061,9 @@ function AddInvoiceModal({ propertyId, onClose, onCreated }: { propertyId: strin
         <div className="flex gap-3 mt-5">
           <button onClick={() => mutate()} disabled={isPending || !form.vendor_name || !form.invoice_date || !form.amount}
             className="flex-1 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-sm rounded-lg transition-colors">
-            {isPending ? 'Saving…' : 'Add Invoice'}
+            {isPending ? t('common.saving') : t('propertiesPanel.addInvoice')}
           </button>
-          <button onClick={onClose} className="px-4 py-2 text-slate-400 hover:text-white text-sm transition-colors">Cancel</button>
+          <button onClick={onClose} className="px-4 py-2 text-slate-400 hover:text-white text-sm transition-colors">{t('common.cancel')}</button>
         </div>
       </div>
     </div>
@@ -1064,6 +1074,7 @@ function AddInvoiceModal({ propertyId, onClose, onCreated }: { propertyId: strin
 function PayInvoiceModal({ propertyId, inv, onClose, onUpdated }: {
   propertyId: string; inv: VendorInvoice; onClose: () => void; onUpdated: () => void
 }) {
+  const { t } = useTranslation()
   const [paidDate, setPaidDate] = useState(new Date().toISOString().slice(0,10))
   const [payRef, setPayRef] = useState('')
 
@@ -1078,14 +1089,14 @@ function PayInvoiceModal({ propertyId, inv, onClose, onUpdated }: {
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
       <div className="bg-slate-800 border border-slate-700 rounded-xl w-full max-w-sm p-6 shadow-2xl">
-        <h2 className="text-base font-semibold mb-4 text-white">Mark as Paid — {inv.vendor_name}</h2>
+        <h2 className="text-base font-semibold mb-4 text-white">{t('propertiesPanel.payInvoiceTitle')} {inv.vendor_name}</h2>
         <div className="space-y-3">
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Paid Date</label>
+            <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.paidDate')}</label>
             <input type="date" value={paidDate} onChange={e => setPaidDate(e.target.value)} className={cls} />
           </div>
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Payment Reference</label>
+            <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.paidRef')}</label>
             <input value={payRef} onChange={e => setPayRef(e.target.value)} className={cls} placeholder="Cheque no., transfer ref…" />
           </div>
           {error && <p className="text-red-400 text-xs">{error instanceof Error ? error.message : 'Failed.'}</p>}
@@ -1093,9 +1104,9 @@ function PayInvoiceModal({ propertyId, inv, onClose, onUpdated }: {
         <div className="flex gap-3 mt-5">
           <button onClick={() => mutate()} disabled={isPending || !paidDate}
             className="flex-1 py-2 bg-green-600 hover:bg-green-500 disabled:opacity-50 text-white text-sm rounded-lg transition-colors">
-            {isPending ? 'Saving…' : 'Mark Paid'}
+            {isPending ? t('common.saving') : t('propertiesPanel.markPaidBtn')}
           </button>
-          <button onClick={onClose} className="px-4 py-2 text-slate-400 hover:text-white text-sm transition-colors">Cancel</button>
+          <button onClick={onClose} className="px-4 py-2 text-slate-400 hover:text-white text-sm transition-colors">{t('common.cancel')}</button>
         </div>
       </div>
     </div>
@@ -1105,6 +1116,7 @@ function PayInvoiceModal({ propertyId, inv, onClose, onUpdated }: {
 // ─── Property Detail ──────────────────────────────────────────────────────────
 // ─── Add Insurance Modal ──────────────────────────────────────────────────────
 function AddInsuranceModal({ propertyId, onClose, onCreated }: { propertyId: string; onClose: () => void; onCreated: () => void }) {
+  const { t } = useTranslation()
   const [form, setForm] = useState({
     insurance_type: 'BUILDING', insurer: '', policy_number: '',
     premium_amount: '', premium_currency: 'TTD', premium_frequency: 'ANNUAL',
@@ -1131,7 +1143,7 @@ function AddInsuranceModal({ propertyId, onClose, onCreated }: { propertyId: str
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
       <div className="bg-slate-800 rounded-xl w-full max-w-lg max-h-[90vh] flex flex-col shadow-2xl">
         <div className="flex items-center justify-between px-5 py-4 border-b border-slate-700 shrink-0">
-          <h2 className="text-sm font-semibold text-slate-100">Add Insurance Policy</h2>
+          <h2 className="text-sm font-semibold text-slate-100">{t('propertiesPanel.addInsurance')}</h2>
           <button onClick={onClose} className="text-slate-500 hover:text-slate-300">✕</button>
         </div>
         <div className="flex-1 overflow-y-auto p-5 space-y-3">
@@ -1180,7 +1192,7 @@ function AddInsuranceModal({ propertyId, onClose, onCreated }: { propertyId: str
           <div className="flex items-center gap-2">
             <input type="checkbox" id="auto_renew" checked={form.auto_renew}
               onChange={e => setForm(f => ({ ...f, auto_renew: e.target.checked }))} className="rounded" />
-            <label htmlFor="auto_renew" className="text-xs text-slate-300">Auto-renew</label>
+            <label htmlFor="auto_renew" className="text-xs text-slate-300">{t('propertiesPanel.autoRenew')}</label>
           </div>
           <div>
             <label className="block text-xs text-slate-400 mb-1">Notes</label>
@@ -1189,7 +1201,7 @@ function AddInsuranceModal({ propertyId, onClose, onCreated }: { propertyId: str
           <div className="flex justify-end pt-2">
             <button onClick={() => mutate()} disabled={!form.insurer || isPending}
               className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-sm rounded-lg transition-colors">
-              {isPending ? 'Adding…' : 'Add Policy'}
+              {isPending ? t('propertiesPanel.addingLabel') : t('propertiesPanel.addPolicy')}
             </button>
           </div>
         </div>
@@ -1200,6 +1212,7 @@ function AddInsuranceModal({ propertyId, onClose, onCreated }: { propertyId: str
 
 // ─── Add Tax Modal ────────────────────────────────────────────────────────────
 function AddTaxModal({ propertyId, onClose, onCreated }: { propertyId: string; onClose: () => void; onCreated: () => void }) {
+  const { t } = useTranslation()
   const [form, setForm] = useState({
     tax_year: new Date().getFullYear().toString(),
     assessment_value: '', tax_amount: '', due_date: '', notes: '',
@@ -1223,7 +1236,7 @@ function AddTaxModal({ propertyId, onClose, onCreated }: { propertyId: string; o
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
       <div className="bg-slate-800 rounded-xl w-full max-w-md shadow-2xl">
         <div className="flex items-center justify-between px-5 py-4 border-b border-slate-700">
-          <h2 className="text-sm font-semibold text-slate-100">Add Property Tax Record</h2>
+          <h2 className="text-sm font-semibold text-slate-100">{t('propertiesPanel.addTaxRecord')}</h2>
           <button onClick={onClose} className="text-slate-500 hover:text-slate-300">✕</button>
         </div>
         <div className="p-5 space-y-3">
@@ -1252,7 +1265,7 @@ function AddTaxModal({ propertyId, onClose, onCreated }: { propertyId: string; o
           <div className="flex justify-end pt-2">
             <button onClick={() => mutate()} disabled={!form.tax_year || !form.tax_amount || isPending}
               className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-sm rounded-lg transition-colors">
-              {isPending ? 'Adding…' : 'Add Record'}
+              {isPending ? t('propertiesPanel.addingLabel') : t('propertiesPanel.addTaxBtn')}
             </button>
           </div>
         </div>
@@ -1263,6 +1276,7 @@ function AddTaxModal({ propertyId, onClose, onCreated }: { propertyId: string; o
 
 // ─── Pay Tax Modal ────────────────────────────────────────────────────────────
 function PayTaxModal({ propertyId, record, onClose, onUpdated }: { propertyId: string; record: PropertyTaxRecord; onClose: () => void; onUpdated: () => void }) {
+  const { t } = useTranslation()
   const [form, setForm] = useState({ paid_date: new Date().toISOString().slice(0, 10), payment_reference: '' })
 
   const { mutate, isPending } = useMutation({
@@ -1277,11 +1291,11 @@ function PayTaxModal({ propertyId, record, onClose, onUpdated }: { propertyId: s
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
       <div className="bg-slate-800 rounded-xl w-full max-w-md shadow-2xl">
         <div className="flex items-center justify-between px-5 py-4 border-b border-slate-700">
-          <h2 className="text-sm font-semibold text-slate-100">Pay Property Tax — {record.tax_year}</h2>
+          <h2 className="text-sm font-semibold text-slate-100">{t('propertiesPanel.payPropertyTax')} — {record.tax_year}</h2>
           <button onClick={onClose} className="text-slate-500 hover:text-slate-300">✕</button>
         </div>
         <div className="p-5 space-y-3">
-          <p className="text-xs text-slate-400">Amount: <span className="text-slate-200 font-medium">{fmtTTD(record.tax_amount)}</span></p>
+          <p className="text-xs text-slate-400">{t('propertiesPanel.amountLabel')} <span className="text-slate-200 font-medium">{fmtTTD(record.tax_amount)}</span></p>
           <div>
             <label className="block text-xs text-slate-400 mb-1">Paid Date *</label>
             <input type="date" value={form.paid_date} onChange={e => setForm(f => ({ ...f, paid_date: e.target.value }))} className={cls} />
@@ -1293,7 +1307,7 @@ function PayTaxModal({ propertyId, record, onClose, onUpdated }: { propertyId: s
           <div className="flex justify-end pt-2">
             <button onClick={() => mutate()} disabled={!form.paid_date || isPending}
               className="px-4 py-2 bg-green-700 hover:bg-green-600 disabled:opacity-50 text-white text-sm rounded-lg transition-colors">
-              {isPending ? 'Saving…' : 'Mark Paid'}
+              {isPending ? t('common.saving') : t('propertiesPanel.markPaidBtn')}
             </button>
           </div>
         </div>
@@ -1304,6 +1318,7 @@ function PayTaxModal({ propertyId, record, onClose, onUpdated }: { propertyId: s
 
 // ─── Add Inspection Modal ─────────────────────────────────────────────────────
 function AddInspectionModal({ propertyId, onClose, onCreated }: { propertyId: string; onClose: () => void; onCreated: () => void }) {
+  const { t } = useTranslation()
   const [form, setForm] = useState({
     inspection_type: 'PERIODIC', inspection_date: new Date().toISOString().slice(0, 10),
     inspector_name: '', condition_rating: '', next_due_date: '', notes: '',
@@ -1328,7 +1343,7 @@ function AddInspectionModal({ propertyId, onClose, onCreated }: { propertyId: st
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
       <div className="bg-slate-800 rounded-xl w-full max-w-lg max-h-[90vh] flex flex-col shadow-2xl">
         <div className="flex items-center justify-between px-5 py-4 border-b border-slate-700 shrink-0">
-          <h2 className="text-sm font-semibold text-slate-100">Record Inspection</h2>
+          <h2 className="text-sm font-semibold text-slate-100">{t('propertiesPanel.addInspection')}</h2>
           <button onClick={onClose} className="text-slate-500 hover:text-slate-300">✕</button>
         </div>
         <div className="flex-1 overflow-y-auto p-5 space-y-3">
@@ -1368,7 +1383,7 @@ function AddInspectionModal({ propertyId, onClose, onCreated }: { propertyId: st
           <div className="flex justify-end pt-2">
             <button onClick={() => mutate()} disabled={!form.inspection_date || isPending}
               className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-sm rounded-lg transition-colors">
-              {isPending ? 'Saving…' : 'Save Inspection'}
+              {isPending ? t('common.saving') : t('propertiesPanel.saveInspection')}
             </button>
           </div>
         </div>
@@ -1379,6 +1394,7 @@ function AddInspectionModal({ propertyId, onClose, onCreated }: { propertyId: st
 
 // ─── Add Utility Account Modal ────────────────────────────────────────────────
 function AddUtilityAccountModal({ propertyId, onClose, onCreated }: { propertyId: string; onClose: () => void; onCreated: () => void }) {
+  const { t } = useTranslation()
   const UTIL_TYPES = ['ELECTRICITY','WATER','GAS','INTERNET','OTHER'] as const
   const [form, setForm] = useState({
     utility_type: 'ELECTRICITY' as typeof UTIL_TYPES[number],
@@ -1401,7 +1417,7 @@ function AddUtilityAccountModal({ propertyId, onClose, onCreated }: { propertyId
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
       <div className="bg-slate-800 border border-slate-700 rounded-xl w-full max-w-md p-5 shadow-2xl">
-        <h2 className="text-sm font-semibold text-slate-100 mb-4">Add Utility Account</h2>
+        <h2 className="text-sm font-semibold text-slate-100 mb-4">{t('propertiesPanel.addAccount')}</h2>
         <div className="space-y-3">
           <div className="flex gap-3">
             <div className="flex-1">
@@ -1430,10 +1446,10 @@ function AddUtilityAccountModal({ propertyId, onClose, onCreated }: { propertyId
         </div>
         {error && <p className="mt-2 text-xs text-red-400">{(error as Error).message}</p>}
         <div className="flex gap-2 mt-4">
-          <button onClick={onClose} className="flex-1 py-1.5 text-xs rounded bg-slate-700 hover:bg-slate-600 text-slate-300">Cancel</button>
+          <button onClick={onClose} className="flex-1 py-1.5 text-xs rounded bg-slate-700 hover:bg-slate-600 text-slate-300">{t('common.cancel')}</button>
           <button onClick={() => mutate()} disabled={isPending || !form.provider}
             className="flex-1 py-1.5 text-xs rounded bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white">
-            {isPending ? 'Saving…' : 'Add Account'}
+            {isPending ? t('common.saving') : t('propertiesPanel.addAccount')}
           </button>
         </div>
       </div>
@@ -1443,6 +1459,7 @@ function AddUtilityAccountModal({ propertyId, onClose, onCreated }: { propertyId
 
 // ─── Add Unit Modal ───────────────────────────────────────────────────────────
 function AddUnitModal({ propertyId, onClose, onCreated }: { propertyId: string; onClose: () => void; onCreated: () => void }) {
+  const { t } = useTranslation()
   const [form, setForm] = useState({ unit_number: '', floor: '', bedrooms: '', bathrooms: '', floor_area_sqm: '', notes: '' })
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
     setForm(f => ({ ...f, [k]: e.target.value }))
@@ -1462,43 +1479,43 @@ function AddUnitModal({ propertyId, onClose, onCreated }: { propertyId: string; 
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
       <div className="bg-slate-800 border border-slate-700 rounded-xl w-full max-w-md p-5 shadow-2xl">
-        <h2 className="text-sm font-semibold text-slate-100 mb-4">Add Unit</h2>
+        <h2 className="text-sm font-semibold text-slate-100 mb-4">{t('propertiesPanel.addUnit')}</h2>
         <div className="space-y-3">
           <div className="flex gap-3">
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Unit Number *</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.unitNumber')}</label>
               <input value={form.unit_number} onChange={set('unit_number')} className={cls} placeholder="e.g. A1, 2B, 101" />
             </div>
             <div className="w-24">
-              <label className="block text-xs text-slate-400 mb-1">Floor</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.floor')}</label>
               <input type="number" value={form.floor} onChange={set('floor')} className={cls} />
             </div>
           </div>
           <div className="flex gap-3">
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Bedrooms</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.bedrooms')}</label>
               <input type="number" min="0" value={form.bedrooms} onChange={set('bedrooms')} className={cls} />
             </div>
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Bathrooms</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.bathrooms')}</label>
               <input type="number" step="0.5" min="0" value={form.bathrooms} onChange={set('bathrooms')} className={cls} />
             </div>
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Area (m²)</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.area')}</label>
               <input type="number" step="0.1" min="0" value={form.floor_area_sqm} onChange={set('floor_area_sqm')} className={cls} />
             </div>
           </div>
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Notes</label>
+            <label className="block text-xs text-slate-400 mb-1">{t('common.notes')}</label>
             <textarea value={form.notes} onChange={set('notes')} rows={2} className={cls} />
           </div>
         </div>
         {error && <p className="mt-2 text-xs text-red-400">{(error as Error).message}</p>}
         <div className="flex gap-2 mt-4">
-          <button onClick={onClose} className="flex-1 py-1.5 text-xs rounded bg-slate-700 hover:bg-slate-600 text-slate-300">Cancel</button>
+          <button onClick={onClose} className="flex-1 py-1.5 text-xs rounded bg-slate-700 hover:bg-slate-600 text-slate-300">{t('common.cancel')}</button>
           <button onClick={() => mutate()} disabled={isPending || !form.unit_number}
             className="flex-1 py-1.5 text-xs rounded bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white">
-            {isPending ? 'Saving…' : 'Add Unit'}
+            {isPending ? t('common.saving') : t('propertiesPanel.addUnit')}
           </button>
         </div>
       </div>
@@ -1508,6 +1525,7 @@ function AddUnitModal({ propertyId, onClose, onCreated }: { propertyId: string; 
 
 // ─── Edit Unit Modal ──────────────────────────────────────────────────────────
 function EditUnitModal({ propertyId, unit, onClose, onSaved }: { propertyId: string; unit: Unit; onClose: () => void; onSaved: () => void }) {
+  const { t } = useTranslation()
   const [form, setForm] = useState({
     unit_number: unit.unit_number,
     floor: unit.floor != null ? String(unit.floor) : '',
@@ -1534,43 +1552,43 @@ function EditUnitModal({ propertyId, unit, onClose, onSaved }: { propertyId: str
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
       <div className="bg-slate-800 border border-slate-700 rounded-xl w-full max-w-md p-5 shadow-2xl">
-        <h2 className="text-sm font-semibold text-slate-100 mb-4">Edit Unit</h2>
+        <h2 className="text-sm font-semibold text-slate-100 mb-4">{t('propertiesPanel.editUnit')}</h2>
         <div className="space-y-3">
           <div className="flex gap-3">
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Unit Number *</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.unitNumber')}</label>
               <input value={form.unit_number} onChange={set('unit_number')} className={cls} />
             </div>
             <div className="w-24">
-              <label className="block text-xs text-slate-400 mb-1">Floor</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.floor')}</label>
               <input type="number" value={form.floor} onChange={set('floor')} className={cls} />
             </div>
           </div>
           <div className="flex gap-3">
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Bedrooms</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.bedrooms')}</label>
               <input type="number" min="0" value={form.bedrooms} onChange={set('bedrooms')} className={cls} />
             </div>
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Bathrooms</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.bathrooms')}</label>
               <input type="number" step="0.5" min="0" value={form.bathrooms} onChange={set('bathrooms')} className={cls} />
             </div>
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Area (m²)</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.area')}</label>
               <input type="number" step="0.1" min="0" value={form.floor_area_sqm} onChange={set('floor_area_sqm')} className={cls} />
             </div>
           </div>
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Notes</label>
+            <label className="block text-xs text-slate-400 mb-1">{t('common.notes')}</label>
             <textarea value={form.notes} onChange={set('notes')} rows={2} className={cls} />
           </div>
         </div>
         {error && <p className="mt-2 text-xs text-red-400">{(error as Error).message}</p>}
         <div className="flex gap-2 mt-4">
-          <button onClick={onClose} className="flex-1 py-1.5 text-xs rounded bg-slate-700 hover:bg-slate-600 text-slate-300">Cancel</button>
+          <button onClick={onClose} className="flex-1 py-1.5 text-xs rounded bg-slate-700 hover:bg-slate-600 text-slate-300">{t('common.cancel')}</button>
           <button onClick={() => mutate()} disabled={isPending || !form.unit_number}
             className="flex-1 py-1.5 text-xs rounded bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white">
-            {isPending ? 'Saving…' : 'Save Changes'}
+            {isPending ? t('common.saving') : t('propertiesPanel.saveChanges')}
           </button>
         </div>
       </div>
@@ -1583,6 +1601,7 @@ const INS_TYPES = ['BUILDING','CONTENTS','COMPREHENSIVE','LIABILITY','FLOOD','FI
 const FREQ_TYPES = ['MONTHLY','QUARTERLY','ANNUAL'] as const
 
 function EditInsuranceModal({ propertyId, policy, onClose, onSaved }: { propertyId: string; policy: InsurancePolicy; onClose: () => void; onSaved: () => void }) {
+  const { t } = useTranslation()
   const [form, setForm] = useState({
     insurance_type: policy.insurance_type,
     insurer: policy.insurer,
@@ -1619,7 +1638,7 @@ function EditInsuranceModal({ propertyId, policy, onClose, onSaved }: { property
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
       <div className="bg-slate-800 border border-slate-700 rounded-xl w-full max-w-lg p-5 shadow-2xl max-h-[90vh] overflow-y-auto">
-        <h2 className="text-sm font-semibold text-slate-100 mb-4">Edit Insurance Policy</h2>
+        <h2 className="text-sm font-semibold text-slate-100 mb-4">{t('propertiesPanel.editInsurance')}</h2>
         <div className="space-y-3">
           <div className="flex gap-3">
             <div className="flex-1">
@@ -1667,7 +1686,7 @@ function EditInsuranceModal({ propertyId, policy, onClose, onSaved }: { property
           </div>
           <div className="flex items-center gap-2">
             <input type="checkbox" id="edit_ins_autorenew" checked={form.auto_renew} onChange={setCheck('auto_renew')} className="rounded" />
-            <label htmlFor="edit_ins_autorenew" className="text-xs text-slate-300">Auto-renew</label>
+            <label htmlFor="edit_ins_autorenew" className="text-xs text-slate-300">{t('propertiesPanel.autoRenew')}</label>
           </div>
           <div>
             <label className="block text-xs text-slate-400 mb-1">Notes</label>
@@ -1676,10 +1695,10 @@ function EditInsuranceModal({ propertyId, policy, onClose, onSaved }: { property
         </div>
         {error && <p className="mt-2 text-xs text-red-400">{(error as Error).message}</p>}
         <div className="flex gap-2 mt-4">
-          <button onClick={onClose} className="flex-1 py-1.5 text-xs rounded bg-slate-700 hover:bg-slate-600 text-slate-300">Cancel</button>
+          <button onClick={onClose} className="flex-1 py-1.5 text-xs rounded bg-slate-700 hover:bg-slate-600 text-slate-300">{t('common.cancel')}</button>
           <button onClick={() => mutate()} disabled={isPending || !form.insurer}
             className="flex-1 py-1.5 text-xs rounded bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white">
-            {isPending ? 'Saving…' : 'Save Changes'}
+            {isPending ? t('common.saving') : t('propertiesPanel.saveChanges')}
           </button>
         </div>
       </div>
@@ -1692,6 +1711,7 @@ const INSP_TYPES = ['MOVE_IN','MOVE_OUT','PERIODIC','PRE_TENANCY','MAINTENANCE',
 const COND_RATINGS = ['EXCELLENT','GOOD','FAIR','POOR'] as const
 
 function EditInspectionModal({ propertyId, inspection, onClose, onSaved }: { propertyId: string; inspection: Inspection; onClose: () => void; onSaved: () => void }) {
+  const { t } = useTranslation()
   const [form, setForm] = useState({
     inspection_type: inspection.inspection_type,
     inspection_date: inspection.inspection_date,
@@ -1718,7 +1738,7 @@ function EditInspectionModal({ propertyId, inspection, onClose, onSaved }: { pro
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
       <div className="bg-slate-800 border border-slate-700 rounded-xl w-full max-w-md p-5 shadow-2xl max-h-[90vh] overflow-y-auto">
-        <h2 className="text-sm font-semibold text-slate-100 mb-4">Edit Inspection</h2>
+        <h2 className="text-sm font-semibold text-slate-100 mb-4">{t('propertiesPanel.editInspection')}</h2>
         <div className="space-y-3">
           <div className="flex gap-3">
             <div className="flex-1">
@@ -1756,10 +1776,10 @@ function EditInspectionModal({ propertyId, inspection, onClose, onSaved }: { pro
         </div>
         {error && <p className="mt-2 text-xs text-red-400">{(error as Error).message}</p>}
         <div className="flex gap-2 mt-4">
-          <button onClick={onClose} className="flex-1 py-1.5 text-xs rounded bg-slate-700 hover:bg-slate-600 text-slate-300">Cancel</button>
+          <button onClick={onClose} className="flex-1 py-1.5 text-xs rounded bg-slate-700 hover:bg-slate-600 text-slate-300">{t('common.cancel')}</button>
           <button onClick={() => mutate()} disabled={isPending || !form.inspection_date}
             className="flex-1 py-1.5 text-xs rounded bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white">
-            {isPending ? 'Saving…' : 'Save Changes'}
+            {isPending ? t('common.saving') : t('propertiesPanel.saveChanges')}
           </button>
         </div>
       </div>
@@ -1769,6 +1789,7 @@ function EditInspectionModal({ propertyId, inspection, onClose, onSaved }: { pro
 
 // ─── Edit Tax Modal ───────────────────────────────────────────────────────────
 function EditTaxModal({ propertyId, record, onClose, onSaved }: { propertyId: string; record: PropertyTaxRecord; onClose: () => void; onSaved: () => void }) {
+  const { t } = useTranslation()
   const [form, setForm] = useState({
     tax_year: String(record.tax_year),
     assessment_value: record.assessment_value != null ? String(parseFloat(String(record.assessment_value))) : '',
@@ -1793,7 +1814,7 @@ function EditTaxModal({ propertyId, record, onClose, onSaved }: { propertyId: st
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
       <div className="bg-slate-800 border border-slate-700 rounded-xl w-full max-w-sm p-5 shadow-2xl">
-        <h2 className="text-sm font-semibold text-slate-100 mb-4">Edit Tax Record</h2>
+        <h2 className="text-sm font-semibold text-slate-100 mb-4">{t('propertiesPanel.editTax')}</h2>
         <div className="space-y-3">
           <div className="flex gap-3">
             <div className="w-24">
@@ -1820,10 +1841,10 @@ function EditTaxModal({ propertyId, record, onClose, onSaved }: { propertyId: st
         </div>
         {error && <p className="mt-2 text-xs text-red-400">{(error as Error).message}</p>}
         <div className="flex gap-2 mt-4">
-          <button onClick={onClose} className="flex-1 py-1.5 text-xs rounded bg-slate-700 hover:bg-slate-600 text-slate-300">Cancel</button>
+          <button onClick={onClose} className="flex-1 py-1.5 text-xs rounded bg-slate-700 hover:bg-slate-600 text-slate-300">{t('common.cancel')}</button>
           <button onClick={() => mutate()} disabled={isPending}
             className="flex-1 py-1.5 text-xs rounded bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white">
-            {isPending ? 'Saving…' : 'Save Changes'}
+            {isPending ? t('common.saving') : t('propertiesPanel.saveChanges')}
           </button>
         </div>
       </div>
@@ -1835,6 +1856,7 @@ function EditTaxModal({ propertyId, record, onClose, onSaved }: { propertyId: st
 const UTIL_TYPES = ['ELECTRICITY','WATER','GAS','INTERNET','OTHER'] as const
 
 function EditUtilityAccountModal({ propertyId, account, onClose, onSaved }: { propertyId: string; account: UtilityAccount; onClose: () => void; onSaved: () => void }) {
+  const { t } = useTranslation()
   const [form, setForm] = useState({
     utility_type: account.utility_type,
     provider: account.provider,
@@ -1859,7 +1881,7 @@ function EditUtilityAccountModal({ propertyId, account, onClose, onSaved }: { pr
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
       <div className="bg-slate-800 border border-slate-700 rounded-xl w-full max-w-sm p-5 shadow-2xl">
-        <h2 className="text-sm font-semibold text-slate-100 mb-4">Edit Utility Account</h2>
+        <h2 className="text-sm font-semibold text-slate-100 mb-4">{t('propertiesPanel.editUtilityAccount')}</h2>
         <div className="space-y-3">
           <div className="flex gap-3">
             <div className="flex-1">
@@ -1890,10 +1912,10 @@ function EditUtilityAccountModal({ propertyId, account, onClose, onSaved }: { pr
         </div>
         {error && <p className="mt-2 text-xs text-red-400">{(error as Error).message}</p>}
         <div className="flex gap-2 mt-4">
-          <button onClick={onClose} className="flex-1 py-1.5 text-xs rounded bg-slate-700 hover:bg-slate-600 text-slate-300">Cancel</button>
+          <button onClick={onClose} className="flex-1 py-1.5 text-xs rounded bg-slate-700 hover:bg-slate-600 text-slate-300">{t('common.cancel')}</button>
           <button onClick={() => mutate()} disabled={isPending || !form.provider}
             className="flex-1 py-1.5 text-xs rounded bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white">
-            {isPending ? 'Saving…' : 'Save Changes'}
+            {isPending ? t('common.saving') : t('propertiesPanel.saveChanges')}
           </button>
         </div>
       </div>
@@ -1909,6 +1931,7 @@ function ChargeLateFeeModal({ propertyId, payment, lease, onClose, onCharged }: 
   onClose: () => void
   onCharged: () => void
 }) {
+  const { t } = useTranslation()
   const suggested = lease?.late_fee_type === 'FIXED'
     ? Number(lease.late_fee_value ?? 0)
     : lease?.late_fee_type === 'PERCENT'
@@ -1924,29 +1947,29 @@ function ChargeLateFeeModal({ propertyId, payment, lease, onClose, onCharged }: 
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
       <div className="bg-slate-800 border border-slate-700 rounded-xl w-full max-w-sm p-5 shadow-2xl">
-        <h2 className="text-sm font-semibold text-slate-100 mb-3">Charge Late Fee</h2>
+        <h2 className="text-sm font-semibold text-slate-100 mb-3">{t('propertiesPanel.chargeLateFee')}</h2>
         <p className="text-xs text-slate-400 mb-4">
           Payment: {MONTHS[payment.period_month - 1]} {payment.period_year} · Due {fmtTTD(payment.amount_due)} · Paid {fmtTTD(payment.amount_paid)}
         </p>
         <div>
-          <label className="block text-xs text-slate-400 mb-1">Late Fee Amount (TTD) *</label>
+          <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.lateFeeAmountTTD')}</label>
           <input
             type="number" step="0.01" min="0" value={amount}
             onChange={e => setAmount(e.target.value)} className={cls}
           />
           {suggested > 0 && (
             <p className="mt-1 text-xs text-slate-500">
-              Lease policy suggests: {fmtTTD(String(suggested))}
+              {t('propertiesPanel.leasePolicySuggests')} {fmtTTD(String(suggested))}
               {lease?.late_fee_type === 'PERCENT' && ` (${lease.late_fee_value}%)`}
             </p>
           )}
         </div>
         {error && <p className="mt-2 text-xs text-red-400">{(error as Error).message}</p>}
         <div className="flex gap-2 mt-4">
-          <button onClick={onClose} className="flex-1 py-1.5 text-xs rounded bg-slate-700 hover:bg-slate-600 text-slate-300">Cancel</button>
+          <button onClick={onClose} className="flex-1 py-1.5 text-xs rounded bg-slate-700 hover:bg-slate-600 text-slate-300">{t('common.cancel')}</button>
           <button onClick={() => mutate()} disabled={isPending || !amount || Number(amount) <= 0}
             className="flex-1 py-1.5 text-xs rounded bg-orange-600 hover:bg-orange-500 disabled:opacity-50 text-white">
-            {isPending ? 'Saving…' : 'Charge Fee'}
+            {isPending ? t('common.saving') : t('propertiesPanel.chargeFeeBtn')}
           </button>
         </div>
       </div>
@@ -1956,6 +1979,7 @@ function ChargeLateFeeModal({ propertyId, payment, lease, onClose, onCharged }: 
 
 // ─── Refund Deposit Modal ─────────────────────────────────────────────────────
 function RefundDepositModal({ propertyId, lease, onClose, onSaved }: { propertyId: string; lease: Lease; onClose: () => void; onSaved: () => void }) {
+  const { t } = useTranslation()
   const depositAmount = Number(lease.security_deposit ?? 0)
   const [form, setForm] = useState({
     refunded_amount: String(depositAmount),
@@ -1980,39 +2004,39 @@ function RefundDepositModal({ propertyId, lease, onClose, onSaved }: { propertyI
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
       <div className="bg-slate-800 border border-slate-700 rounded-xl w-full max-w-md p-5 shadow-2xl">
-        <h2 className="text-sm font-semibold text-slate-100 mb-4">Refund Security Deposit</h2>
+        <h2 className="text-sm font-semibold text-slate-100 mb-4">{t('propertiesPanel.refundSecurityDeposit')}</h2>
         <p className="text-xs text-slate-400 mb-4">
-          Deposit held: <span className="text-slate-200 font-mono">{fmtTTD(String(depositAmount))}</span>
+          {t('propertiesPanel.depositHeld')} <span className="text-slate-200 font-mono">{fmtTTD(String(depositAmount))}</span>
           {' · '}
           {lease.is_company ? lease.company_name : `${lease.first_name} ${lease.last_name ?? ''}`}
         </p>
         <div className="space-y-3">
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Amount Refunded *</label>
+            <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.amountRefunded')}</label>
             <input type="number" step="0.01" min="0" value={form.refunded_amount} onChange={set('refunded_amount')} className={cls} />
           </div>
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Deductions</label>
+            <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.deductions')}</label>
             <input type="number" step="0.01" min="0" value={form.deductions} onChange={set('deductions')} className={cls} />
           </div>
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Refund Date *</label>
+            <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.refundDate')}</label>
             <input type="date" value={form.refund_date} onChange={set('refund_date')} className={cls} />
           </div>
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Notes</label>
+            <label className="block text-xs text-slate-400 mb-1">{t('common.notes')}</label>
             <textarea value={form.notes} onChange={set('notes')} rows={2} className={cls} placeholder="Reason for deductions, etc." />
           </div>
         </div>
         {error && <p className="mt-2 text-xs text-red-400">{(error as Error).message}</p>}
         <div className="flex gap-2 mt-4">
-          <button onClick={onClose} className="flex-1 py-1.5 text-xs rounded bg-slate-700 hover:bg-slate-600 text-slate-300">Cancel</button>
+          <button onClick={onClose} className="flex-1 py-1.5 text-xs rounded bg-slate-700 hover:bg-slate-600 text-slate-300">{t('common.cancel')}</button>
           <button
             onClick={() => mutate()}
             disabled={isPending || !form.refund_date}
             className="flex-1 py-1.5 text-xs rounded bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white"
           >
-            {isPending ? 'Saving…' : 'Record Refund'}
+            {isPending ? t('common.saving') : t('propertiesPanel.recordRefund')}
           </button>
         </div>
       </div>
@@ -2022,6 +2046,7 @@ function RefundDepositModal({ propertyId, lease, onClose, onSaved }: { propertyI
 
 // ─── Add Document Modal ───────────────────────────────────────────────────────
 function AddDocumentModal({ propertyId, leases, onClose, onCreated }: { propertyId: string; leases: Lease[]; onClose: () => void; onCreated: () => void }) {
+  const { t } = useTranslation()
   const [form, setForm] = useState({
     label: '',
     document_type: 'OTHER' as 'TITLE_DEED' | 'TENANCY_AGREEMENT' | 'INSURANCE_CERTIFICATE' | 'INSPECTION_REPORT' | 'PERMIT' | 'INVOICE' | 'OTHER',
@@ -2050,21 +2075,21 @@ function AddDocumentModal({ propertyId, leases, onClose, onCreated }: { property
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
       <div className="bg-slate-800 border border-slate-700 rounded-xl w-full max-w-md p-5 shadow-2xl">
-        <h2 className="text-sm font-semibold text-slate-100 mb-4">Attach Document</h2>
+        <h2 className="text-sm font-semibold text-slate-100 mb-4">{t('propertiesPanel.attachDocument')}</h2>
         <div className="space-y-3">
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Label *</label>
+            <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.docLabel')}</label>
             <input value={form.label} onChange={set('label')} className={cls} placeholder="e.g. Title Deed 2024" />
           </div>
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Document Type</label>
+            <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.documentType')}</label>
             <select value={form.document_type} onChange={set('document_type')} className={cls}>
-              {DOC_TYPES.map(t => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}
+              {DOC_TYPES.map(dt => <option key={dt} value={dt}>{dt.replace(/_/g, ' ')}</option>)}
             </select>
           </div>
           {leases.length > 0 && (
             <div>
-              <label className="block text-xs text-slate-400 mb-1">Link to Lease (optional)</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.linkToLease')}</label>
               <select value={form.lease_id} onChange={set('lease_id')} className={cls}>
                 <option value="">— not linked —</option>
                 {leases.map(l => (
@@ -2087,19 +2112,19 @@ function AddDocumentModal({ propertyId, leases, onClose, onCreated }: { property
             />
           </div>
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Notes</label>
+            <label className="block text-xs text-slate-400 mb-1">{t('common.notes')}</label>
             <textarea value={form.notes} onChange={set('notes')} rows={2} className={cls} />
           </div>
         </div>
         {error && <p className="mt-2 text-xs text-red-400">{(error as Error).message}</p>}
         <div className="flex gap-2 mt-4">
-          <button onClick={onClose} className="flex-1 py-1.5 text-xs rounded bg-slate-700 hover:bg-slate-600 text-slate-300">Cancel</button>
+          <button onClick={onClose} className="flex-1 py-1.5 text-xs rounded bg-slate-700 hover:bg-slate-600 text-slate-300">{t('common.cancel')}</button>
           <button
             onClick={() => mutate()}
             disabled={isPending || !form.label || !uploadedKey}
             className="flex-1 py-1.5 text-xs rounded bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white"
           >
-            {isPending ? 'Saving…' : 'Attach Document'}
+            {isPending ? t('common.saving') : t('propertiesPanel.attachDocument')}
           </button>
         </div>
       </div>
@@ -2109,6 +2134,7 @@ function AddDocumentModal({ propertyId, leases, onClose, onCreated }: { property
 
 // ─── Edit Property Modal ──────────────────────────────────────────────────────
 function EditPropertyModal({ property, onClose, onSaved }: { property: Property; onClose: () => void; onSaved: () => void }) {
+  const { t } = useTranslation()
   const [form, setForm] = useState({
     name: property.name,
     address_line1: property.address_line1 ?? '',
@@ -2139,15 +2165,15 @@ function EditPropertyModal({ property, onClose, onSaved }: { property: Property;
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
       <div className="bg-slate-800 border border-slate-700 rounded-xl w-full max-w-md p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
-        <h2 className="text-lg font-semibold mb-4 text-white">Edit Property</h2>
+        <h2 className="text-lg font-semibold mb-4 text-white">{t('propertiesPanel.editProperty')}</h2>
         <p className="text-xs text-slate-500 mb-4">{property.property_code}</p>
         <div className="space-y-3">
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Property Name *</label>
+            <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.propertyName')} *</label>
             <input value={form.name} onChange={set('name')} className={cls} />
           </div>
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Address Line 1</label>
+            <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.addressLine1')}</label>
             <input value={form.address_line1} onChange={set('address_line1')} className={cls} />
           </div>
           <div>
@@ -2156,26 +2182,26 @@ function EditPropertyModal({ property, onClose, onSaved }: { property: Property;
           </div>
           <div className="flex gap-3">
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">City</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.city')}</label>
               <input value={form.city} onChange={set('city')} className={cls} />
             </div>
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Country</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.country')}</label>
               <input value={form.country} onChange={set('country')} className={cls} />
             </div>
           </div>
           <div className="flex gap-3">
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Current Valuation (TTD)</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.currentValuation')}</label>
               <input type="number" step="0.01" min="0" value={form.current_valuation} onChange={set('current_valuation')} className={cls} />
             </div>
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Valuation Date</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.valuationDate')}</label>
               <input type="date" value={form.valuation_date} onChange={set('valuation_date')} className={cls} />
             </div>
           </div>
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Notes</label>
+            <label className="block text-xs text-slate-400 mb-1">{t('common.notes')}</label>
             <textarea value={form.notes} onChange={set('notes')} rows={3} className={cls} />
           </div>
           {error && <p className="text-red-400 text-xs">{error instanceof Error ? error.message : 'Failed.'}</p>}
@@ -2183,9 +2209,9 @@ function EditPropertyModal({ property, onClose, onSaved }: { property: Property;
         <div className="flex gap-3 mt-5">
           <button onClick={() => mutate()} disabled={isPending || !form.name}
             className="flex-1 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-sm rounded-lg transition-colors">
-            {isPending ? 'Saving…' : 'Save Changes'}
+            {isPending ? t('common.saving') : t('propertiesPanel.saveChanges')}
           </button>
-          <button onClick={onClose} className="px-4 py-2 text-slate-400 hover:text-white text-sm transition-colors">Cancel</button>
+          <button onClick={onClose} className="px-4 py-2 text-slate-400 hover:text-white text-sm transition-colors">{t('common.cancel')}</button>
         </div>
       </div>
     </div>
@@ -2194,10 +2220,111 @@ function EditPropertyModal({ property, onClose, onSaved }: { property: Property;
 
 type DetailTab = 'overview' | 'leases' | 'payments' | 'maintenance' | 'utilities' | 'invoices' | 'insurance' | 'tax' | 'inspections' | 'financials' | 'documents' | 'units'
 
+function ValuationHistoryModal({ id, name, onClose }: { id: string; name: string; onClose: () => void }) {
+  const { t } = useTranslation()
+  const qc = useQueryClient()
+  const [showAdd, setShowAdd] = useState(false)
+  const [date, setDate] = useState('')
+  const [valuation, setValuation] = useState('')
+  const [notes, setNotes] = useState('')
+
+  const { data: history = [], isLoading } = useQuery({
+    queryKey: ['properties', id, 'valuation-history'],
+    queryFn: () => propertiesApi.getValuationHistory(id),
+  })
+
+  const { mutate, isPending, error: addError } = useMutation({
+    mutationFn: () => propertiesApi.addValuationHistory(id, {
+      as_of_date: date,
+      valuation_ttd: Number(valuation),
+      notes: notes || undefined,
+    }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['properties', id, 'valuation-history'] })
+      setDate(''); setValuation(''); setNotes('')
+      setShowAdd(false)
+    },
+  })
+
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[60] overflow-y-auto py-6">
+      <div className="bg-slate-800 border border-slate-700 rounded-xl w-full max-w-2xl mx-4 p-6 shadow-2xl">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-base font-semibold text-white">Valuation History — {name}</h2>
+          <button onClick={onClose} className="text-slate-400 hover:text-white text-sm">{t('common.close', 'Close')}</button>
+        </div>
+
+        {!showAdd && (
+          <button onClick={() => setShowAdd(true)}
+            className="mb-4 px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-200 text-xs rounded-lg transition-colors">
+            + Add Past Entry
+          </button>
+        )}
+        {showAdd && (
+          <div className="mb-5 p-4 bg-slate-700/50 rounded-lg border border-slate-600 space-y-3">
+            <p className="text-xs text-slate-400 font-medium uppercase tracking-wide">Add Historical Entry</p>
+            <div className="flex gap-3">
+              <div className="flex-1">
+                <label className="block text-xs text-slate-400 mb-1">Date</label>
+                <input type="date" value={date} onChange={e => setDate(e.target.value)} className={cls} />
+              </div>
+              <div className="flex-1">
+                <label className="block text-xs text-slate-400 mb-1">Valuation (TTD)</label>
+                <input type="number" step="0.01" value={valuation} onChange={e => setValuation(e.target.value)} className={cls} placeholder="0.00" />
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">Notes</label>
+              <input value={notes} onChange={e => setNotes(e.target.value)} className={cls} placeholder="e.g. Professional appraisal 2025" />
+            </div>
+            {addError && <p className="text-red-400 text-xs">{addError instanceof Error ? addError.message : 'Failed.'}</p>}
+            <div className="flex gap-3 pt-1">
+              <button onClick={() => mutate()} disabled={isPending || !date || !valuation}
+                className="px-4 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-xs rounded-lg transition-colors">
+                {isPending ? 'Saving...' : 'Save Entry'}
+              </button>
+              <button onClick={() => setShowAdd(false)} className="text-slate-400 hover:text-white text-xs transition-colors">Cancel</button>
+            </div>
+          </div>
+        )}
+
+        {isLoading && <p className="text-slate-400 text-sm">Loading...</p>}
+        {!isLoading && history.length === 0 && (
+          <p className="text-slate-400 text-sm">No history yet. History records automatically each time you update the valuation.</p>
+        )}
+        {history.length > 0 && (
+          <div className="rounded-lg overflow-hidden border border-slate-700">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-slate-700/50 text-slate-400 text-xs uppercase tracking-wide">
+                  <th className="text-left px-3 py-2">Date</th>
+                  <th className="text-right px-3 py-2">Valuation (TTD)</th>
+                  <th className="text-left px-3 py-2">Notes</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-700">
+                {history.map((row: PropertyValuationHistory) => (
+                  <tr key={row.id} className="hover:bg-slate-700/30">
+                    <td className="px-3 py-2 text-slate-300">{row.as_of_date}</td>
+                    <td className="px-3 py-2 text-right font-mono text-slate-100 font-medium">{fmtTTD(row.valuation_ttd)}</td>
+                    <td className="px-3 py-2 text-slate-400 text-xs">{row.notes ?? '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 function PropertyDetail({ property, onDeleted }: { property: Property; onDeleted: () => void }) {
+  const { t } = useTranslation()
   const [detailTab, setDetailTab] = useState<DetailTab>('overview')
   const [showEditProperty, setShowEditProperty] = useState(false)
   const [showDeleteProperty, setShowDeleteProperty] = useState(false)
+  const [showValuationHistory, setShowValuationHistory] = useState(false)
   const [showAddLease, setShowAddLease] = useState(false)
   const [showRecordPayment, setShowRecordPayment] = useState(false)
   const [receiptPaymentId, setReceiptPaymentId] = useState<string | null>(null)
@@ -2299,18 +2426,18 @@ function PropertyDetail({ property, onDeleted }: { property: Property; onDeleted
     void qc.invalidateQueries({ queryKey: ['properties', property.id, tab === 'payments' ? 'payments' : tab === 'overview' ? 'mortgages' : tab] })
 
   const DETAIL_TABS: { id: DetailTab; label: string }[] = [
-    { id: 'overview',    label: 'Overview' },
-    { id: 'leases',      label: 'Leases' },
-    { id: 'payments',    label: 'Rent Payments' },
-    { id: 'maintenance', label: 'Maintenance' },
-    { id: 'utilities',   label: 'Utilities' },
-    { id: 'invoices',    label: 'Vendor Invoices' },
-    { id: 'insurance',   label: 'Insurance' },
-    { id: 'tax',         label: 'Property Tax' },
-    { id: 'inspections', label: 'Inspections' },
-    { id: 'units',       label: 'Units' },
-    { id: 'financials',  label: '$ Financial Summary' },
-    { id: 'documents',   label: 'Documents' },
+    { id: 'overview',    label: t('propertiesPanel.detailTabs.overview') },
+    { id: 'leases',      label: t('propertiesPanel.detailTabs.leases') },
+    { id: 'payments',    label: t('propertiesPanel.detailTabs.payments') },
+    { id: 'maintenance', label: t('propertiesPanel.detailTabs.maintenance') },
+    { id: 'utilities',   label: t('propertiesPanel.detailTabs.utilities') },
+    { id: 'invoices',    label: t('propertiesPanel.detailTabs.invoices') },
+    { id: 'insurance',   label: t('propertiesPanel.detailTabs.insurance') },
+    { id: 'tax',         label: t('propertiesPanel.detailTabs.tax') },
+    { id: 'inspections', label: t('propertiesPanel.detailTabs.inspections') },
+    { id: 'units',       label: t('propertiesPanel.detailTabs.units') },
+    { id: 'financials',  label: t('propertiesPanel.detailTabs.financials') },
+    { id: 'documents',   label: t('propertiesPanel.detailTabs.documents') },
   ]
 
   const activeLease = property.active_leases?.[0]
@@ -2330,32 +2457,36 @@ function PropertyDetail({ property, onDeleted }: { property: Property; onDeleted
                 <span className="text-xs px-2 py-0.5 rounded bg-slate-700 text-slate-300">{property.bedrooms}BR / {property.bathrooms}BA</span>
               )}
               <span className={`text-xs px-2 py-0.5 rounded border ${property.is_rented ? 'border-green-700 text-green-400' : 'border-slate-600 text-slate-400'}`}>
-                {property.is_rented ? 'Rented' : 'Vacant'}
+                {property.is_rented ? t('propertiesPanel.rented') : t('propertiesPanel.vacant')}
               </span>
             </div>
           </div>
           <div className="flex items-start gap-3">
             {property.current_valuation && (
               <div className="text-right">
-                <p className="text-xs text-slate-400">Valuation</p>
+                <p className="text-xs text-slate-400">{t('propertiesPanel.valuation')}</p>
                 <p className="text-sm font-semibold font-mono text-slate-100">{fmtTTD(property.current_valuation)}</p>
                 {property.valuation_date && <p className="text-xs text-slate-500">{fmtDate(property.valuation_date)}</p>}
               </div>
             )}
             <button
+              onClick={() => setShowValuationHistory(true)}
+              className="px-3 py-1.5 text-xs rounded bg-slate-700 hover:bg-slate-600 text-slate-400 hover:text-white transition-colors whitespace-nowrap"
+            >Valuation History</button>
+            <button
               onClick={() => setShowEditProperty(true)}
               className="px-3 py-1.5 text-xs rounded bg-slate-700 hover:bg-slate-600 text-slate-300 hover:text-white transition-colors whitespace-nowrap"
-            >Edit</button>
+            >{t('propertiesPanel.edit')}</button>
             <button
               onClick={() => setShowDeleteProperty(true)}
               className="px-3 py-1.5 text-xs rounded bg-slate-700 hover:bg-red-700 text-slate-400 hover:text-white transition-colors whitespace-nowrap"
               title="Delete property"
-            >Delete</button>
+            >{t('propertiesPanel.delete')}</button>
           </div>
         </div>
         {activeLease && (
           <div className="mt-3 p-2.5 bg-slate-700/40 rounded text-xs text-slate-300">
-            <span className="text-slate-400">Active lease: </span>
+            <span className="text-slate-400">{t('propertiesPanel.activeLeaseLbl')}</span>
             <span className="font-medium">{activeLease.is_company ? activeLease.company_name : `${activeLease.first_name} ${activeLease.last_name ?? ''}`}</span>
             <span className="text-slate-400 ml-2">{fmtTTD(activeLease.monthly_rent)}/mo</span>
             <span className="text-slate-400 ml-2">due day {activeLease.payment_due_day}</span>
@@ -2365,13 +2496,13 @@ function PropertyDetail({ property, onDeleted }: { property: Property; onDeleted
 
       {/* Sub-tabs */}
       <div className="flex gap-0 border-b border-slate-700 overflow-x-auto">
-        {DETAIL_TABS.map(t => (
-          <button key={t.id} onClick={() => setDetailTab(t.id)}
+        {DETAIL_TABS.map(tab => (
+          <button key={tab.id} onClick={() => setDetailTab(tab.id)}
             className={`px-3 py-2 text-xs font-medium whitespace-nowrap transition-colors border-b-2 -mb-px ${
-              detailTab === t.id ? 'border-blue-500 text-white' : 'border-transparent text-slate-400 hover:text-slate-200'
+              detailTab === tab.id ? 'border-blue-500 text-white' : 'border-transparent text-slate-400 hover:text-slate-200'
             }`}
           >
-            {t.label}
+            {tab.label}
           </button>
         ))}
       </div>
@@ -2381,20 +2512,20 @@ function PropertyDetail({ property, onDeleted }: { property: Property; onDeleted
         {detailTab === 'overview' && (
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
-              <InfoField label="Property Code" value={property.property_code} mono />
-              <InfoField label="City" value={property.city} />
-              <InfoField label="Type" value={property.property_type} />
-              <InfoField label="Tenure" value={property.tenure_type} />
+              <InfoField label={t('propertiesPanel.infoCode')} value={property.property_code} mono />
+              <InfoField label={t('propertiesPanel.city')} value={property.city} />
+              <InfoField label={t('common.type')} value={property.property_type} />
+              <InfoField label={t('propertiesPanel.infoTenure')} value={property.tenure_type} />
             </div>
             <div className="flex justify-end">
               <button onClick={() => setShowAddMortgage(true)}
                 className="text-xs px-3 py-1 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-lg border border-slate-600 transition-colors">
-                + Add Mortgage
+                + {t('propertiesPanel.addMortgage')}
               </button>
             </div>
             {mortgages.length > 0 && (
               <div>
-                <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">Mortgages</h3>
+                <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">{t('propertiesPanel.mortgagesLbl')}</h3>
                 <div className="space-y-2">
                   {mortgages.map(m => (
                     <div key={m.id} className="p-3 bg-slate-700/40 rounded flex justify-between items-start text-sm">
@@ -2441,17 +2572,17 @@ function PropertyDetail({ property, onDeleted }: { property: Property; onDeleted
                     <div className="grid grid-cols-3 gap-2 text-xs text-slate-400">
                       <span>Rent: <span className="text-slate-200 font-mono">{fmtTTD(l.monthly_rent)}/mo</span></span>
                       <span>Due: day {l.payment_due_day}</span>
-                      <span>{fmtDate(l.start_date)} → {l.end_date ? fmtDate(l.end_date) : 'ongoing'}</span>
+                      <span>{fmtDate(l.start_date)} → {l.end_date ? fmtDate(l.end_date) : t('propertiesPanel.ongoing')}</span>
                     </div>
                     {(l.email || l.phone) && (
                       <p className="text-xs text-slate-500 mt-1">{l.email ?? ''} {l.phone ? `· ${l.phone}` : ''}</p>
                     )}
                     {l.security_deposit && Number(l.security_deposit) > 0 && (
                       <div className="flex items-center justify-between mt-2 pt-2 border-t border-slate-700">
-                        <p className="text-xs text-slate-400">Deposit: <span className="font-mono text-slate-200">{fmtTTD(l.security_deposit)}</span></p>
+                        <p className="text-xs text-slate-400">{t('propertiesPanel.depositLbl')} <span className="font-mono text-slate-200">{fmtTTD(l.security_deposit)}</span></p>
                         <button onClick={() => setRefundingDeposit(l)}
                           className="text-xs px-2 py-0.5 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded border border-slate-600 transition-colors">
-                          Refund Deposit
+                          {t('propertiesPanel.refundDeposit')}
                         </button>
                       </div>
                     )}
@@ -2476,12 +2607,12 @@ function PropertyDetail({ property, onDeleted }: { property: Property; onDeleted
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="bg-slate-700/50 text-slate-400 text-xs uppercase tracking-wide">
-                      <th className="text-left px-3 py-2">Date</th>
-                      <th className="text-left px-3 py-2">Period</th>
-                      <th className="text-right px-3 py-2">Due</th>
-                      <th className="text-right px-3 py-2">Paid</th>
-                      <th className="text-left px-3 py-2">Method</th>
-                      <th className="text-center px-3 py-2">Status</th>
+                      <th className="text-left px-3 py-2">{t('propertiesPanel.colDate')}</th>
+                      <th className="text-left px-3 py-2">{t('propertiesPanel.colPeriod')}</th>
+                      <th className="text-right px-3 py-2">{t('propertiesPanel.colDue')}</th>
+                      <th className="text-right px-3 py-2">{t('propertiesPanel.paidBadge')}</th>
+                      <th className="text-left px-3 py-2">{t('propertiesPanel.colMethod')}</th>
+                      <th className="text-center px-3 py-2">{t('propertiesPanel.colStatus')}</th>
                       <th className="px-3 py-2"></th>
                     </tr>
                   </thead>
@@ -2498,16 +2629,16 @@ function PropertyDetail({ property, onDeleted }: { property: Property; onDeleted
                         </td>
                         <td className="px-3 py-2 text-center">
                           {p.is_late
-                            ? <span className="text-xs text-red-400">Late{Number(p.late_fee_charged) > 0 ? ` +${fmtTTD(p.late_fee_charged)}` : ''}</span>
+                            ? <span className="text-xs text-red-400">{t('propertiesPanel.lateStatus')}{Number(p.late_fee_charged) > 0 ? ` +${fmtTTD(p.late_fee_charged)}` : ''}</span>
                             : parseFloat(String(p.amount_paid)) < parseFloat(String(p.amount_due))
-                              ? <span className="text-xs text-yellow-400">Partial</span>
-                              : <span className="text-xs text-emerald-400">Paid</span>}
+                              ? <span className="text-xs text-yellow-400">{t('propertiesPanel.partialStatus')}</span>
+                              : <span className="text-xs text-emerald-400">{t('propertiesPanel.paidStatus')}</span>}
                         </td>
                         <td className="px-3 py-2 text-right">
                           <div className="flex gap-2 justify-end">
                             <button onClick={() => setReceiptPaymentId(p.id)}
                               className="text-xs text-green-400 hover:text-green-300 transition-colors">
-                              Receipt
+                              {t('propertiesPanel.receiptBtn')}
                             </button>
                             {(parseFloat(String(p.amount_paid)) < parseFloat(String(p.amount_due)) || p.is_late) && (
                               <button onClick={() => setChargingLateFee(p)}
@@ -2568,14 +2699,14 @@ function PropertyDetail({ property, onDeleted }: { property: Property; onDeleted
             {/* Utility Accounts (reference) */}
             <div>
               <div className="flex items-center justify-between mb-2">
-                <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wide">Service Accounts</h3>
+                <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wide">{t('propertiesPanel.serviceAccounts')}</h3>
                 <button onClick={() => setShowAddUtilityAccount(true)}
                   className="text-xs px-2 py-0.5 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded border border-slate-600 transition-colors">
-                  + Add Account
+                  + {t('propertiesPanel.addAccount')}
                 </button>
               </div>
               {(utilityAccounts as UtilityAccount[]).length === 0 ? (
-                <p className="text-slate-600 text-xs">No utility accounts registered.</p>
+                <p className="text-slate-600 text-xs">{t('propertiesPanel.noUtilityAccounts')}</p>
               ) : (
                 <div className="space-y-1">
                   {(utilityAccounts as UtilityAccount[]).map((a: UtilityAccount) => (
@@ -2590,7 +2721,7 @@ function PropertyDetail({ property, onDeleted }: { property: Property; onDeleted
                         <button
                           onClick={() => setEditingUtilityAccount(a)}
                           className="text-xs text-slate-500 hover:text-blue-400 transition-colors"
-                        >Edit</button>
+                        >{t('propertiesPanel.edit')}</button>
                         <button
                           onClick={() => propertiesApi.deleteUtilityAccount(property.id, a.id).then(() =>
                             void qc.invalidateQueries({ queryKey: ['properties', property.id, 'utility-accounts'] })
@@ -2606,7 +2737,7 @@ function PropertyDetail({ property, onDeleted }: { property: Property; onDeleted
             {/* Bills */}
             <div>
               <div className="flex items-center justify-between mb-2">
-                <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wide">Bills</h3>
+                <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wide">{t('propertiesPanel.billsLbl')}</h3>
                 <button onClick={() => setShowAddUtility(true)}
                   className="text-xs px-3 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors">
                   + Record Bill
@@ -2617,11 +2748,11 @@ function PropertyDetail({ property, onDeleted }: { property: Property; onDeleted
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="bg-slate-700/50 text-slate-400 text-xs uppercase tracking-wide">
-                        <th className="text-left px-3 py-2">Type</th>
-                        <th className="text-left px-3 py-2">Provider</th>
-                        <th className="text-left px-3 py-2">Bill Date</th>
-                        <th className="text-left px-3 py-2">Paid</th>
-                        <th className="text-right px-3 py-2">Amount</th>
+                        <th className="text-left px-3 py-2">{t('common.type')}</th>
+                        <th className="text-left px-3 py-2">{t('propertiesPanel.colVendor')}</th>
+                        <th className="text-left px-3 py-2">{t('propertiesPanel.billDate')}</th>
+                        <th className="text-left px-3 py-2">{t('propertiesPanel.paidDate')}</th>
+                        <th className="text-right px-3 py-2">{t('common.amount')}</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-700">
@@ -2631,7 +2762,7 @@ function PropertyDetail({ property, onDeleted }: { property: Property; onDeleted
                           <td className="px-3 py-2 text-xs text-slate-400">{u.provider}</td>
                           <td className="px-3 py-2 text-xs text-slate-400">{fmtDate(u.bill_date)}</td>
                           <td className="px-3 py-2 text-xs">
-                            {u.paid_date ? <span className="text-green-400">{fmtDate(u.paid_date)}</span> : <span className="text-red-400">Unpaid</span>}
+                            {u.paid_date ? <span className="text-green-400">{fmtDate(u.paid_date)}</span> : <span className="text-red-400">{t('propertiesPanel.unpaidStatus')}</span>}
                           </td>
                           <td className="px-3 py-2 text-right font-mono text-xs text-slate-100">{fmtTTD(u.amount)}</td>
                         </tr>
@@ -2658,11 +2789,11 @@ function PropertyDetail({ property, onDeleted }: { property: Property; onDeleted
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="bg-slate-700/50 text-slate-400 text-xs uppercase tracking-wide">
-                      <th className="text-left px-3 py-2">Vendor</th>
-                      <th className="text-left px-3 py-2">Ref</th>
-                      <th className="text-left px-3 py-2">Date</th>
-                      <th className="text-right px-3 py-2">Amount</th>
-                      <th className="text-center px-3 py-2">Status</th>
+                      <th className="text-left px-3 py-2">{t('propertiesPanel.colVendor')}</th>
+                      <th className="text-left px-3 py-2">{t('propertiesPanel.colRef')}</th>
+                      <th className="text-left px-3 py-2">{t('propertiesPanel.colDate')}</th>
+                      <th className="text-right px-3 py-2">{t('common.amount')}</th>
+                      <th className="text-center px-3 py-2">{t('propertiesPanel.colStatus')}</th>
                       <th className="text-right px-3 py-2"></th>
                     </tr>
                   </thead>
@@ -2679,11 +2810,11 @@ function PropertyDetail({ property, onDeleted }: { property: Property; onDeleted
                         <td className="px-3 py-2 text-right">
                           {inv.status === 'RECEIVED' && (
                             <button onClick={() => approveInv(inv.id)}
-                              className="text-xs text-blue-400 hover:text-blue-300 transition-colors mr-2">Approve</button>
+                              className="text-xs text-blue-400 hover:text-blue-300 transition-colors mr-2">{t('propertiesPanel.approve')}</button>
                           )}
                           {inv.status === 'APPROVED' && (
                             <button onClick={() => setPayingInvoice(inv)}
-                              className="text-xs text-green-400 hover:text-green-300 transition-colors">Pay</button>
+                              className="text-xs text-green-400 hover:text-green-300 transition-colors">{t('propertiesPanel.payBtn')}</button>
                           )}
                         </td>
                       </tr>
@@ -2715,14 +2846,14 @@ function PropertyDetail({ property, onDeleted }: { property: Property; onDeleted
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="text-sm font-medium text-slate-100">{p.insurer}</span>
                         <span className="text-xs px-1.5 py-0.5 rounded bg-slate-600 text-slate-300">{p.insurance_type}</span>
-                        {expiring && <span className="text-xs px-1.5 py-0.5 rounded bg-red-900/60 text-red-300 border border-red-700">Expiring soon</span>}
+                        {expiring && <span className="text-xs px-1.5 py-0.5 rounded bg-red-900/60 text-red-300 border border-red-700">{t('propertiesPanel.expiringSoon')}</span>}
                       </div>
                       {p.policy_number && <p className="text-xs text-slate-400 mt-0.5 font-mono">{p.policy_number}</p>}
                       <div className="grid grid-cols-2 gap-x-4 mt-1.5 text-xs text-slate-400">
-                        {p.premium_amount && <span>Premium: <span className="text-slate-200">{fmtTTD(p.premium_amount)} / {p.premium_frequency.toLowerCase()}</span></span>}
-                        {p.coverage_amount && <span>Coverage: <span className="text-slate-200">{fmtTTD(p.coverage_amount)}</span></span>}
-                        {p.start_date && <span>From: <span className="text-slate-200">{fmtDate(p.start_date)}</span></span>}
-                        {p.expiry_date && <span className={expiring ? 'text-red-400' : ''}>Expires: <span className="text-slate-200">{fmtDate(p.expiry_date)}</span></span>}
+                        {p.premium_amount && <span>{t('propertiesPanel.insurancePremium')} <span className="text-slate-200">{fmtTTD(p.premium_amount)} / {p.premium_frequency.toLowerCase()}</span></span>}
+                        {p.coverage_amount && <span>{t('propertiesPanel.insuranceCoverage')} <span className="text-slate-200">{fmtTTD(p.coverage_amount)}</span></span>}
+                        {p.start_date && <span>{t('propertiesPanel.insuranceFrom')} <span className="text-slate-200">{fmtDate(p.start_date)}</span></span>}
+                        {p.expiry_date && <span className={expiring ? 'text-red-400' : ''}>{t('propertiesPanel.insuranceExpires')} <span className="text-slate-200">{fmtDate(p.expiry_date)}</span></span>}
                       </div>
                       {p.notes && <p className="text-xs text-slate-500 mt-1">{p.notes}</p>}
                     </div>
@@ -2730,7 +2861,7 @@ function PropertyDetail({ property, onDeleted }: { property: Property; onDeleted
                       <button
                         onClick={() => setEditingInsurance(p)}
                         className="text-xs text-slate-500 hover:text-blue-400 transition-colors"
-                      >Edit</button>
+                      >{t('propertiesPanel.edit')}</button>
                       <button onClick={() => {
                         propertiesApi.deleteInsurance(property.id, p.id).then(() =>
                           void qc.invalidateQueries({ queryKey: ['properties', property.id, 'insurance'] })
@@ -2759,12 +2890,12 @@ function PropertyDetail({ property, onDeleted }: { property: Property; onDeleted
                 <table className="w-full text-xs">
                   <thead>
                     <tr className="text-slate-500 border-b border-slate-700">
-                      <th className="px-3 py-2 text-left font-medium">Year</th>
-                      <th className="px-3 py-2 text-right font-medium">Assessment</th>
-                      <th className="px-3 py-2 text-right font-medium">Tax Due</th>
-                      <th className="px-3 py-2 text-center font-medium">Due Date</th>
-                      <th className="px-3 py-2 text-center font-medium">Paid</th>
-                      <th className="px-3 py-2 text-center font-medium">Status</th>
+                      <th className="px-3 py-2 text-left font-medium">{t('propertiesPanel.colYear')}</th>
+                      <th className="px-3 py-2 text-right font-medium">{t('propertiesPanel.colAssessment')}</th>
+                      <th className="px-3 py-2 text-right font-medium">{t('propertiesPanel.colTaxDue')}</th>
+                      <th className="px-3 py-2 text-center font-medium">{t('propertiesPanel.dueDate')}</th>
+                      <th className="px-3 py-2 text-center font-medium">{t('propertiesPanel.paidDate')}</th>
+                      <th className="px-3 py-2 text-center font-medium">{t('propertiesPanel.colStatus')}</th>
                       <th className="px-3 py-2" />
                     </tr>
                   </thead>
@@ -2778,16 +2909,16 @@ function PropertyDetail({ property, onDeleted }: { property: Property; onDeleted
                         <td className="px-3 py-2 text-center text-slate-400">{r.paid_date ? fmtDate(r.paid_date) : '—'}</td>
                         <td className="px-3 py-2 text-center">
                           <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium border ${r.paid_date ? 'bg-green-900/50 text-green-300 border-green-700' : 'bg-yellow-900/50 text-yellow-300 border-yellow-700'}`}>
-                            {r.paid_date ? 'PAID' : 'UNPAID'}
+                            {r.paid_date ? t('propertiesPanel.paidStatus').toUpperCase() : t('propertiesPanel.unpaidStatus').toUpperCase()}
                           </span>
                         </td>
                         <td className="px-3 py-2">
                           <div className="flex gap-2 justify-end">
                             <button onClick={() => setEditingTax(r)}
-                              className="text-xs text-slate-500 hover:text-blue-400 transition-colors">Edit</button>
+                              className="text-xs text-slate-500 hover:text-blue-400 transition-colors">{t('propertiesPanel.edit')}</button>
                             {!r.paid_date && (
                               <button onClick={() => setPayingTax(r)}
-                                className="text-xs text-green-400 hover:text-green-300 transition-colors">Pay</button>
+                                className="text-xs text-green-400 hover:text-green-300 transition-colors">{t('propertiesPanel.payBtn')}</button>
                             )}
                           </div>
                         </td>
@@ -2828,14 +2959,14 @@ function PropertyDetail({ property, onDeleted }: { property: Property; onDeleted
                           </span>
                         )}
                       </div>
-                      {insp.inspector_name && <p className="text-xs text-slate-400 mt-0.5">Inspector: {insp.inspector_name}</p>}
-                      {insp.next_due_date && <p className="text-xs text-slate-400 mt-0.5">Next due: {fmtDate(insp.next_due_date)}</p>}
+                      {insp.inspector_name && <p className="text-xs text-slate-400 mt-0.5">{t('propertiesPanel.inspectorLbl')} {insp.inspector_name}</p>}
+                      {insp.next_due_date && <p className="text-xs text-slate-400 mt-0.5">{t('propertiesPanel.nextDueLbl')} {fmtDate(insp.next_due_date)}</p>}
                       {insp.notes && <p className="text-xs text-slate-300 mt-1.5 whitespace-pre-line">{insp.notes}</p>}
                     </div>
                     <button
                       onClick={() => setEditingInspection(insp)}
                       className="text-xs text-slate-500 hover:text-blue-400 transition-colors shrink-0"
-                    >Edit</button>
+                    >{t('propertiesPanel.edit')}</button>
                   </div>
                 </div>
               )
@@ -2853,7 +2984,7 @@ function PropertyDetail({ property, onDeleted }: { property: Property; onDeleted
               </button>
             </div>
             {(units as Unit[]).length === 0 ? (
-              <p className="text-slate-500 text-sm">No units defined. Use units for apartment blocks or multi-suite properties.</p>
+              <p className="text-slate-500 text-sm">{t('propertiesPanel.noUnits')}</p>
             ) : (
               <div className="space-y-2">
                 {(units as Unit[]).map((u: Unit) => (
@@ -2861,10 +2992,10 @@ function PropertyDetail({ property, onDeleted }: { property: Property; onDeleted
                     <div className="flex items-start justify-between">
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
-                          <p className="text-sm font-semibold text-slate-100">Unit {u.unit_number}</p>
+                          <p className="text-sm font-semibold text-slate-100">{t('propertiesPanel.unitLbl')} {u.unit_number}</p>
                           {u.floor != null && <span className="text-xs text-slate-500">Floor {u.floor}</span>}
                           <span className={`text-xs px-1.5 py-0.5 rounded border ${u.is_rented ? 'border-green-700 text-green-400' : 'border-slate-600 text-slate-500'}`}>
-                            {u.is_rented ? 'Rented' : 'Vacant'}
+                            {u.is_rented ? t('propertiesPanel.rented') : t('propertiesPanel.vacant')}
                           </span>
                         </div>
                         <div className="flex gap-3 text-xs text-slate-400 mt-1">
@@ -2884,14 +3015,14 @@ function PropertyDetail({ property, onDeleted }: { property: Property; onDeleted
                         <button
                           onClick={() => setEditingUnit(u)}
                           className="text-xs px-2 py-0.5 bg-slate-700 hover:bg-slate-600 text-slate-400 rounded border border-slate-600 transition-colors"
-                        >Edit</button>
+                        >{t('propertiesPanel.edit')}</button>
                         <button
                           onClick={() => propertiesApi.patchUnit(property.id, u.id, { is_rented: !u.is_rented }).then(() =>
                             void qc.invalidateQueries({ queryKey: ['properties', property.id, 'units'] })
                           )}
                           className="text-xs px-2 py-0.5 bg-slate-700 hover:bg-slate-600 text-slate-400 rounded border border-slate-600 transition-colors"
                         >
-                          {u.is_rented ? 'Mark Vacant' : 'Mark Rented'}
+                          {u.is_rented ? t('propertiesPanel.markVacant') : t('propertiesPanel.markRented')}
                         </button>
                       </div>
                     </div>
@@ -2912,24 +3043,24 @@ function PropertyDetail({ property, onDeleted }: { property: Property; onDeleted
               <div className="space-y-4">
                 <div className="grid grid-cols-2 gap-3">
                   <div className="bg-green-900/20 border border-green-800 rounded-lg p-3">
-                    <p className="text-xs text-green-400 mb-1">Rent Collected (12 mo)</p>
+                    <p className="text-xs text-green-400 mb-1">{t('propertiesPanel.finRentCollected')}</p>
                     <p className="text-lg font-semibold font-mono text-green-300">{fmtTTD(String(financials.rent_collected))}</p>
                   </div>
                   <div className="bg-red-900/20 border border-red-800 rounded-lg p-3">
-                    <p className="text-xs text-red-400 mb-1">Total Expenses (12 mo)</p>
+                    <p className="text-xs text-red-400 mb-1">{t('propertiesPanel.finTotalExpenses')}</p>
                     <p className="text-lg font-semibold font-mono text-red-300">{fmtTTD(String(financials.total_expenses))}</p>
                   </div>
                   <div className={`col-span-2 border rounded-lg p-3 ${financials.net_income >= 0 ? 'bg-blue-900/20 border-blue-800' : 'bg-orange-900/20 border-orange-800'}`}>
-                    <p className={`text-xs mb-1 ${financials.net_income >= 0 ? 'text-blue-400' : 'text-orange-400'}`}>Net Income (12 mo)</p>
+                    <p className={`text-xs mb-1 ${financials.net_income >= 0 ? 'text-blue-400' : 'text-orange-400'}`}>{t('propertiesPanel.finNetIncome')}</p>
                     <p className={`text-xl font-bold font-mono ${financials.net_income >= 0 ? 'text-blue-200' : 'text-orange-300'}`}>{fmtTTD(String(financials.net_income))}</p>
                   </div>
                 </div>
                 <div className="border border-slate-700 rounded-lg divide-y divide-slate-700">
                   {[
-                    { label: 'Maintenance costs', val: financials.maintenance_cost },
-                    { label: 'Utility bills', val: financials.utility_cost },
-                    { label: 'Vendor invoices', val: financials.vendor_invoice_cost },
-                    { label: 'Mortgage payments (annual)', val: financials.mortgage_cost },
+                    { label: t('propertiesPanel.finMaintenance'), val: financials.maintenance_cost },
+                    { label: t('propertiesPanel.finUtilities'), val: financials.utility_cost },
+                    { label: t('propertiesPanel.finVendor'), val: financials.vendor_invoice_cost },
+                    { label: t('propertiesPanel.finMortgage'), val: financials.mortgage_cost },
                   ].map(row => (
                     <div key={row.label} className="flex justify-between px-3 py-2 text-sm">
                       <span className="text-slate-400">{row.label}</span>
@@ -2941,19 +3072,19 @@ function PropertyDetail({ property, onDeleted }: { property: Property; onDeleted
                   <div className="flex gap-4">
                     {financials.gross_yield_percent !== null && (
                       <div className="flex-1 border border-slate-700 rounded-lg p-3 text-center">
-                        <p className="text-xs text-slate-400">Gross Yield</p>
+                        <p className="text-xs text-slate-400">{t('propertiesPanel.finGrossYield')}</p>
                         <p className="text-base font-semibold text-slate-100 mt-0.5">{financials.gross_yield_percent.toFixed(2)}%</p>
                       </div>
                     )}
                     {financials.net_yield_percent !== null && (
                       <div className="flex-1 border border-slate-700 rounded-lg p-3 text-center">
-                        <p className="text-xs text-slate-400">Net Yield</p>
+                        <p className="text-xs text-slate-400">{t('propertiesPanel.finNetYield')}</p>
                         <p className="text-base font-semibold text-slate-100 mt-0.5">{financials.net_yield_percent.toFixed(2)}%</p>
                       </div>
                     )}
                   </div>
                 )}
-                <p className="text-xs text-slate-600">Based on last 12 calendar months. Mortgage cost is annualised from active mortgages.</p>
+                <p className="text-xs text-slate-600">{t('propertiesPanel.finNote')}</p>
               </div>
             )}
           </div>
@@ -3029,6 +3160,7 @@ function PropertyDetail({ property, onDeleted }: { property: Property; onDeleted
       )}
       {showEditProperty && <EditPropertyModal property={property} onClose={() => setShowEditProperty(false)}
         onSaved={() => void qc.invalidateQueries({ queryKey: ['properties'] })} />}
+      {showValuationHistory && <ValuationHistoryModal id={property.id} name={property.name} onClose={() => setShowValuationHistory(false)} />}
       {showAddLease     && <AddLeaseModal propertyId={property.id} onClose={() => setShowAddLease(false)}
         onCreated={() => void qc.invalidateQueries({ queryKey: ['properties', property.id, 'leases'] })} />}
       {showRecordPayment && <RecordPaymentModal propertyId={property.id} onClose={() => setShowRecordPayment(false)}
@@ -3088,6 +3220,7 @@ function PropertyDetail({ property, onDeleted }: { property: Property; onDeleted
 }
 
 export default function PropertiesPanel() {
+  const { t } = useTranslation()
   const qc = useQueryClient()
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [showAdd, setShowAdd] = useState(false)
@@ -3107,9 +3240,9 @@ export default function PropertiesPanel() {
           onClick={() => setShowAdd(true)}
           className="w-full py-1.5 text-sm rounded bg-blue-600 hover:bg-blue-500 text-white transition-colors"
         >
-          + Add Property
+          + {t('propertiesPanel.addProperty')}
         </button>
-        {isLoading && <p className="text-xs text-slate-400 text-center py-4">Loading…</p>}
+        {isLoading && <p className="text-xs text-slate-400 text-center py-4">{t('common.loading')}</p>}
         {properties.map(p => (
           <button
             key={p.id}
@@ -3123,12 +3256,12 @@ export default function PropertiesPanel() {
             <p className="font-medium truncate">{p.name}</p>
             <p className="text-xs text-slate-500 truncate mt-0.5">{p.property_code} · {p.property_type}</p>
             <span className={`text-xs ${p.is_rented ? 'text-green-400' : 'text-slate-500'}`}>
-              {p.is_rented ? 'Rented' : 'Vacant'}
+              {p.is_rented ? t('propertiesPanel.rented') : t('propertiesPanel.vacant')}
             </span>
           </button>
         ))}
         {!isLoading && properties.length === 0 && (
-          <p className="text-xs text-slate-500 text-center py-6">No properties yet</p>
+          <p className="text-xs text-slate-500 text-center py-6">{t('propertiesPanel.noProperties')}</p>
         )}
       </div>
 
@@ -3140,7 +3273,7 @@ export default function PropertiesPanel() {
               void qc.invalidateQueries({ queryKey: ['properties'] })
             }} />
           : <div className="h-full flex items-center justify-center text-slate-500 text-sm">
-              Select a property
+              {t('propertiesPanel.selectProperty')}
             </div>
         }
       </div>

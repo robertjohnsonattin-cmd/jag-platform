@@ -1,3 +1,12 @@
+export interface PropertyValuationHistory {
+  id: string
+  property_id: string
+  as_of_date: string
+  valuation_ttd: string
+  notes: string | null
+  recorded_at: string
+}
+
 export interface Property {
   id: string
   property_code: string

@@ -1,4 +1,5 @@
-// POST   /api/v1/finance/bank-statements/upload    — upload a statement file, enqueue job
+// POST   /api/v1/finance/bank-statements/upload    — Path 1: upload file, enqueue job
+// POST   /api/v1/finance/bank-statements/import    — Path 2: direct JSON transaction array from local script
 // GET    /api/v1/finance/bank-statements            — list jobs (newest first)
 // GET    /api/v1/finance/bank-statements/:id        — job detail + status
 // DELETE /api/v1/finance/bank-statements/:id        — delete job record + MinIO object (terminal states only)
@@ -44,6 +45,86 @@ const UploadBodySchema = z.object({
   account_id:      z.string().uuid(),
   idempotency_key: z.string().min(1).max(200),
 }).strict();
+
+// ── POST /bank-statements/import (Path 2 — direct JSON from local script) ────
+// Accepts pre-extracted transaction array; no file upload, no MinIO, no job record.
+// Creates fin_transactions + fin_pending_review_queue entries directly.
+
+const ImportTransactionSchema = z.object({
+  account_id:          z.string().uuid(),
+  transaction_date:    z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  amount:              z.number(),
+  currency:            z.string().length(3).default('TTD'),
+  description:         z.string().min(1).max(500),
+  merchant_name:       z.string().max(200).nullable().optional(),
+  reference_number:    z.string().max(100).nullable().optional(),
+  suggested_category:  z.string().max(50).optional(),
+  confidence:          z.number().min(0).max(1).optional(),
+  idempotency_key:     z.string().min(1).max(200),
+});
+
+const ImportTransactionsSchema = z.object({
+  transactions: z.array(ImportTransactionSchema).min(1).max(500),
+}).strict();
+
+bankStatementsRouter.post('/import', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const parsed = ImportTransactionsSchema.safeParse(req.body);
+    if (!parsed.success) { err(res, 422, 'VALIDATION_ERROR', 'transactions array is required (at least 1 item).'); return; }
+    const { transactions } = parsed.data;
+    const { ownerId } = req.rlsCtx;
+
+    const client = await familyPool.connect();
+    let imported = 0;
+    let skipped  = 0;
+    try {
+      for (const tx of transactions) {
+        const result = await withOwnerRLS(client, req.rlsCtx, async (c) => {
+          // Verify account belongs to owner
+          const acct = await c.query(
+            `SELECT id FROM fin_accounts WHERE id = $1 AND is_active = true`,
+            [tx.account_id],
+          );
+          if (!acct.rows.length) throw Object.assign(new Error(`Account ${tx.account_id} not found.`), { statusCode: 404, code: 'NOT_FOUND' });
+
+          const txRes = await c.query(
+            `INSERT INTO fin_transactions
+               (owner_id, account_id, transaction_date, amount, currency,
+                amount_ttd, description, merchant_name, reference_number,
+                category, is_pending_review, idempotency_key)
+             VALUES ($1,$2,$3,$4,$5,$4,$6,$7,$8,'UNCLASSIFIED',true,$9)
+             ON CONFLICT (idempotency_key) DO NOTHING
+             RETURNING id`,
+            [
+              ownerId, tx.account_id, tx.transaction_date, tx.amount, tx.currency,
+              tx.description, tx.merchant_name ?? null, tx.reference_number ?? null,
+              tx.idempotency_key,
+            ],
+          );
+          if (!txRes.rows.length) return null;
+          const txId = txRes.rows[0].id as string;
+
+          await c.query(
+            `INSERT INTO fin_pending_review_queue
+               (owner_id, transaction_id, suggested_category, confidence)
+             VALUES ($1,$2,$3,$4)
+             ON CONFLICT DO NOTHING`,
+            [ownerId, txId, tx.suggested_category ?? 'UNCLASSIFIED', tx.confidence ?? 0.5],
+          );
+          return txId;
+        });
+        if (result) { imported++; } else { skipped++; }
+      }
+
+      logger.info({ entity: 'FINANCE', action: 'BANK_STMT_IMPORTED', user_id: ownerId, imported, skipped, source: 'LOCAL_SCRIPT' });
+      ok(res, { imported, skipped }, 201);
+    } catch (e: unknown) {
+      const typed = e as { statusCode?: number; code?: string; message?: string };
+      if (typed.statusCode) { err(res, typed.statusCode, typed.code ?? 'ERROR', typed.message ?? 'Error'); return; }
+      next(e);
+    } finally { client.release(); }
+  } catch (e) { next(e); }
+});
 
 // ── POST /bank-statements/upload ─────────────────────────────────────────────
 

@@ -1,5 +1,6 @@
 import { useState, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useTranslation } from 'react-i18next'
 import { api } from '../api/client'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -108,6 +109,7 @@ function mimeIcon(mime: string): string {
 // ── Upload Modal ──────────────────────────────────────────────────────────────
 
 function UploadModal({ onClose }: { onClose: () => void }) {
+  const { t } = useTranslation()
   const qc = useQueryClient()
   const fileRef = useRef<HTMLInputElement>(null)
   const [file, setFile] = useState<File | null>(null)
@@ -175,7 +177,7 @@ function UploadModal({ onClose }: { onClose: () => void }) {
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
       <div className="bg-slate-800 border border-slate-700 rounded-xl w-full max-w-lg p-6 shadow-2xl">
-        <h2 className="text-lg font-semibold mb-4 text-white">Upload Document</h2>
+        <h2 className="text-lg font-semibold mb-4 text-white">{t('docvault.uploadTitle')}</h2>
 
         {/* File picker */}
         <div
@@ -195,8 +197,8 @@ function UploadModal({ onClose }: { onClose: () => void }) {
           ) : (
             <div>
               <p className="text-3xl mb-2">📁</p>
-              <p className="text-slate-400 text-sm">Click to select a file</p>
-              <p className="text-slate-500 text-xs mt-1">PDF, Word, Excel, images — max 50 MB</p>
+              <p className="text-slate-400 text-sm">{t('docvault.clickToSelect')}</p>
+              <p className="text-slate-500 text-xs mt-1">{t('docvault.fileTypesHint')}</p>
             </div>
           )}
         </div>
@@ -204,15 +206,15 @@ function UploadModal({ onClose }: { onClose: () => void }) {
         <div className="space-y-3">
           <div className="flex gap-3">
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Title</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('docvault.docTitle')}</label>
               <input value={form.title} onChange={set('title')} placeholder={file?.name ?? ''} className={cls} />
             </div>
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Document Type *</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('docvault.docType')}</label>
               <select value={form.document_type} onChange={set('document_type')} className={cls}>
                 <option value="">— select —</option>
-                {DOC_TYPES.map(t => (
-                  <option key={t} value={t}>{DOC_TYPE_ICONS[t]} {DOC_TYPE_LABELS[t]}</option>
+                {DOC_TYPES.map(dt => (
+                  <option key={dt} value={dt}>{DOC_TYPE_ICONS[dt]} {t(`docvault.docTypes.${dt}`, DOC_TYPE_LABELS[dt])}</option>
                 ))}
               </select>
             </div>
@@ -220,7 +222,7 @@ function UploadModal({ onClose }: { onClose: () => void }) {
 
           <div className="flex gap-3">
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Expiry Date</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('docvault.expiryDate')}</label>
               <input type="date" value={form.expires_date} onChange={set('expires_date')} className={cls} />
             </div>
             <div className="flex-1 flex items-end gap-2 pb-1">
@@ -228,21 +230,21 @@ function UploadModal({ onClose }: { onClose: () => void }) {
                 <input type="checkbox" checked={form.is_data_room}
                   onChange={e => setForm(f => ({ ...f, is_data_room: e.target.checked }))}
                   className="w-4 h-4 accent-orange-500" />
-                <span className="text-slate-300 text-sm">Data Room</span>
+                <span className="text-slate-300 text-sm">{t('docvault.dataRoom')}</span>
               </label>
             </div>
           </div>
 
           {form.is_data_room && (
             <div>
-              <label className="block text-xs text-slate-400 mb-1">Data Room Entity</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('docvault.dataRoomEntity')}</label>
               <input value={form.data_room_entity} onChange={set('data_room_entity')}
                 placeholder="JABCO, JAG Properties…" className={cls} />
             </div>
           )}
 
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Notes</label>
+            <label className="block text-xs text-slate-400 mb-1">{t('common.notes')}</label>
             <textarea value={form.notes} onChange={set('notes')} rows={2} className={cls} />
           </div>
         </div>
@@ -252,18 +254,18 @@ function UploadModal({ onClose }: { onClose: () => void }) {
         {progress !== 'idle' && (
           <div className="mt-3 flex items-center gap-2 text-sm text-slate-400">
             <div className="w-4 h-4 border-2 border-orange-500 border-t-transparent rounded-full animate-spin" />
-            {progress === 'uploading'   && 'Uploading file…'}
-            {progress === 'registering' && 'Registering metadata…'}
-            {progress === 'done'        && <span className="text-green-400">Done ✓</span>}
+            {progress === 'uploading'   && t('docvault.uploading')}
+            {progress === 'registering' && t('docvault.registering')}
+            {progress === 'done'        && <span className="text-green-400">{t('docvault.done')}</span>}
           </div>
         )}
 
         <div className="flex gap-3 mt-5">
           <button onClick={handleUpload} disabled={!canSubmit}
             className="flex-1 py-2 bg-orange-600 hover:bg-orange-500 disabled:opacity-50 text-white text-sm rounded-lg transition-colors">
-            Upload & Register
+            {t('docvault.uploadRegister')}
           </button>
-          <button onClick={onClose} className="px-4 py-2 text-slate-400 hover:text-white text-sm transition-colors">Cancel</button>
+          <button onClick={onClose} className="px-4 py-2 text-slate-400 hover:text-white text-sm transition-colors">{t('common.cancel')}</button>
         </div>
       </div>
     </div>
@@ -273,6 +275,7 @@ function UploadModal({ onClose }: { onClose: () => void }) {
 // ── Document Detail Panel ─────────────────────────────────────────────────────
 
 function DocDetailPanel({ doc, onClose }: { doc: DocFile; onClose: () => void }) {
+  const { t } = useTranslation()
   const qc = useQueryClient()
   const [deleting, setDeleting] = useState(false)
 
@@ -311,24 +314,24 @@ function DocDetailPanel({ doc, onClose }: { doc: DocFile; onClose: () => void })
         {/* Expiry warning */}
         {expired && (
           <div className="flex items-center gap-2 p-3 bg-red-950/40 border border-red-700 rounded-lg text-red-400 text-sm">
-            <span>⚠</span> Expired on {fmtDate(doc.expires_date)}
+            <span>⚠</span> {t('docvault.expiredOn')} {fmtDate(doc.expires_date)}
           </div>
         )}
         {!expired && expiring && (
           <div className="flex items-center gap-2 p-3 bg-yellow-950/40 border border-yellow-700 rounded-lg text-yellow-400 text-sm">
-            <span>⏰</span> Expires {fmtDate(doc.expires_date)} — renew soon
+            <span>⏰</span> {t('docvault.expiresLabel')} {fmtDate(doc.expires_date)} {t('docvault.renewSoon')}
           </div>
         )}
 
         {/* Meta grid */}
         <div className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm">
           {[
-            { label: 'File Name',  value: doc.file_name },
-            { label: 'Size',       value: fmtSize(doc.file_size_bytes) },
-            { label: 'Type',       value: doc.mime_type },
-            { label: 'Uploaded',   value: fmtDate(doc.created_at) },
-            { label: 'Expires',    value: fmtDate(doc.expires_date) },
-            { label: 'Data Room',  value: doc.is_data_room ? (doc.data_room_entity ?? 'Yes') : 'No' },
+            { label: t('docvault.fileName'),  value: doc.file_name },
+            { label: t('docvault.fileSize'),  value: fmtSize(doc.file_size_bytes) },
+            { label: t('docvault.fileType'),  value: doc.mime_type },
+            { label: t('docvault.uploaded'),  value: fmtDate(doc.created_at) },
+            { label: t('docvault.expiresLabel'), value: fmtDate(doc.expires_date) },
+            { label: t('docvault.dataRoom'),  value: doc.is_data_room ? (doc.data_room_entity ?? t('docvault.dataRoomYes')) : t('docvault.dataRoomNo') },
           ].map(({ label, value }) => (
             <div key={label}>
               <p className="text-slate-500 text-xs">{label}</p>
@@ -339,7 +342,7 @@ function DocDetailPanel({ doc, onClose }: { doc: DocFile; onClose: () => void })
 
         {doc.notes && (
           <div>
-            <p className="text-slate-500 text-xs mb-1">Notes</p>
+            <p className="text-slate-500 text-xs mb-1">{t('common.notes')}</p>
             <p className="text-slate-300 text-sm bg-slate-900/40 rounded-lg p-3">{doc.notes}</p>
           </div>
         )}
@@ -348,23 +351,23 @@ function DocDetailPanel({ doc, onClose }: { doc: DocFile; onClose: () => void })
         <div className="flex flex-col gap-2 pt-2">
           <a href={downloadUrl} target="_blank" rel="noreferrer"
             className="flex items-center justify-center gap-2 py-2.5 bg-blue-700 hover:bg-blue-600 text-white text-sm rounded-lg transition-colors">
-            ↓ Download / View
+            {t('docvault.downloadView')}
           </a>
 
           {!deleting ? (
             <button onClick={() => setDeleting(true)}
               className="py-2.5 text-slate-400 hover:text-red-400 text-sm transition-colors border border-slate-700 hover:border-red-700 rounded-lg">
-              Delete Document
+              {t('docvault.deleteDoc')}
             </button>
           ) : (
             <div className="p-3 border border-red-700 rounded-lg bg-red-950/30">
-              <p className="text-red-400 text-sm mb-3">Permanently delete this document and its file?</p>
+              <p className="text-red-400 text-sm mb-3">{t('docvault.confirmDelete')}</p>
               <div className="flex gap-2">
                 <button onClick={() => deleteDoc()} disabled={isDeleting}
                   className="flex-1 py-2 bg-red-700 hover:bg-red-600 disabled:opacity-50 text-white text-sm rounded-lg transition-colors">
-                  {isDeleting ? 'Deleting…' : 'Yes, Delete'}
+                  {isDeleting ? t('docvault.deleting') : t('docvault.yesDelete')}
                 </button>
-                <button onClick={() => setDeleting(false)} className="px-4 py-2 text-slate-400 hover:text-white text-sm">Cancel</button>
+                <button onClick={() => setDeleting(false)} className="px-4 py-2 text-slate-400 hover:text-white text-sm">{t('common.cancel')}</button>
               </div>
             </div>
           )}
@@ -377,6 +380,7 @@ function DocDetailPanel({ doc, onClose }: { doc: DocFile; onClose: () => void })
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function DocVault() {
+  const { t } = useTranslation()
   const [typeFilter, setTypeFilter] = useState<DocType | ''>('')
   const [dataRoomFilter, setDataRoomFilter] = useState<'' | 'true' | 'false'>('')
   const [search, setSearch] = useState('')
@@ -411,12 +415,12 @@ export default function DocVault() {
       <div className="px-6 py-4 border-b border-slate-700">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-xl font-semibold text-white">DocVault</h1>
-            <p className="text-slate-400 text-sm mt-0.5">Secure document registry — IDs, titles, licences, statements</p>
+            <h1 className="text-xl font-semibold text-white">{t('docvault.title')}</h1>
+            <p className="text-slate-400 text-sm mt-0.5">{t('docvault.subtitle')}</p>
           </div>
           <button onClick={() => setShowUpload(true)}
             className="px-4 py-2 bg-orange-600 hover:bg-orange-500 text-white text-sm rounded-lg transition-colors">
-            + Upload Document
+            {t('docvault.uploadBtn')}
           </button>
         </div>
 
@@ -426,13 +430,13 @@ export default function DocVault() {
             {expiredCount > 0 && (
               <button onClick={() => {}}
                 className="flex items-center gap-1.5 px-3 py-1.5 bg-red-950/40 border border-red-700 rounded-lg text-red-400 text-xs hover:bg-red-950/60 transition-colors">
-                ⚠ {expiredCount} expired document{expiredCount !== 1 ? 's' : ''}
+                ⚠ {t('docvault.expiredAlert', { count: expiredCount })}
               </button>
             )}
             {expiringCount > 0 && (
               <button onClick={() => {}}
                 className="flex items-center gap-1.5 px-3 py-1.5 bg-yellow-950/40 border border-yellow-700 rounded-lg text-yellow-400 text-xs hover:bg-yellow-950/60 transition-colors">
-                ⏰ {expiringCount} expiring within 90 days
+                ⏰ {t('docvault.expiringAlert', { count: expiringCount })}
               </button>
             )}
           </div>
@@ -444,33 +448,33 @@ export default function DocVault() {
         <input
           value={search}
           onChange={e => setSearch(e.target.value)}
-          placeholder="Search title or filename…"
+          placeholder={t('docvault.searchPlaceholder')}
           className="bg-slate-700 border border-slate-600 rounded-lg px-3 py-1.5 text-white text-sm w-56 focus:outline-none focus:border-orange-500"
         />
         <select value={typeFilter} onChange={e => setTypeFilter(e.target.value as DocType | '')}
           className="bg-slate-700 border border-slate-600 rounded-lg px-3 py-1.5 text-white text-sm">
-          <option value="">All Types</option>
-          {DOC_TYPES.map(t => <option key={t} value={t}>{DOC_TYPE_ICONS[t]} {DOC_TYPE_LABELS[t]}</option>)}
+          <option value="">{t('docvault.allTypes')}</option>
+          {DOC_TYPES.map(dt => <option key={dt} value={dt}>{DOC_TYPE_ICONS[dt]} {t(`docvault.docTypes.${dt}`, DOC_TYPE_LABELS[dt])}</option>)}
         </select>
         <select value={dataRoomFilter} onChange={e => setDataRoomFilter(e.target.value as '' | 'true' | 'false')}
           className="bg-slate-700 border border-slate-600 rounded-lg px-3 py-1.5 text-white text-sm">
-          <option value="">All Documents</option>
-          <option value="true">Data Room Only</option>
-          <option value="false">Personal Only</option>
+          <option value="">{t('docvault.allDocuments')}</option>
+          <option value="true">{t('docvault.dataRoomOnly')}</option>
+          <option value="false">{t('docvault.personalOnly')}</option>
         </select>
-        <span className="text-slate-500 text-sm ml-auto">{displayed.length} document{displayed.length !== 1 ? 's' : ''}</span>
+        <span className="text-slate-500 text-sm ml-auto">{t('docvault.documentCount', { count: displayed.length })}</span>
       </div>
 
       {/* Content */}
       <div className="flex flex-1 overflow-hidden">
         {/* File list */}
         <div className={`flex flex-col overflow-y-auto ${selected ? 'hidden lg:flex lg:w-1/2 lg:border-r lg:border-slate-700' : 'flex-1'}`}>
-          {isLoading && <div className="flex items-center justify-center h-32 text-slate-400 text-sm">Loading…</div>}
+          {isLoading && <div className="flex items-center justify-center h-32 text-slate-400 text-sm">{t('common.loading')}</div>}
           {!isLoading && displayed.length === 0 && (
             <div className="flex flex-col items-center justify-center h-64 text-slate-500">
               <p className="text-4xl mb-3">🗄️</p>
-              <p className="text-sm">No documents yet.</p>
-              <button onClick={() => setShowUpload(true)} className="mt-3 text-orange-400 hover:text-orange-300 text-sm">Upload your first document →</button>
+              <p className="text-sm">{t('docvault.noDocuments')}</p>
+              <button onClick={() => setShowUpload(true)} className="mt-3 text-orange-400 hover:text-orange-300 text-sm">{t('docvault.uploadFirst')}</button>
             </div>
           )}
 
@@ -497,8 +501,8 @@ export default function DocVault() {
                         {f.is_data_room && (
                           <span className="px-1.5 py-0.5 bg-purple-900/40 text-purple-300 text-xs rounded border border-purple-700">DR</span>
                         )}
-                        {expired && <span className="px-1.5 py-0.5 bg-red-900/40 text-red-400 text-xs rounded border border-red-700">Expired</span>}
-                        {expiring && <span className="px-1.5 py-0.5 bg-yellow-900/40 text-yellow-400 text-xs rounded border border-yellow-700">Expiring</span>}
+                        {expired && <span className="px-1.5 py-0.5 bg-red-900/40 text-red-400 text-xs rounded border border-red-700">{t('docvault.expiredBadge')}</span>}
+                        {expiring && <span className="px-1.5 py-0.5 bg-yellow-900/40 text-yellow-400 text-xs rounded border border-yellow-700">{t('docvault.expiringBadge')}</span>}
                       </div>
                     </div>
                     <p className="text-white font-medium text-sm leading-tight">{f.title}</p>
@@ -510,7 +514,7 @@ export default function DocVault() {
                     </div>
                     {f.expires_date && (
                       <p className={`text-xs mt-1 ${expired ? 'text-red-400' : expiring ? 'text-yellow-400' : 'text-slate-500'}`}>
-                        Expires {fmtDate(f.expires_date)}
+                        {t('docvault.expiresLabel')} {fmtDate(f.expires_date)}
                       </p>
                     )}
                   </button>

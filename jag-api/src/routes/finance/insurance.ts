@@ -6,6 +6,8 @@
 // GET    /finance/insurance/policies/:id
 // PATCH  /finance/insurance/policies/:id
 // DELETE /finance/insurance/policies/:id
+// GET    /finance/insurance/policies/:id/history
+// POST   /finance/insurance/policies/:id/history — manual backfill
 //
 // GET    /finance/insurance/policies/:policyId/premiums
 // POST   /finance/insurance/policies/:policyId/premiums
@@ -141,6 +143,45 @@ async function enqueueRenewalAlert(ownerId: string, policy: {
   );
 }
 
+// ── POST /policies/import (Path 2 — direct JSON from local script) ────────────
+
+const ImportPolicySchema = CreatePolicySchema.extend({
+  idempotency_key: z.string().min(1).max(200),
+}).omit({ gl_expense_account_id: true });
+
+insuranceRouter.post('/policies/import', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const parsed = ImportPolicySchema.safeParse(req.body);
+    if (!parsed.success) { err(res, 422, 'VALIDATION_ERROR', 'Request body validation failed.'); return; }
+    const b = parsed.data;
+    const { ownerId } = req.rlsCtx;
+
+    const client = await familyPool.connect();
+    try {
+      const rec = await withOwnerRLS(client, req.rlsCtx, (c) =>
+        c.query(
+          `INSERT INTO fin_insurance_policies
+             (owner_id, owner_entity_id, policy_number, insurer_name, broker_name,
+              policy_type, insured_asset_type, coverage_amount, currency,
+              coverage_amount_ttd, premium_amount, premium_amount_ttd,
+              premium_frequency, start_date, expiry_date, renewal_alert_days, notes)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+           RETURNING *`,
+          [
+            ownerId, b.owner_entity_id, b.policy_number, b.insurer_name, b.broker_name ?? null,
+            b.policy_type, b.insured_asset_type, b.coverage_amount, b.currency,
+            b.coverage_amount_ttd, b.premium_amount, b.premium_amount_ttd,
+            b.premium_frequency, b.start_date, b.expiry_date,
+            b.renewal_alert_days ?? 60, b.notes ?? null,
+          ],
+        ).then(r => r.rows[0]),
+      );
+      logger.info({ entity: 'FINANCE', action: 'INSURANCE_IMPORTED', user_id: ownerId, record_id: rec.id, source: 'LOCAL_SCRIPT' });
+      ok(res, rec, 201);
+    } finally { client.release(); }
+  } catch (e) { next(e); }
+});
+
 // ── POLICIES ──────────────────────────────────────────────────────────────────
 
 // GET /policies
@@ -246,6 +287,7 @@ insuranceRouter.patch('/policies/:id', async (req: Request, res: Response, next:
     if (!parsed.success) { err(res, 422, 'VALIDATION_ERROR', 'Request body validation failed.'); return; }
     const b = parsed.data;
     const fields = Object.keys(b) as (keyof typeof b)[];
+    const { ownerId } = req.rlsCtx;
 
     const client = await familyPool.connect();
     try {
@@ -256,10 +298,86 @@ insuranceRouter.patch('/policies/:id', async (req: Request, res: Response, next:
            WHERE id = $1 RETURNING *`,
           [req.params.id, ...fields.map(k => b[k])]
         );
-        return rows[0] ?? null;
+        const updated = rows[0] ?? null;
+        if (!updated) return null;
+
+        await c.query(
+          `INSERT INTO fin_insurance_policy_history
+             (policy_id, owner_id, as_of_date, coverage_amount_ttd, premium_amount_ttd, expiry_date)
+           VALUES ($1,$2,CURRENT_DATE,$3,$4,$5)`,
+          [
+            updated.id, ownerId,
+            updated.coverage_amount_ttd,
+            updated.premium_amount_ttd,
+            updated.expiry_date ?? null,
+          ],
+        );
+        return updated;
       });
       if (!rec) { err(res, 404, 'NOT_FOUND', 'Policy not found'); return; }
       ok(res, rec);
+    } finally { client.release(); }
+  } catch (e) { next(e); }
+});
+
+// ── GET /policies/:id/history ─────────────────────────────────────────────────
+
+const PolicyHistoryBackfillSchema = z.object({
+  as_of_date:          z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  coverage_amount_ttd: z.number().positive(),
+  premium_amount_ttd:  z.number().positive(),
+  expiry_date:         z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  notes:               z.string().max(2000).optional(),
+}).strict();
+
+insuranceRouter.get('/policies/:id/history', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const client = await familyPool.connect();
+    try {
+      const rows = await withOwnerRLS(client, req.rlsCtx, (c) =>
+        c.query(
+          `SELECT * FROM fin_insurance_policy_history WHERE policy_id = $1 ORDER BY as_of_date DESC, recorded_at DESC`,
+          [req.params.id],
+        ).then(r => r.rows),
+      );
+      ok(res, rows);
+    } finally { client.release(); }
+  } catch (e) { next(e); }
+});
+
+// ── POST /policies/:id/history (manual backfill) ──────────────────────────────
+
+insuranceRouter.post('/policies/:id/history', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const bodyParsed = PolicyHistoryBackfillSchema.safeParse(req.body);
+    if (!bodyParsed.success) { err(res, 422, 'VALIDATION_ERROR', 'Request body validation failed.'); return; }
+
+    const b = bodyParsed.data;
+    const { ownerId } = req.rlsCtx;
+
+    const client = await familyPool.connect();
+    try {
+      const row = await withOwnerRLS(client, req.rlsCtx, async (c) => {
+        const { rows: check } = await c.query(
+          `SELECT id FROM fin_insurance_policies WHERE id = $1`, [req.params.id]
+        );
+        if (!check.length) return null;
+
+        return c.query(
+          `INSERT INTO fin_insurance_policy_history
+             (policy_id, owner_id, as_of_date, coverage_amount_ttd, premium_amount_ttd, expiry_date, notes)
+           VALUES ($1,$2,$3,$4,$5,$6,$7)
+           RETURNING *`,
+          [
+            req.params.id, ownerId, b.as_of_date,
+            b.coverage_amount_ttd, b.premium_amount_ttd,
+            b.expiry_date ?? null, b.notes ?? null,
+          ],
+        ).then(r => r.rows[0]);
+      });
+      if (!row) { err(res, 404, 'NOT_FOUND', 'Policy not found'); return; }
+      logger.info({ entity: 'FINANCE', action: 'POLICY_HISTORY_BACKFILL', user_id: ownerId, record_id: req.params.id });
+      ok(res, row, 201);
     } finally { client.release(); }
   } catch (e) { next(e); }
 });

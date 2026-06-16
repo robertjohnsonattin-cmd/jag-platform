@@ -129,6 +129,7 @@ services:
       MINIO_ACCESS_KEY:           ${MINIO_ACCESS_KEY}
       MINIO_SECRET_KEY:           ${MINIO_SECRET_KEY}
       MINIO_BUCKET_STATEMENTS:    ${MINIO_BUCKET_STATEMENTS}
+      MINIO_AUDIT_TOKEN:          ${MINIO_AUDIT_TOKEN}
       PORT:                       "3000"
       NODE_ENV:                   "production"
     ports:

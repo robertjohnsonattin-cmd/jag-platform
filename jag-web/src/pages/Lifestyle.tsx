@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useTranslation } from 'react-i18next'
 
 function uuidv4(): string {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
@@ -69,6 +70,7 @@ const fmtNum = (n: number) => n.toLocaleString()
 // ── Add Programme Modal ────────────────────────────────────────────────────────
 
 function AddProgrammeModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
+  const { t } = useTranslation()
   const [form, setForm] = useState({
     programme_type: 'AIRLINE' as ProgType,
     provider_name: '',
@@ -106,22 +108,22 @@ function AddProgrammeModal({ onClose, onSaved }: { onClose: () => void; onSaved:
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
       <div className="bg-slate-800 rounded-xl w-full max-w-lg shadow-2xl">
         <div className="flex justify-between items-center px-6 py-4 border-b border-slate-700">
-          <h2 className="text-lg font-semibold">Add Loyalty Programme</h2>
+          <h2 className="text-lg font-semibold">{t('lifestyle.addProgramme')}</h2>
           <button onClick={onClose} className="text-slate-400 hover:text-white text-xl">✕</button>
         </div>
         <div className="p-6 space-y-4">
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs text-slate-400 mb-1">Type</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('crm.typeLabel')}</label>
               <select value={form.programme_type} onChange={e => set('programme_type', e.target.value)}
                 className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-sm">
-                {(Object.keys(PROG_LABELS) as ProgType[]).map(t => (
-                  <option key={t} value={t}>{PROG_ICONS[t]} {PROG_LABELS[t]}</option>
+                {(Object.keys(PROG_LABELS) as ProgType[]).map(pt => (
+                  <option key={pt} value={pt}>{PROG_ICONS[pt]} {t(`lifestyle.progTypes.${pt}`, PROG_LABELS[pt])}</option>
                 ))}
               </select>
             </div>
             <div>
-              <label className="block text-xs text-slate-400 mb-1">Provider Name *</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('lifestyle.providerNameStar')}</label>
               <input value={form.provider_name} onChange={e => set('provider_name', e.target.value)}
                 placeholder="e.g. Caribbean Airlines, Marriott"
                 className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-sm" />
@@ -129,12 +131,12 @@ function AddProgrammeModal({ onClose, onSaved }: { onClose: () => void; onSaved:
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs text-slate-400 mb-1">Membership Number</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('lifestyle.membershipNumber')}</label>
               <input value={form.membership_number} onChange={e => set('membership_number', e.target.value)}
                 className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-sm" />
             </div>
             <div>
-              <label className="block text-xs text-slate-400 mb-1">Tier / Status</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('lifestyle.tierStatus')}</label>
               <input value={form.tier} onChange={e => set('tier', e.target.value)}
                 placeholder="e.g. Gold, Platinum"
                 className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-sm" />
@@ -142,35 +144,35 @@ function AddProgrammeModal({ onClose, onSaved }: { onClose: () => void; onSaved:
           </div>
           <div className="grid grid-cols-3 gap-4">
             <div>
-              <label className="block text-xs text-slate-400 mb-1">Opening Points</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('lifestyle.openingPoints')}</label>
               <input type="number" min="0" value={form.points_balance} onChange={e => set('points_balance', e.target.value)}
                 placeholder="0"
                 className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-sm" />
             </div>
             <div>
-              <label className="block text-xs text-slate-400 mb-1">Opening Miles</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('lifestyle.openingMiles')}</label>
               <input type="number" min="0" value={form.miles_balance} onChange={e => set('miles_balance', e.target.value)}
                 placeholder="0"
                 className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-sm" />
             </div>
             <div>
-              <label className="block text-xs text-slate-400 mb-1">Expiry Date</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('lifestyle.expiryLabel')}</label>
               <input type="date" value={form.expiry_date} onChange={e => set('expiry_date', e.target.value)}
                 className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-sm" />
             </div>
           </div>
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Notes</label>
+            <label className="block text-xs text-slate-400 mb-1">{t('common.notes')}</label>
             <textarea value={form.notes} onChange={e => set('notes', e.target.value)} rows={2}
               className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-sm resize-none" />
           </div>
           {error && <p className="text-red-400 text-sm">{error}</p>}
         </div>
         <div className="flex justify-end gap-3 px-6 pb-5">
-          <button onClick={onClose} className="px-4 py-2 text-sm rounded bg-slate-700 hover:bg-slate-600">Cancel</button>
+          <button onClick={onClose} className="px-4 py-2 text-sm rounded bg-slate-700 hover:bg-slate-600">{t('common.cancel')}</button>
           <button onClick={submit} disabled={saving}
             className="px-4 py-2 text-sm rounded bg-blue-600 hover:bg-blue-500 disabled:opacity-50">
-            {saving ? 'Saving…' : 'Add Programme'}
+            {saving ? t('common.saving') : t('lifestyle.addProgrammeBtn')}
           </button>
         </div>
       </div>
@@ -181,6 +183,7 @@ function AddProgrammeModal({ onClose, onSaved }: { onClose: () => void; onSaved:
 // ── Edit Programme Modal ──────────────────────────────────────────────────────
 
 function EditProgrammeModal({ prog, onClose, onSaved }: { prog: LoyaltyProgramme; onClose: () => void; onSaved: () => void }) {
+  const { t } = useTranslation()
   const [form, setForm] = useState({
     tier: prog.tier ?? '',
     membership_number: prog.membership_number ?? '',
@@ -211,35 +214,35 @@ function EditProgrammeModal({ prog, onClose, onSaved }: { prog: LoyaltyProgramme
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
       <div className="bg-slate-800 rounded-xl w-full max-w-md shadow-2xl">
         <div className="flex justify-between items-center px-6 py-4 border-b border-slate-700">
-          <h2 className="text-lg font-semibold">Edit — {prog.provider_name}</h2>
+          <h2 className="text-lg font-semibold">{t('lifestyle.editProgramme', { name: prog.provider_name })}</h2>
           <button onClick={onClose} className="text-slate-400 hover:text-white text-xl">✕</button>
         </div>
         <div className="p-6 space-y-4">
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs text-slate-400 mb-1">Membership Number</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('lifestyle.membershipNumber')}</label>
               <input value={form.membership_number} onChange={e => set('membership_number', e.target.value)}
                 className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-sm" />
             </div>
             <div>
-              <label className="block text-xs text-slate-400 mb-1">Tier</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('lifestyle.tier')}</label>
               <input value={form.tier} onChange={e => set('tier', e.target.value)}
                 className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-sm" />
             </div>
           </div>
           <div className="grid grid-cols-3 gap-4">
             <div>
-              <label className="block text-xs text-slate-400 mb-1">Points Balance</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('lifestyle.pointsBalance')}</label>
               <input type="number" value={form.points_balance} onChange={e => set('points_balance', e.target.value)}
                 className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-sm" />
             </div>
             <div>
-              <label className="block text-xs text-slate-400 mb-1">Miles Balance</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('lifestyle.milesBalance')}</label>
               <input type="number" value={form.miles_balance} onChange={e => set('miles_balance', e.target.value)}
                 className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-sm" />
             </div>
             <div>
-              <label className="block text-xs text-slate-400 mb-1">Expiry Date</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('lifestyle.expiryLabel')}</label>
               <input type="date" value={form.expiry_date} onChange={e => set('expiry_date', e.target.value)}
                 className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-sm" />
             </div>
@@ -247,10 +250,10 @@ function EditProgrammeModal({ prog, onClose, onSaved }: { prog: LoyaltyProgramme
           {error && <p className="text-red-400 text-sm">{error}</p>}
         </div>
         <div className="flex justify-end gap-3 px-6 pb-5">
-          <button onClick={onClose} className="px-4 py-2 text-sm rounded bg-slate-700 hover:bg-slate-600">Cancel</button>
+          <button onClick={onClose} className="px-4 py-2 text-sm rounded bg-slate-700 hover:bg-slate-600">{t('common.cancel')}</button>
           <button onClick={submit} disabled={saving}
             className="px-4 py-2 text-sm rounded bg-blue-600 hover:bg-blue-500 disabled:opacity-50">
-            {saving ? 'Saving…' : 'Save Changes'}
+            {saving ? t('common.saving') : t('lifestyle.saveChanges')}
           </button>
         </div>
       </div>
@@ -261,6 +264,7 @@ function EditProgrammeModal({ prog, onClose, onSaved }: { prog: LoyaltyProgramme
 // ── Add Transaction Modal ─────────────────────────────────────────────────────
 
 function AddTransactionModal({ prog, onClose, onSaved }: { prog: LoyaltyProgramme; onClose: () => void; onSaved: () => void }) {
+  const { t } = useTranslation()
   const [form, setForm] = useState({
     transaction_date: today(),
     transaction_type: 'EARN' as TxType,
@@ -295,58 +299,58 @@ function AddTransactionModal({ prog, onClose, onSaved }: { prog: LoyaltyProgramm
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
       <div className="bg-slate-800 rounded-xl w-full max-w-md shadow-2xl">
         <div className="flex justify-between items-center px-6 py-4 border-b border-slate-700">
-          <h2 className="text-lg font-semibold">Add Transaction — {prog.provider_name}</h2>
+          <h2 className="text-lg font-semibold">{t('lifestyle.addTransactionTitle', { name: prog.provider_name })}</h2>
           <button onClick={onClose} className="text-slate-400 hover:text-white text-xl">✕</button>
         </div>
         <div className="p-6 space-y-4">
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs text-slate-400 mb-1">Date</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('lifestyle.dateLabel')}</label>
               <input type="date" value={form.transaction_date} onChange={e => set('transaction_date', e.target.value)}
                 className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-sm" />
             </div>
             <div>
-              <label className="block text-xs text-slate-400 mb-1">Type</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('crm.typeLabel')}</label>
               <select value={form.transaction_type} onChange={e => set('transaction_type', e.target.value)}
                 className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-sm">
-                {(Object.keys(TX_LABELS) as TxType[]).map(t => (
-                  <option key={t} value={t}>{TX_LABELS[t]}</option>
+                {(Object.keys(TX_LABELS) as TxType[]).map(tp => (
+                  <option key={tp} value={tp}>{t(`lifestyle.txTypes.${tp}`, TX_LABELS[tp])}</option>
                 ))}
               </select>
             </div>
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs text-slate-400 mb-1">Points</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('lifestyle.points')}</label>
               <input type="number" value={form.points_amount} onChange={e => set('points_amount', e.target.value)}
                 placeholder="0"
                 className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-sm" />
             </div>
             <div>
-              <label className="block text-xs text-slate-400 mb-1">Miles</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('lifestyle.miles')}</label>
               <input type="number" value={form.miles_amount} onChange={e => set('miles_amount', e.target.value)}
                 placeholder="0"
                 className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-sm" />
             </div>
           </div>
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Description *</label>
+            <label className="block text-xs text-slate-400 mb-1">{t('lifestyle.descriptionStar')}</label>
             <input value={form.description} onChange={e => set('description', e.target.value)}
               placeholder="e.g. CAL flight BW101 New York"
               className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-sm" />
           </div>
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Reference Number</label>
+            <label className="block text-xs text-slate-400 mb-1">{t('lifestyle.referenceNumber')}</label>
             <input value={form.reference_number} onChange={e => set('reference_number', e.target.value)}
               className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-sm" />
           </div>
           {error && <p className="text-red-400 text-sm">{error}</p>}
         </div>
         <div className="flex justify-end gap-3 px-6 pb-5">
-          <button onClick={onClose} className="px-4 py-2 text-sm rounded bg-slate-700 hover:bg-slate-600">Cancel</button>
+          <button onClick={onClose} className="px-4 py-2 text-sm rounded bg-slate-700 hover:bg-slate-600">{t('common.cancel')}</button>
           <button onClick={submit} disabled={saving}
             className="px-4 py-2 text-sm rounded bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50">
-            {saving ? 'Saving…' : 'Record Transaction'}
+            {saving ? t('common.saving') : t('lifestyle.recordTxBtn')}
           </button>
         </div>
       </div>
@@ -357,6 +361,7 @@ function AddTransactionModal({ prog, onClose, onSaved }: { prog: LoyaltyProgramm
 // ── Programme Detail Panel ────────────────────────────────────────────────────
 
 function ProgrammeDetail({ prog, onClose }: { prog: LoyaltyProgramme; onClose: () => void }) {
+  const { t } = useTranslation()
   const qc = useQueryClient()
   const [showEdit, setShowEdit] = useState(false)
   const [showAddTx, setShowAddTx] = useState(false)
@@ -377,18 +382,18 @@ function ProgrammeDetail({ prog, onClose }: { prog: LoyaltyProgramme; onClose: (
         <div>
           <div className="flex items-center gap-2 mb-1">
             <span className={`text-xs px-2 py-0.5 rounded ${PROG_COLORS[prog.programme_type]}`}>
-              {PROG_ICONS[prog.programme_type]} {PROG_LABELS[prog.programme_type]}
+              {PROG_ICONS[prog.programme_type]} {t(`lifestyle.progTypes.${prog.programme_type}`, PROG_LABELS[prog.programme_type])}
             </span>
             {prog.tier && <span className="text-xs bg-yellow-900 text-yellow-200 px-2 py-0.5 rounded">{prog.tier}</span>}
-            {isExpired && <span className="text-xs bg-red-900 text-red-300 px-2 py-0.5 rounded">Expired</span>}
-            {isExpiringSoon && <span className="text-xs bg-orange-900 text-orange-300 px-2 py-0.5 rounded">Expiring Soon</span>}
+            {isExpired && <span className="text-xs bg-red-900 text-red-300 px-2 py-0.5 rounded">{t('lifestyle.expiredBadge')}</span>}
+            {isExpiringSoon && <span className="text-xs bg-orange-900 text-orange-300 px-2 py-0.5 rounded">{t('lifestyle.expiringSoonBadge')}</span>}
           </div>
           <h3 className="text-xl font-bold">{prog.provider_name}</h3>
           {prog.membership_number && <p className="text-sm text-slate-400 mt-0.5">#{prog.membership_number}</p>}
         </div>
         <div className="flex gap-2">
           <button onClick={() => setShowEdit(true)}
-            className="text-xs px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded">Edit</button>
+            className="text-xs px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded">{t('common.edit')}</button>
           <button onClick={onClose} className="text-slate-400 hover:text-white text-xl px-1">✕</button>
         </div>
       </div>
@@ -397,38 +402,38 @@ function ProgrammeDetail({ prog, onClose }: { prog: LoyaltyProgramme; onClose: (
       <div className="grid grid-cols-3 gap-3 mb-6">
         <div className="bg-slate-700 rounded-lg p-3 text-center">
           <div className="text-2xl font-bold text-emerald-400">{fmtNum(prog.points_balance)}</div>
-          <div className="text-xs text-slate-400 mt-0.5">Points</div>
+          <div className="text-xs text-slate-400 mt-0.5">{t('lifestyle.points')}</div>
         </div>
         <div className="bg-slate-700 rounded-lg p-3 text-center">
           <div className="text-2xl font-bold text-blue-400">{fmtNum(prog.miles_balance)}</div>
-          <div className="text-xs text-slate-400 mt-0.5">Miles</div>
+          <div className="text-xs text-slate-400 mt-0.5">{t('lifestyle.miles')}</div>
         </div>
         <div className="bg-slate-700 rounded-lg p-3 text-center">
           <div className={`text-lg font-bold ${isExpired ? 'text-red-400' : isExpiringSoon ? 'text-orange-400' : 'text-slate-200'}`}>
             {prog.expiry_date ? fmtDate(prog.expiry_date) : '—'}
           </div>
-          <div className="text-xs text-slate-400 mt-0.5">Expiry</div>
+          <div className="text-xs text-slate-400 mt-0.5">{t('lifestyle.expiryLabel')}</div>
         </div>
       </div>
 
       {/* Transactions */}
       <div className="flex justify-between items-center mb-3">
-        <h4 className="text-sm font-semibold text-slate-300">Transaction History</h4>
+        <h4 className="text-sm font-semibold text-slate-300">{t('lifestyle.txHistory')}</h4>
         <button onClick={() => setShowAddTx(true)}
-          className="text-xs px-3 py-1.5 bg-emerald-700 hover:bg-emerald-600 rounded">+ Add Transaction</button>
+          className="text-xs px-3 py-1.5 bg-emerald-700 hover:bg-emerald-600 rounded">{t('lifestyle.addTxShort')}</button>
       </div>
 
       {isLoading ? (
-        <p className="text-slate-500 text-sm">Loading…</p>
+        <p className="text-slate-500 text-sm">{t('common.loading')}</p>
       ) : txs.length === 0 ? (
-        <p className="text-slate-500 text-sm italic">No transactions recorded yet.</p>
+        <p className="text-slate-500 text-sm italic">{t('lifestyle.noTxs')}</p>
       ) : (
         <div className="space-y-1 max-h-64 overflow-y-auto">
           {txs.map(tx => (
             <div key={tx.id} className="flex items-center justify-between py-2 px-3 bg-slate-700/50 rounded text-sm">
               <div className="flex items-center gap-3">
                 <span className="text-slate-400 text-xs w-24 shrink-0">{fmtDate(tx.transaction_date)}</span>
-                <span className={`text-xs font-medium ${TX_COLORS[tx.transaction_type]}`}>{TX_LABELS[tx.transaction_type]}</span>
+                <span className={`text-xs font-medium ${TX_COLORS[tx.transaction_type]}`}>{t(`lifestyle.txTypes.${tx.transaction_type}`, TX_LABELS[tx.transaction_type])}</span>
                 <span className="text-slate-300">{tx.description}</span>
               </div>
               <div className="flex gap-4 text-xs shrink-0">
@@ -467,6 +472,7 @@ function ProgrammeDetail({ prog, onClose }: { prog: LoyaltyProgramme; onClose: (
 // ── Loyalty Tab ────────────────────────────────────────────────────────────────
 
 function LoyaltyTab() {
+  const { t } = useTranslation()
   const qc = useQueryClient()
   const [showAdd, setShowAdd] = useState(false)
   const [selected, setSelected] = useState<LoyaltyProgramme | null>(null)
@@ -491,48 +497,48 @@ function LoyaltyTab() {
       <div className="grid grid-cols-3 gap-4">
         <div className="bg-slate-800 rounded-xl p-4">
           <div className="text-2xl font-bold text-emerald-400">{fmtNum(totalPoints)}</div>
-          <div className="text-xs text-slate-400 mt-1">Total Points</div>
+          <div className="text-xs text-slate-400 mt-1">{t('lifestyle.totalPoints')}</div>
         </div>
         <div className="bg-slate-800 rounded-xl p-4">
           <div className="text-2xl font-bold text-blue-400">{fmtNum(totalMiles)}</div>
-          <div className="text-xs text-slate-400 mt-1">Total Miles</div>
+          <div className="text-xs text-slate-400 mt-1">{t('lifestyle.totalMiles')}</div>
         </div>
         <div className="bg-slate-800 rounded-xl p-4">
           <div className={`text-2xl font-bold ${expiringSoon.length > 0 ? 'text-orange-400' : 'text-slate-400'}`}>
             {expiringSoon.length}
           </div>
-          <div className="text-xs text-slate-400 mt-1">Expiring in 90 days</div>
+          <div className="text-xs text-slate-400 mt-1">{t('lifestyle.expiring90d')}</div>
         </div>
       </div>
 
       {expiringSoon.length > 0 && (
         <div className="bg-orange-900/30 border border-orange-700 rounded-lg px-4 py-3 text-sm text-orange-300">
-          ⚠️ {expiringSoon.map(p => p.provider_name).join(', ')} — points/miles expiring soon!
+          ⚠️ {expiringSoon.map(p => p.provider_name).join(', ')} {t('lifestyle.expiringSoonAlert')}
         </div>
       )}
 
       {/* Filter + Add */}
       <div className="flex justify-between items-center">
         <div className="flex gap-2 flex-wrap">
-          {(['ALL', ...Object.keys(PROG_LABELS)] as (ProgType | 'ALL')[]).map(t => (
-            <button key={t} onClick={() => setFilterType(t)}
+          {(['ALL', ...Object.keys(PROG_LABELS)] as (ProgType | 'ALL')[]).map(pt => (
+            <button key={pt} onClick={() => setFilterType(pt)}
               className={`text-xs px-3 py-1.5 rounded-full transition-colors ${
-                filterType === t ? 'bg-blue-600 text-white' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                filterType === pt ? 'bg-blue-600 text-white' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
               }`}>
-              {t === 'ALL' ? 'All' : `${PROG_ICONS[t as ProgType]} ${PROG_LABELS[t as ProgType]}`}
+              {pt === 'ALL' ? t('lifestyle.allFilter') : `${PROG_ICONS[pt as ProgType]} ${t(`lifestyle.progTypes.${pt}`, PROG_LABELS[pt as ProgType])}`}
             </button>
           ))}
         </div>
         <button onClick={() => setShowAdd(true)}
           className="text-sm px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg font-medium">
-          + Add Programme
+          {t('lifestyle.addProgrammeShort')}
         </button>
       </div>
 
       {isLoading ? (
-        <p className="text-slate-500 text-sm">Loading…</p>
+        <p className="text-slate-500 text-sm">{t('common.loading')}</p>
       ) : filtered.length === 0 ? (
-        <p className="text-slate-500 text-sm italic">No loyalty programmes yet.</p>
+        <p className="text-slate-500 text-sm italic">{t('lifestyle.noProgrammes')}</p>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {filtered.map(p => {
@@ -547,7 +553,7 @@ function LoyaltyTab() {
                   <div>
                     <div className="flex items-center gap-2 mb-1">
                       <span className={`text-xs px-2 py-0.5 rounded ${PROG_COLORS[p.programme_type]}`}>
-                        {PROG_ICONS[p.programme_type]} {PROG_LABELS[p.programme_type]}
+                        {PROG_ICONS[p.programme_type]} {t(`lifestyle.progTypes.${p.programme_type}`, PROG_LABELS[p.programme_type])}
                       </span>
                       {p.tier && <span className="text-xs bg-yellow-900 text-yellow-200 px-2 py-0.5 rounded">{p.tier}</span>}
                     </div>
@@ -555,20 +561,20 @@ function LoyaltyTab() {
                     {p.membership_number && <div className="text-xs text-slate-400">#{p.membership_number}</div>}
                   </div>
                   <div className="text-right">
-                    {expired && <div className="text-xs text-red-400 mb-1">Expired</div>}
-                    {expiring && <div className="text-xs text-orange-400 mb-1">Expiring soon</div>}
+                    {expired && <div className="text-xs text-red-400 mb-1">{t('lifestyle.expiredBadge')}</div>}
+                    {expiring && <div className="text-xs text-orange-400 mb-1">{t('lifestyle.expiringSoonShort')}</div>}
                     {p.expiry_date && <div className="text-xs text-slate-400">{fmtDate(p.expiry_date)}</div>}
                   </div>
                 </div>
                 <div className="flex gap-6">
                   <div>
                     <div className="text-lg font-bold text-emerald-400">{fmtNum(p.points_balance)}</div>
-                    <div className="text-xs text-slate-400">Points</div>
+                    <div className="text-xs text-slate-400">{t('lifestyle.points')}</div>
                   </div>
                   {p.miles_balance > 0 && (
                     <div>
                       <div className="text-lg font-bold text-blue-400">{fmtNum(p.miles_balance)}</div>
-                      <div className="text-xs text-slate-400">Miles</div>
+                      <div className="text-xs text-slate-400">{t('lifestyle.miles')}</div>
                     </div>
                   )}
                 </div>
@@ -598,6 +604,7 @@ function isExpiringSoonFn(date: string) {
 // ── Add Tracker Entry Modal ────────────────────────────────────────────────────
 
 function AddTrackerModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
+  const { t } = useTranslation()
   const [form, setForm] = useState({
     entry_date: today(),
     metric_type: 'WEIGHT_KG' as MetricType,
@@ -635,56 +642,56 @@ function AddTrackerModal({ onClose, onSaved }: { onClose: () => void; onSaved: (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
       <div className="bg-slate-800 rounded-xl w-full max-w-md shadow-2xl">
         <div className="flex justify-between items-center px-6 py-4 border-b border-slate-700">
-          <h2 className="text-lg font-semibold">Log Health Metric</h2>
+          <h2 className="text-lg font-semibold">{t('lifestyle.logHealthMetric')}</h2>
           <button onClick={onClose} className="text-slate-400 hover:text-white text-xl">✕</button>
         </div>
         <div className="p-6 space-y-4">
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs text-slate-400 mb-1">Date</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('lifestyle.dateLabel')}</label>
               <input type="date" value={form.entry_date} onChange={e => set('entry_date', e.target.value)}
                 className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-sm" />
             </div>
             <div>
-              <label className="block text-xs text-slate-400 mb-1">Metric</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('lifestyle.metricLabel')}</label>
               <select value={form.metric_type} onChange={e => handleMetricChange(e.target.value as MetricType)}
                 className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-sm">
                 {(Object.keys(METRIC_LABELS) as MetricType[]).map(m => (
-                  <option key={m} value={m}>{METRIC_ICONS[m]} {METRIC_LABELS[m]}</option>
+                  <option key={m} value={m}>{METRIC_ICONS[m]} {t(`lifestyle.metricTypes.${m}`, METRIC_LABELS[m])}</option>
                 ))}
               </select>
             </div>
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs text-slate-400 mb-1">Value *</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('lifestyle.valueStar')}</label>
               <input type="number" step="any" value={form.value} onChange={e => set('value', e.target.value)}
                 className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-sm" />
             </div>
             <div>
-              <label className="block text-xs text-slate-400 mb-1">Unit</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('lifestyle.unitLabel')}</label>
               <input value={form.unit} onChange={e => set('unit', e.target.value)}
                 className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-sm" />
             </div>
           </div>
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Source</label>
+            <label className="block text-xs text-slate-400 mb-1">{t('lifestyle.sourceLabel')}</label>
             <input value={form.source} onChange={e => set('source', e.target.value)}
               placeholder="e.g. Fitbit, Manual, Doctor"
               className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-sm" />
           </div>
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Notes</label>
+            <label className="block text-xs text-slate-400 mb-1">{t('common.notes')}</label>
             <textarea value={form.notes} onChange={e => set('notes', e.target.value)} rows={2}
               className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-sm resize-none" />
           </div>
           {error && <p className="text-red-400 text-sm">{error}</p>}
         </div>
         <div className="flex justify-end gap-3 px-6 pb-5">
-          <button onClick={onClose} className="px-4 py-2 text-sm rounded bg-slate-700 hover:bg-slate-600">Cancel</button>
+          <button onClick={onClose} className="px-4 py-2 text-sm rounded bg-slate-700 hover:bg-slate-600">{t('common.cancel')}</button>
           <button onClick={submit} disabled={saving}
             className="px-4 py-2 text-sm rounded bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50">
-            {saving ? 'Saving…' : 'Log Entry'}
+            {saving ? t('common.saving') : t('lifestyle.logEntryBtn')}
           </button>
         </div>
       </div>
@@ -695,6 +702,7 @@ function AddTrackerModal({ onClose, onSaved }: { onClose: () => void; onSaved: (
 // ── Tracker Tab ────────────────────────────────────────────────────────────────
 
 function TrackerTab() {
+  const { t } = useTranslation()
   const qc = useQueryClient()
   const [showAdd, setShowAdd] = useState(false)
   const [filterMetric, setFilterMetric] = useState<MetricType | 'ALL'>('ALL')
@@ -733,7 +741,7 @@ function TrackerTab() {
               <div key={m} className="bg-slate-800 rounded-xl p-3">
                 <div className="text-lg">{METRIC_ICONS[m]}</div>
                 <div className="text-lg font-bold text-slate-100 mt-1">{e.value} <span className="text-sm text-slate-400">{e.unit}</span></div>
-                <div className="text-xs text-slate-400 mt-0.5">{METRIC_LABELS[m]}</div>
+                <div className="text-xs text-slate-400 mt-0.5">{t(`lifestyle.metricTypes.${m}`, METRIC_LABELS[m])}</div>
                 <div className="text-xs text-slate-500">{fmtDate(e.entry_date)}</div>
               </div>
             )
@@ -749,32 +757,32 @@ function TrackerTab() {
               className={`text-xs px-3 py-1.5 rounded-full transition-colors ${
                 filterMetric === m ? 'bg-blue-600 text-white' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
               }`}>
-              {m === 'ALL' ? 'All Metrics' : `${METRIC_ICONS[m as MetricType]} ${METRIC_LABELS[m as MetricType]}`}
+              {m === 'ALL' ? t('lifestyle.allMetrics') : `${METRIC_ICONS[m as MetricType]} ${t(`lifestyle.metricTypes.${m}`, METRIC_LABELS[m as MetricType])}`}
             </button>
           ))}
         </div>
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2">
-            <label className="text-xs text-slate-400">From</label>
+            <label className="text-xs text-slate-400">{t('common.from')}</label>
             <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)}
               className="bg-slate-700 border border-slate-600 rounded px-2 py-1.5 text-sm" />
           </div>
           <div className="flex items-center gap-2">
-            <label className="text-xs text-slate-400">To</label>
+            <label className="text-xs text-slate-400">{t('common.to')}</label>
             <input type="date" value={toDate} onChange={e => setToDate(e.target.value)}
               className="bg-slate-700 border border-slate-600 rounded px-2 py-1.5 text-sm" />
           </div>
           <button onClick={() => setShowAdd(true)}
             className="text-sm px-4 py-2 bg-emerald-600 hover:bg-emerald-500 rounded-lg font-medium">
-            + Log Metric
+            {t('lifestyle.logMetricShort')}
           </button>
         </div>
       </div>
 
       {isLoading ? (
-        <p className="text-slate-500 text-sm">Loading…</p>
+        <p className="text-slate-500 text-sm">{t('common.loading')}</p>
       ) : entries.length === 0 ? (
-        <p className="text-slate-500 text-sm italic">No health entries yet.</p>
+        <p className="text-slate-500 text-sm italic">{t('lifestyle.noEntries')}</p>
       ) : (
         <div className="space-y-4">
           {Object.entries(grouped)
@@ -786,10 +794,10 @@ function TrackerTab() {
                   {dayEntries.map(e => (
                     <div key={e.id} className="flex items-center gap-4 bg-slate-800 rounded-lg px-4 py-2.5 text-sm">
                       <span className="text-base">{METRIC_ICONS[e.metric_type]}</span>
-                      <span className="text-slate-300 w-48 shrink-0">{METRIC_LABELS[e.metric_type]}</span>
+                      <span className="text-slate-300 w-48 shrink-0">{t(`lifestyle.metricTypes.${e.metric_type}`, METRIC_LABELS[e.metric_type])}</span>
                       <span className="font-semibold text-white">{e.value}</span>
                       <span className="text-slate-400">{e.unit}</span>
-                      {e.source && <span className="text-xs text-slate-500 ml-auto">via {e.source}</span>}
+                      {e.source && <span className="text-xs text-slate-500 ml-auto">{t('lifestyle.viaSource', { source: e.source })}</span>}
                       {e.notes && <span className="text-xs text-slate-500 italic">{e.notes}</span>}
                     </div>
                   ))}
@@ -815,26 +823,27 @@ function TrackerTab() {
 type Tab = 'loyalty' | 'tracker'
 
 export default function Lifestyle() {
+  const { t } = useTranslation()
   const [tab, setTab] = useState<Tab>('loyalty')
 
   return (
     <div>
       <div className="flex justify-between items-center mb-6">
         <div>
-          <h1 className="text-2xl font-bold">JAG Lifestyle</h1>
-          <p className="text-slate-400 text-sm mt-1">Loyalty programmes & health tracker</p>
+          <h1 className="text-2xl font-bold">{t('lifestyle.title')}</h1>
+          <p className="text-slate-400 text-sm mt-1">{t('lifestyle.subtitle')}</p>
         </div>
       </div>
 
       {/* Tab bar */}
       <div className="flex gap-1 mb-6 bg-slate-800 rounded-lg p-1 w-fit">
         {([
-          ['loyalty', '⭐ Loyalty Programmes'],
-          ['tracker', '❤️ Health Tracker'],
-        ] as [Tab, string][]).map(([t, label]) => (
-          <button key={t} onClick={() => setTab(t)}
+          ['loyalty', t('lifestyle.tabLoyalty')],
+          ['tracker', t('lifestyle.tabTracker')],
+        ] as [Tab, string][]).map(([tb, label]) => (
+          <button key={tb} onClick={() => setTab(tb)}
             className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-              tab === t ? 'bg-blue-600 text-white' : 'text-slate-300 hover:text-white'
+              tab === tb ? 'bg-blue-600 text-white' : 'text-slate-300 hover:text-white'
             }`}>
             {label}
           </button>

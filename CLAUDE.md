@@ -1,7 +1,7 @@
 # JAG Integrated Business Platform — Claude Session Context
 
 **Owner:** Robert Johnson-Attin | Barataria, Trinidad & Tobago
-**Architecture:** v1.9 | **Current Phase:** ALL PHASES COMPLETE — in production | **Updated:** 2026-06-12 (session 2)
+**Architecture:** v1.9 | **Current Phase:** ALL PHASES COMPLETE — in production | **Updated:** 2026-06-15 (session 9)
 
 ---
 
@@ -38,7 +38,7 @@
 | Web server | Caddy + Let's Encrypt + Cloudflare DNS-01 wildcard certs |
 | Auth | Keycloak 26.x (self-hosted), realm: `jag`, client: `jag-api` |
 | Object storage | MinIO (self-hosted) |
-| Frontend | React 18 + TypeScript + Vite + TailwindCSS + React Query + Keycloak JS adapter |
+| Frontend | React 18 + TypeScript + Vite + TailwindCSS + React Query + Keycloak JS adapter + react-i18next (en / zh-CN) |
 | AI | Ollama on main Windows workstation (NOT Dell Inspiron) |
 | Observability | Loki + Grafana, 14-day retention, structured JSON logs |
 | Migrations | node-pg-migrate on all five databases |
@@ -111,6 +111,19 @@ Custom `app.*` GUC parameters revert to `''` (empty string) **not NULL** at sess
 ### node-pg numeric types
 PostgreSQL `numeric` / `decimal` columns arrive in Node.js as **strings**, not numbers. Always wrap with `parseFloat(String(value ?? 0))` before arithmetic — using `+` on two pg numeric values concatenates strings instead of adding numbers.
 
+### React date inputs — PG DATE/TIMESTAMP values
+PostgreSQL `DATE`/`TIMESTAMP` columns may arrive from the API as ISO datetime strings (`'2025-12-31T00:00:00.000Z'`). A browser `<input type="date">` cannot display ISO datetime format — it shows empty placeholder but still submits the full string, failing Zod's `^\d{4}-\d{2}-\d{2}$` regex.
+
+**Always** initialize date-input state by slicing to 10 chars and guard on submit:
+```tsx
+// CORRECT
+const [maturity, setMaturity] = useState(inv.maturity_date ? inv.maturity_date.slice(0, 10) : '')
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
+// in mutationFn:
+maturity_date: (maturity && DATE_RE.test(maturity)) ? maturity : undefined,
+```
+Apply to every date field: `purchase_date`, `maturity_date`, `expiry_date`, `as_of_date`, etc.
+
 ### Dashboard query limits
 `jag-web/src/pages/Dashboard.tsx` requests properties with `limit: 100` (backend max is 500 per `PropertiesQuerySchema`). Never raise Dashboard limit above 500 without also raising the backend Zod schema.
 
@@ -150,6 +163,60 @@ Step 6 (ZAP baseline) fires automatically when `ZAP_SCAN_PASSWORD` env var is se
 - Caddy Caddyfile already has the `jag-web` block
 - `docker-compose.yml` Caddy service has volume mount: `/opt/jag/jag-web/dist:/opt/jag/jag-web/dist:ro`
 - If Caddy container needs recreating after docker-compose.yml change: `docker compose up -d --force-recreate caddy`
+- **Docker overlayfs bind-mount masking (2026-06-13):** If frontend deploys successfully (files in `/opt/jag/jag-web/dist` on host) but site serves 404, the Caddy container's overlayfs layer is shadowing the bind mount. Fix: `docker compose up -d --force-recreate caddy`. Root cause was the image not having the mount path pre-declared — fixed by adding `RUN mkdir -p /opt/jag/jag-web/dist` to `jag-infra/caddy/Dockerfile`.
+
+### MinIO — critical operational notes
+
+**jag_app MinIO user is a separate IAM user, NOT the root user.** It must be created explicitly after any MinIO data wipe or volume loss:
+```bash
+MINIO_ROOT_PASSWORD=<pw> MINIO_ROOT_USER=jag_minio_admin \
+  mc admin user add jagadmin aVl4SrRl0YtilT55zCNe <secret>
+mc admin policy attach jagadmin jag-app-buckets --user aVl4SrRl0YtilT55zCNe
+```
+
+**IAM policy** `jag-app-buckets` restricts jag_app to the 4 authorised buckets only. Recreate with:
+```bash
+MINIO_ROOT_PASSWORD=<pw> JAG_APP_ACCESS_KEY=aVl4SrRl0YtilT55zCNe \
+  bash /opt/jag/jag-infra/scripts/setup-minio-policy.sh
+```
+
+**SSE-S3 encryption** — all 4 buckets encrypted at rest via `MINIO_KMS_SECRET_KEY` in docker-compose.yml env. Key is `jag-sse-key:Zv/jb8tPW1FkuO6drbKQuKVui0ZxEpTV6zpVYFJ3Zf0=`. If rotated, existing objects cannot be decrypted.
+
+**Audit log** — MinIO sends every file operation (PUT/GET/DELETE) to `http://jag-api:3000/internal/minio-audit` via `audit_webhook:loki`. Secured by `Bearer $MINIO_AUDIT_TOKEN`. Events appear in Grafana/Loki under `entity="MINIO_AUDIT"`. Config survives container restarts (stored in MinIO's internal KV).
+
+**Stale statement cleanup** — VM cron at 07:00 UTC (03:00 TT) runs `cleanup-stale-statements.sh`. Deletes PENDING `fin_bank_statement_jobs` older than 7 days + their MinIO objects. Logs to `/var/log/jag-stmt-cleanup.log`.
+
+### Bank statements — Ollama batch pipeline
+- Uploaded via Finance → Bank Statements tab (drag-and-drop, multi-file, per-file account assignment)
+- Files stored in `jag-bank-statements` bucket; job record in `fin_bank_statement_jobs` (`jag_family` DB)
+- Processed by `scripts/ollama-batch/` via Windows Task Scheduler at 02:00 TT; SSH-tunnels to VM on ports 15432→5432 and 19000→9000
+- **`DRY_RUN=true`** in `.env.ollama-batch` — flip to `false` after first real statement is uploaded and reviewed
+- Batch deletes MinIO object after COMPLETE/PARTIAL/FAILED; manual delete available via Delete button in UI
+- Internal API route: `/internal/minio-audit` — NOT under `/api/v1/`; no Keycloak auth; Docker-network-only
+
+### Financial document extraction — two-path architecture
+All financial documents (loan statements, investment portfolios, insurance policies) support two extraction paths:
+
+**Path 1 — Cloud upload (browser):** Finance → Documents tab → drag-and-drop → file stored in `jag-documents` bucket → Ollama batch at 02:00 TT extracts data → job status goes to `REVIEW` → Robert reviews extracted JSON in UI → Approve & Import writes to target table → MinIO object auto-deleted. Table: `fin_document_jobs` (`jag_family`). Route: `routes/finance/document-jobs.ts`.
+
+**Path 2 — Local script (hard drive):** `node dist/extract.js --type <loan|investment|insurance|bank-statement> --file "C:/JAG Filing/..."` from `scripts/doc-import/`. Ollama reads the file locally → POST extracted data to API `/import` endpoint → DB written directly. **File never leaves the local machine.** Uses Keycloak ROPC (username+password grant) for auth; token cached with 30s early-expiry buffer. Env: `scripts/doc-import/.env.doc-import`.
+
+**fin_document_jobs table** (`jag_family`) — tracks Path 1 jobs:
+- `doc_type`: `LOAN | INVESTMENT | INSURANCE`
+- `status`: `PENDING → PROCESSING → REVIEW → APPROVED | FAILED`
+- `extracted_data JSONB` — Ollama output stored here until approved
+- `target_record_ids UUID[]` — IDs of records created in target table on approval
+- RLS: `owner_id = NULLIF(current_setting('app.current_owner_id', true), '')::uuid`
+
+**Path 2 /import endpoints (idempotency_key required on all):**
+- `POST /finance/loans/import` → `fin_mortgages_loans`
+- `POST /finance/investments/import` → `fin_investments` (accepts `{ items: [] }` for multi-holding)
+- `POST /finance/insurance/policies/import` → `fin_insurance_policies`
+- `POST /finance/bank-statements/import` → `fin_transactions` + `fin_pending_review_queue`
+
+**ANNUITY** added as valid `investment_type` to `fin_investments` CHECK constraint (migration 008).
+
+**Ollama prompts** — `scripts/ollama-batch/index.ts` has `DOC_PROMPTS` for `LOAN`, `INVESTMENT`, `INSURANCE`; `scripts/doc-import/src/extract.ts` has matching per-type prompts for the local path.
 
 ---
 
@@ -165,6 +232,14 @@ Step 6 (ZAP baseline) fires automatically when `ZAP_SCAN_PASSWORD` env var is se
 | DRAGONBRIDGE | `00000000-0000-0000-0001-000000000006` |
 | NLCB | `00000000-0000-0000-0001-000000000007` |
 | CONSOLIDATED (net worth) | `00000000-0000-0000-0000-000000000000` |
+| Personal — Robert | `00000000-0000-0000-0001-000000000008` |
+| Isabella Johnson-Attin | `00000000-0000-0000-0001-000000000009` |
+| Phillip Ajack Johnson-Attin | `00000000-0000-0000-0001-000000000010` |
+| Brian Johnson-Attin | `00000000-0000-0000-0001-000000000011` |
+| Zhanghua Chang | `00000000-0000-0000-0001-000000000012` |
+| Theresa Johnson-Attin | `00000000-0000-0000-0001-000000000013` |
+
+**Note:** UUIDs 008–013 are personal/family owner entities used in `fin_accounts`, `fin_investments`, `fin_insurance_policies`, and `fin_mortgages_loans` (`owner_entity_id` grouping field only — no FK to tenants table, no RLS tenant scope, `jag_family` DB only).
 
 ---
 
@@ -210,6 +285,9 @@ Step 6 (ZAP baseline) fires automatically when `ZAP_SCAN_PASSWORD` env var is se
 | jag-api client secret | `FIjMqEPT35gr3TRvh6FDdCTnMAX2FAGMjTVHuljqcBU` |
 | PG superuser | `postgres` / `PgSuperAdmin2026` |
 | jag_app PG user | `fz4liKWoRn0a81GluZxI9pIHEacrBN5F` |
+| MinIO root | `jag_minio_admin` / `EsvMOHas4ASnWY9f1M9rTV2rQByRsqAz` (admin only — console + mc) |
+| MinIO jag_app | access key `aVl4SrRl0YtilT55zCNe` / secret `gjdzq9IH8IZM0MSlazE8szxH67kz2VYtbWavQe29` (scoped to 4 JAG buckets via `jag-app-buckets` policy) |
+| MinIO audit token | stored in VM `.env` as `MINIO_AUDIT_TOKEN` — shared secret for MinIO→jag-api webhook |
 
 ---
 
@@ -305,6 +383,14 @@ Step 6 (ZAP baseline) fires automatically when `ZAP_SCAN_PASSWORD` env var is se
 | DocVault routes | `routes/docvault/` | Document management |
 | Succession routes | `routes/succession/` | Succession planning |
 | Family routes | `routes/family/` | Family module |
+| Finance bank statements | `routes/finance/bank-statements.ts` | Upload, queue, list, delete jobs; MinIO storage; `fin_bank_statement_jobs` table; `POST /import` for Path 2 local script |
+| Finance document jobs | `routes/finance/document-jobs.ts` | Path 1 cloud upload → REVIEW → approve; writes to loans/investments/insurance on approve; auto-deletes MinIO object |
+| Finance /import endpoints | `bank-statements.ts`, `loans.ts`, `investments.ts`, `insurance.ts` | Path 2 direct JSON import from local script; all require `idempotency_key` |
+| Finance investment valuations | `routes/finance/investments.ts` | `GET /:id/valuations` — history sorted desc by as_of_date; `POST /:id/valuations` — manual historical backfill; auto-insert valuation row on every PATCH to `fin_investments` (same `withOwnerRLS` callback); table `fin_investment_valuations` (migration 009 jag_family) |
+| Finance loan balance history | `routes/finance/loans.ts` | `GET /:id/history`; `POST /:id/history` (manual backfill); auto-insert into `fin_loan_balance_history` on every PATCH; table (migration 010 jag_family) |
+| Finance insurance policy history | `routes/finance/insurance.ts` | `GET /policies/:id/history`; `POST /policies/:id/history` (manual backfill); auto-insert into `fin_insurance_policy_history` on every PATCH; table (migration 011 jag_family) |
+| Property valuation history | `routes/properties/properties.ts` | `GET /:id/valuation-history`; `POST /:id/valuation-history` (manual backfill); auto-insert into `prop_valuation_history` only when `current_valuation` is in PATCH body; table (migration 012 jag_properties) |
+| Internal MinIO audit webhook | `routes/internal/minio-audit.ts` | Receives MinIO `audit_webhook:loki` POSTs; validates `Bearer $MINIO_AUDIT_TOKEN`; logs to Loki via structured logger; mounted at `/internal/minio-audit` (no Keycloak, Docker-network-only) |
 
 ### Phase 7 Migrations (jag_commercial)
 
@@ -323,6 +409,10 @@ Step 6 (ZAP baseline) fires automatically when `ZAP_SCAN_PASSWORD` env var is se
 | File | Changes |
 |---|---|
 | `007_expense_receipt_bucket.sql` | MinIO bucket config for expense receipts |
+| `008_document_jobs.sql` | ANNUITY added to `fin_investments` investment_type CHECK; `fin_document_jobs` table + RLS policy |
+| `009_investment_valuations.sql` | `fin_investment_valuations` append-only table; FK → `fin_investments(id) ON DELETE CASCADE`; indexes on `(investment_id, as_of_date DESC)` and `(owner_id, as_of_date DESC)`; RLS using `NULLIF(current_setting('app.current_owner_id', true), '')::uuid` |
+| `010_loan_balance_history.sql` | `fin_loan_balance_history` append-only table; FK → `fin_mortgages_loans(id) ON DELETE CASCADE`; tracks outstanding_balance, interest_rate, monthly_payment; same RLS + index pattern |
+| `011_insurance_policy_history.sql` | `fin_insurance_policy_history` append-only table; FK → `fin_insurance_policies(id) ON DELETE CASCADE`; tracks coverage_amount_ttd, premium_amount_ttd, expiry_date; same RLS + index pattern |
 
 ### Phase 7 Migrations (jag_properties)
 
@@ -338,6 +428,24 @@ Step 6 (ZAP baseline) fires automatically when `ZAP_SCAN_PASSWORD` env var is se
 | `009_units.sql` | prop_units table (property sub-unit tracking) |
 | `010_mortgage_last_modified.sql` | last_modified_at, last_modified_by on mortgage table |
 | `011_rent_payment_proof.sql` | proof_photo_url, proof_uploaded_at, proof_uploaded_by on rent payments; receipt token for shareable links |
+| `012_valuation_history.sql` | `prop_valuation_history` append-only table; FK → `prop_properties(id) ON DELETE CASCADE`; tracks valuation_ttd; same RLS + index pattern |
+
+### VM Cron Scripts (`jag-infra/scripts/`)
+
+| Script | Schedule (UTC) | Schedule (TT) | Purpose |
+|---|---|---|---|
+| `backup-databases.sh` | 02:00 | 22:00 prev. day | pg_dump all 5 DBs |
+| `fx-rates-sync.sh` | 10:00 | 06:00 | Seed USD + CNY → TTD rates from open.er-api.com |
+| `cleanup-stale-statements.sh` | 07:00 | 03:00 | Delete PENDING bank statement jobs + MinIO objects older than 7 days |
+| `setup-minio-policy.sh` | one-time | — | Create `jag-app-buckets` IAM policy + attach to jag_app user; re-run after MinIO data wipe |
+| `fdw-rotate-password.sh` | manual | — | Resync FDW USER MAPPING passwords after jag_app PG credential rotation |
+
+### Local Extraction Script (`scripts/doc-import/`)
+Path 2 local extraction — reads PDFs from local hard drive, Ollama extracts, posts to API. **File never uploaded to cloud.**
+- Build: `npm run build` in `scripts/doc-import/`
+- Usage: `node dist/extract.js --type <bank-statement|loan|investment|insurance> --file "C:/JAG Filing/..." [--entity <uuid>] [--account <uuid>] [--dry-run]`
+- Config: `scripts/doc-import/.env.doc-import` — `KC_USERNAME`, `KC_PASSWORD` (never commit), `JAG_API_URL`, `OLLAMA_URL`, `OLLAMA_MODEL`
+- Auth: Keycloak ROPC (password grant) — token cached per run with 30s early-expiry buffer
 
 ### Vehicle Owner Options (VEHICLE_OWNER_OPTIONS const)
 `JAG Holdings`, `JABCO`, `JAG Properties`, `JAG Entertainment`, `JAG Finance`, `Personal — Robert`, `Personal — Brian`, `Other`
@@ -354,10 +462,12 @@ Step 6 (ZAP baseline) fires automatically when `ZAP_SCAN_PASSWORD` env var is se
 - ~~**Wife missing jag_auditor Keycloak role**~~ — **FIXED 2026-06-12**: assigned via admin API; Wife email confirmed `zhanghuachang22@gmail.com`
 - ~~**MinIO buckets missing**~~ — **FIXED 2026-06-12**: all 4 buckets created (`jag-bank-statements`, `jag-receipts`, `jag-documents`, `jag-photos`)
 - ~~**Grafana + Promtail never started**~~ — **FIXED 2026-06-12**: containers were in `Created` state for 5 days; now running; logs flowing to Loki
-- ~~**Oracle boot-volume backup policy**~~ — **DONE 2026-06-12**: Bronze policy applied to both boot volumes
+- ~~**Oracle boot-volume backup policy**~~ — **DONE 2026-06-12**: Bronze policy applied to jag-primary boot volume; orphan second volume terminated 2026-06-14
+- ~~**Boot volume at 47 GB (Oracle default)**~~ — **DONE 2026-06-14**: expanded to 200 GB (Always Free max); partition + filesystem extended online; 180 GB free (8% used)
 - ~~**Stale net worth snapshot (11 Jun)**~~ — **FIXED 2026-06-12**: snapshot captured property valuations of `JAG Properties Management` and `62 Ariapita Avenue` before they were cleared; deleted stale rows; fresh snapshot regenerated — consolidated NW now $12,207,370.50 ✓
-- **WebAuthn device registration** — PENDING for all 3 users (Robert, Brian, Wife); requires in-person browser session at `https://auth.jagcorporate.com/realms/jag/account`
-- **Ollama** — deferred; set `DRY_RUN=false` + `ollama pull llama3.2` when ready
+- ~~**WebAuthn device registration (Robert)**~~ — **CONFIRMED 2026-06-12**: Robert's passkey already registered in Keycloak (`type: "webauthn"` credential exists)
+- **WebAuthn device registration (Brian, Wife)** — PENDING; each needs an in-person browser session at `https://auth.jagcorporate.com/realms/jag/account`; no fingerprint reader required — Windows Hello PIN works on any Windows 10/11 machine
+- **Ollama vision** — `DRY_RUN=false` ✓; text-PDF extraction working; scanned PDFs use vision model. **Use `llava` not `llama3.2-vision`** — mllama architecture not supported by Ollama 0.30.8 on this machine (error: unknown model architecture 'mllama'). `.env.ollama-batch` already set to `OLLAMA_MODEL_VISION=llava`. Run `ollama pull llava` (~4.7GB) to enable scanned-PDF extraction. Until then, scanned docs land in REVIEW with nulls — fill manually in Finance → Documents.
 - ~~**Chart of Accounts (A2)**~~ — **DONE 2026-06-12**: 150 accounts across 7 entities seeded via `migration/coa-populate.js`; GL route fix (23505 error code) committed `621a976`
 - ~~**FX Rates (A3)**~~ — **DONE 2026-06-12**: `jag-infra/scripts/fx-rates-sync.sh` seeds rates from open.er-api.com daily at 06:00 TT via VM cron; today's seed: 1 USD = 6.7829 TTD, 1 CNY = 0.9993 TTD
 - **Leases (B3)** — PENDING: all leases expired; need monthly rent amounts per unit from Robert to create new leases
@@ -365,6 +475,78 @@ Step 6 (ZAP baseline) fires automatically when `ZAP_SCAN_PASSWORD` env var is se
 - ~~**JAG Entertainment UI** — BAR + Members Club frontend not yet built~~ **DONE**
 - ~~**DragonBridge UI** — China sourcing / forex frontend not yet built~~ **DONE**
 - ~~**JAG Finance advanced** — intercompany eliminations UI, insurance UI not yet built~~ **DONE**
+- ~~**Bank Statements UI**~~ — **DONE 2026-06-13**: drag-and-drop batch upload panel in Finance → Bank Statements tab; per-file account assignment; parallel upload; job history with delete; `fin_bank_statement_jobs` table; `routes/finance/bank-statements.ts`
+- ~~**MinIO SSE-S3 encryption**~~ — **DONE 2026-06-12**: all 4 buckets encrypted via `MINIO_KMS_SECRET_KEY`
+- ~~**MinIO jag_app user creation**~~ — **DONE 2026-06-13**: user `aVl4SrRl0YtilT55zCNe` created (was never provisioned despite env vars being set); `jag-app-buckets` policy attached
+- ~~**MinIO bucket IAM policy**~~ — **DONE 2026-06-13**: `jag-app-buckets` policy limits jag_app to 4 authorised buckets; `jag-infra/scripts/setup-minio-policy.sh` for re-provisioning
+- ~~**MinIO audit log → Loki**~~ — **DONE 2026-06-13**: `audit_webhook:loki` configured in MinIO; `POST /internal/minio-audit` in jag-api logs every file operation to Grafana/Loki under `entity="MINIO_AUDIT"`
+- ~~**Auto-expire stale PENDING jobs**~~ — **DONE 2026-06-13**: `jag-infra/scripts/cleanup-stale-statements.sh` runs daily at 07:00 UTC (03:00 TT) via VM cron; deletes PENDING jobs + MinIO objects older than 7 days
+- ~~**Financial document extraction (loans, investments, insurance)**~~ — **DONE 2026-06-13**: two-path architecture deployed; `fin_document_jobs` table (migration 008); `routes/finance/document-jobs.ts`; Path 2 `/import` endpoints on loans, investments, insurance, bank-statements; `scripts/doc-import/` local extraction CLI; `scripts/ollama-batch/` extended to process `fin_document_jobs`; Finance → Documents tab in frontend
+- ~~**Finance → Documents tab 404 investigation**~~ — **RESOLVED 2026-06-15 (session 9)**: Investigated fully. All `/api/v1/finance/document-jobs/*` endpoints return 401 (correct auth gate) both directly and through Caddy proxy. `fin_document_jobs` table confirmed present. 404 was a transient initial-deployment issue, no longer reproducible. Also found and fixed: migrations 009/010/011 (jag_family) and 012 (jag_properties) were applied via raw psql but not recorded in `__migrations`; inserted missing rows so future `node-pg-migrate up` won't re-apply them.
+- ~~**Personal/family entity UUIDs missing from Finance dropdowns**~~ — **DONE 2026-06-14**: added Personal — Robert (008) + Isabella (009), Phillip Ajack (010), Brian (011), Zhanghua Chang (012), Theresa (013) to Accounts, Investments, Insurance, Loans panels; UUIDs registered in `entities.ts` and CLAUDE.md; no migration needed (`owner_entity_id` is a free UUID grouping field in `jag_family` DB)
+- ~~**zh-CN.json JSON syntax error**~~ — **FIXED 2026-06-14**: unescaped ASCII double quotes inside `whatsappHint` string on line 967 were silently breaking the Vite build; escaped as `\"`
+- ~~**Full frontend i18n (Simplified Chinese)**~~ — **DONE 2026-06-14**: all pages and components translated via react-i18next; language switcher in top-right header; locale files at `jag-web/src/locales/en.json` and `zh-CN.json`; namespace prefixes: `common`, `nav`, `fin`, `prop`, `tenants`, `pipeline`, `inv`, `jabco`, `ent`, `db`, `crm`, `lifestyle`, `ledger`, `expenses`, `dragonbridge`, `brianAdmin`, `brianPortal`, `placeholder`
+- ~~**Investment Update modal overhaul**~~ — **DONE 2026-06-15**: Update modal now edits all 12 fields (investment_type, asset_name, institution_name, ticker_symbol, units_held, average_cost_per_unit, current_price, current_value_ttd, unrealised_gain_ttd, maturity_date, last_valued_at, notes); auto-calculation of `current_value_ttd = units × price` with manual override; `fmt()` helper strips pg numeric trailing zeros; `Investment` interface corrected (was using wrong field names `quantity`/`cost_basis_ttd`); `ANNUITY` added to `InvestmentType` union and `INVESTMENT_TYPES` array
+- ~~**Investment valuation history**~~ — **DONE 2026-06-15**: `fin_investment_valuations` append-only table (migration 009 jag_family — ran on VM); auto-insert valuation row on every PATCH; History modal in InvestmentsPanel with view + "+ Add Past Entry" backfill form; `GET /:id/valuations` and `POST /:id/valuations` endpoints; `InvestmentValuation` type in `finance.ts`; `getInvestmentValuations` + `addInvestmentValuation` in `finance api`
+- ~~**CALYPSO MACRO INDEX FUND validation error**~~ — **FIXED 2026-06-15 (session 9)**: `maturity_date: Invalid` Zod error caused by PG DATE column arriving as ISO datetime string (`'2025-12-31T00:00:00.000Z'`); frontend was initializing `maturity` state with raw value (showing empty in date input but submitting the full ISO string, failing `^\d{4}-\d{2}-\d{2}$`). Fix: slice to 10 chars in `useState` init (same pattern as `valuedDate` for `last_valued_at`); added regex guard before submit. Deployed.
+- ~~**6 TTSE stocks investment_type + institution_name**~~ — **DONE 2026-06-15 (session 9)**: corrected via Update modal after CALYPSO fix unblocked it
+- ~~**History principle across loans, insurance, properties**~~ — **DONE 2026-06-15 (session 8)**: 3 migrations (010 jag_family, 011 jag_family, 012 jag_properties) ran on VM; backend PATCH auto-insert + GET/POST history endpoints on loans.ts, insurance.ts, properties.ts; types LoanBalanceHistory, InsurancePolicyHistory, PropertyValuationHistory; API client methods; History button + modal in LoansPanel, InsurancePanel, PropertiesPanel. Deployed.
+
+---
+
+## i18n ARCHITECTURE (react-i18next)
+
+**Language switcher:** top-right header — toggles between `en` and `zh-CN`.
+**Locale files:** `jag-web/src/locales/en.json` and `jag-web/src/locales/zh-CN.json` (~1900 lines each).
+**Hook:** `const { t } = useTranslation()` inside every component function. Import: `import { useTranslation } from 'react-i18next'`.
+**Database content** (names, notes, descriptions from API) is never translated — only UI chrome strings.
+
+### Translation workflow for new modules
+1. Build the feature in English first (hardcoded strings) — test fully
+2. Translate as a batch when complete: wire `useTranslation`, add keys to both locale files, deploy
+3. Missing keys degrade gracefully — show the key name in English, never crash
+
+### CRITICAL: variable shadowing
+Any arrow-function parameter named `t` will shadow the `useTranslation` `t` function and cause silent bugs or TypeScript errors. **Never use `t` as a parameter name in new components.** Use `item`, `opt`, `vt`, `mt`, `tag`, etc. instead.
+
+```tsx
+// WRONG — t parameter shadows useTranslation t
+items.map(t => <option key={t.id}>{t.name}</option>)
+
+// CORRECT
+items.map(item => <option key={item.id}>{item.name}</option>)
+```
+
+### React key stability
+Never use a translated string as a React list key. Use a stable English/enum key alongside the translated label:
+```tsx
+// WRONG — key changes with language
+[['Unit Value', fmtMoney(x)]].map(([label, value]) => <div key={label}>)
+
+// CORRECT — stable key
+[['unitValue', t('inv.unitValue'), fmtMoney(x)]].map(([key, label, value]) => <div key={key}>)
+```
+
+### Namespace prefix map
+| Prefix | Page / scope |
+|---|---|
+| `common` | Shared across all pages (save, cancel, loading, etc.) |
+| `nav` | Sidebar navigation |
+| `fin` | Finance page |
+| `prop` | Properties page |
+| `tenants` | Tenants panel |
+| `pipeline` | Acquisition pipeline |
+| `inv` | Inventory & Assets page |
+| `jabco` | JABCO page |
+| `ent` | Entertainment page (BAR + Members Club) |
+| `db` | DragonBridge page |
+| `crm` | CRM page |
+| `lifestyle` | Lifestyle page |
+| `ledger` | Ledger page |
+| `expenses` | Expenses page |
+| `brianAdmin` | Brian admin portal |
+| `brianPortal` | Brian user portal |
+| `placeholder` | Coming soon pages |
 
 ---
 
@@ -396,4 +578,7 @@ Step 6 (ZAP baseline) fires automatically when `ZAP_SCAN_PASSWORD` env var is se
 - Use Keycloak JWT claims for role — never trust application-layer role claims alone
 - Add `last_modified_at` + `last_modified_by` to all shared master record tables
 - For API changes: `npm run build:prod` FIRST, then SCP `dist/`, then docker rebuild
+- For frontend changes: `npm run build` in `jag-web/`, then SCP `dist/` to VM
+- **i18n**: never use `t` as an arrow-function parameter name in any component (shadows `useTranslation` `t`); never use translated strings as React list keys
+- New modules: build in English first, translate as a batch when complete — missing keys degrade gracefully
 - End every session with a handoff note

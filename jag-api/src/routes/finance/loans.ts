@@ -1,7 +1,10 @@
 // GET    /api/v1/finance/loans
 // POST   /api/v1/finance/loans
+// POST   /api/v1/finance/loans/import      — Path 2: direct JSON intake from local script
 // GET    /api/v1/finance/loans/:id
 // PATCH  /api/v1/finance/loans/:id
+// GET    /api/v1/finance/loans/:id/history
+// POST   /api/v1/finance/loans/:id/history — manual backfill
 
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import { z } from 'zod';
@@ -49,6 +52,44 @@ const UpdateLoanSchema = z.object({
   collateral_description: z.string().max(500).optional(),
   notes:                  z.string().max(2000).optional(),
 }).strict().refine(d => Object.keys(d).length > 0, { message: 'At least one field required.' });
+
+// ── POST /loans/import (Path 2 — direct JSON from local script) ───────────────
+
+const ImportLoanSchema = CreateLoanSchema.extend({
+  idempotency_key: z.string().min(1).max(200),
+});
+
+loansRouter.post('/import', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const parsed = ImportLoanSchema.safeParse(req.body);
+    if (!parsed.success) { err(res, 422, 'VALIDATION_ERROR', 'Request body validation failed.'); return; }
+    const b = parsed.data;
+    const { ownerId } = req.rlsCtx;
+
+    const client = await familyPool.connect();
+    try {
+      const rec = await withOwnerRLS(client, req.rlsCtx, (c) =>
+        c.query(
+          `INSERT INTO fin_mortgages_loans
+             (owner_id, owner_entity_id, account_id, loan_type, lender_name,
+              original_principal, outstanding_balance, currency, interest_rate,
+              interest_type, monthly_payment, start_date, maturity_date,
+              collateral_description, notes)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+           RETURNING *`,
+          [
+            ownerId, b.owner_entity_id, b.account_id ?? null, b.loan_type, b.lender_name,
+            b.original_principal, b.outstanding_balance, b.currency, b.interest_rate,
+            b.interest_type, b.monthly_payment ?? null, b.start_date, b.maturity_date ?? null,
+            b.collateral_description ?? null, b.notes ?? null,
+          ],
+        ).then(r => r.rows[0]),
+      );
+      logger.info({ entity: 'FINANCE', action: 'LOAN_IMPORTED', user_id: ownerId, record_id: rec.id, source: 'LOCAL_SCRIPT' });
+      ok(res, rec, 201);
+    } finally { client.release(); }
+  } catch (e) { next(e); }
+});
 
 // ── GET /loans ────────────────────────────────────────────────────────────────
 
@@ -181,17 +222,98 @@ loansRouter.patch('/:id', async (req: Request, res: Response, next: NextFunction
 
     const client = await familyPool.connect();
     try {
-      const row = await withOwnerRLS(client, req.rlsCtx, (c) =>
-        c.query(
+      const row = await withOwnerRLS(client, req.rlsCtx, async (c) => {
+        const updated = await c.query(
           `UPDATE fin_mortgages_loans SET ${setClauses.join(', ')}
            WHERE  id = $${params.length}
            RETURNING *`,
           params,
-        ).then(r => r.rows[0] ?? null),
-      );
+        ).then(r => r.rows[0] ?? null);
+        if (!updated) return null;
+
+        await c.query(
+          `INSERT INTO fin_loan_balance_history
+             (loan_id, owner_id, as_of_date, outstanding_balance, interest_rate, monthly_payment)
+           VALUES ($1,$2,CURRENT_DATE,$3,$4,$5)`,
+          [
+            updated.id, ownerId,
+            updated.outstanding_balance,
+            updated.interest_rate ?? null,
+            updated.monthly_payment ?? null,
+          ],
+        );
+        return updated;
+      });
       if (!row) { err(res, 404, 'NOT_FOUND', 'Loan not found.'); return; }
       logger.info({ entity: 'FINANCE', action: 'LOAN_UPDATED', user_id: ownerId, record_id: row.id });
       ok(res, row);
+    } finally { client.release(); }
+  } catch (e) { next(e); }
+});
+
+// ── GET /loans/:id/history ────────────────────────────────────────────────────
+
+const LoanHistoryBackfillSchema = z.object({
+  as_of_date:          z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  outstanding_balance: z.number().min(0),
+  interest_rate:       z.number().min(0).max(100).optional(),
+  monthly_payment:     z.number().positive().optional(),
+  notes:               z.string().max(2000).optional(),
+}).strict();
+
+loansRouter.get('/:id/history', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const parsed = UUIDParam.safeParse(req.params);
+    if (!parsed.success) { err(res, 422, 'VALIDATION_ERROR', 'Invalid UUID.'); return; }
+
+    const client = await familyPool.connect();
+    try {
+      const rows = await withOwnerRLS(client, req.rlsCtx, (c) =>
+        c.query(
+          `SELECT * FROM fin_loan_balance_history WHERE loan_id = $1 ORDER BY as_of_date DESC, recorded_at DESC`,
+          [parsed.data.id],
+        ).then(r => r.rows),
+      );
+      ok(res, rows);
+    } finally { client.release(); }
+  } catch (e) { next(e); }
+});
+
+// ── POST /loans/:id/history (manual backfill) ─────────────────────────────────
+
+loansRouter.post('/:id/history', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const idParsed = UUIDParam.safeParse(req.params);
+    if (!idParsed.success) { err(res, 422, 'VALIDATION_ERROR', 'Invalid UUID.'); return; }
+
+    const bodyParsed = LoanHistoryBackfillSchema.safeParse(req.body);
+    if (!bodyParsed.success) { err(res, 422, 'VALIDATION_ERROR', 'Request body validation failed.'); return; }
+
+    const b = bodyParsed.data;
+    const { ownerId } = req.rlsCtx;
+
+    const client = await familyPool.connect();
+    try {
+      const row = await withOwnerRLS(client, req.rlsCtx, async (c) => {
+        const { rows: check } = await c.query(
+          `SELECT id FROM fin_mortgages_loans WHERE id = $1`, [idParsed.data.id]
+        );
+        if (!check.length) return null;
+
+        return c.query(
+          `INSERT INTO fin_loan_balance_history
+             (loan_id, owner_id, as_of_date, outstanding_balance, interest_rate, monthly_payment, notes)
+           VALUES ($1,$2,$3,$4,$5,$6,$7)
+           RETURNING *`,
+          [
+            idParsed.data.id, ownerId, b.as_of_date, b.outstanding_balance,
+            b.interest_rate ?? null, b.monthly_payment ?? null, b.notes ?? null,
+          ],
+        ).then(r => r.rows[0]);
+      });
+      if (!row) { err(res, 404, 'NOT_FOUND', 'Loan not found.'); return; }
+      logger.info({ entity: 'FINANCE', action: 'LOAN_HISTORY_BACKFILL', user_id: ownerId, record_id: idParsed.data.id });
+      ok(res, row, 201);
     } finally { client.release(); }
   } catch (e) { next(e); }
 });

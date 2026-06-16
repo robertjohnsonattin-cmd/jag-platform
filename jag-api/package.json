@@ -17,13 +17,16 @@
     "build:batch": "tsc --project ../scripts/ollama-batch/tsconfig.json"
   },
   "dependencies": {
+    "canvas": "^3.2.3",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
     "jose": "^5.10.0",
     "minio": "^8.0.7",
     "multer": "^2.1.1",
     "pdf-parse": "^2.4.5",
+    "pdfjs-dist": "^3.11.174",
     "pg": "^8.12.0",
+    "tesseract.js": "^7.0.0",
     "zod": "^3.23.8"
   },
   "devDependencies": {

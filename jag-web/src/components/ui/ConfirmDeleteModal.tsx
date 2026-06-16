@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 
 interface Props {
   label: string
@@ -7,6 +8,7 @@ interface Props {
 }
 
 export default function ConfirmDeleteModal({ label, onConfirm, onClose }: Props) {
+  const { t } = useTranslation()
   const [isPending, setIsPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [blocking, setBlocking] = useState<Record<string, number> | null>(null)
@@ -33,10 +35,9 @@ export default function ConfirmDeleteModal({ label, onConfirm, onClose }: Props)
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
       <div className="bg-slate-800 border border-slate-700 rounded-xl w-full max-w-md p-6 shadow-2xl">
-        <h2 className="text-base font-semibold mb-2 text-white">Delete Record</h2>
+        <h2 className="text-base font-semibold mb-2 text-white">{t('deleteModal.title')}</h2>
         <p className="text-sm text-slate-300 mb-4">
-          Permanently delete <span className="font-medium text-white">{label}</span>?
-          This cannot be undone.
+          {t('deleteModal.confirm', { label: <span className="font-medium text-white">{label}</span> as unknown as string })}
         </p>
 
         {blocking && (
@@ -62,7 +63,7 @@ export default function ConfirmDeleteModal({ label, onConfirm, onClose }: Props)
             onClick={onClose}
             className="px-4 py-2 text-slate-400 hover:text-white text-sm transition-colors"
           >
-            {blocking ? 'Close' : 'Cancel'}
+            {blocking ? t('deleteModal.close') : t('deleteModal.cancel')}
           </button>
           {!blocking && (
             <button
@@ -70,7 +71,7 @@ export default function ConfirmDeleteModal({ label, onConfirm, onClose }: Props)
               disabled={isPending}
               className="px-4 py-2 bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white text-sm rounded-lg transition-colors"
             >
-              {isPending ? 'Deleting…' : 'Delete'}
+              {isPending ? t('deleteModal.deleting') : t('deleteModal.delete')}
             </button>
           )}
         </div>

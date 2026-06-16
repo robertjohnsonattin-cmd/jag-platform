@@ -1,10 +1,12 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useTranslation } from 'react-i18next'
 import { financeApi } from '../../api/finance'
 import { entityName, fmtTTD, fmtDate } from '../../lib/entities'
 import type {
   InsurancePolicy, InsurancePremium, InsuranceClaim as _InsuranceClaim,
   InsurancePolicyType, InsuranceAssetType, PremiumFrequency, ClaimStatus,
+  InsurancePolicyHistory,
 } from '../../types/finance'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -13,19 +15,8 @@ const POLICY_TYPES: InsurancePolicyType[] = [
   'PROPERTY','VEHICLE','LIABILITY','LIFE','HEALTH',
   'BUSINESS_INTERRUPTION','MARINE','PROFESSIONAL_INDEMNITY','OTHER',
 ]
-const POLICY_TYPE_LABELS: Record<InsurancePolicyType, string> = {
-  PROPERTY: 'Property', VEHICLE: 'Vehicle', LIABILITY: 'Liability',
-  LIFE: 'Life', HEALTH: 'Health', BUSINESS_INTERRUPTION: 'Business Interruption',
-  MARINE: 'Marine', PROFESSIONAL_INDEMNITY: 'Prof. Indemnity', OTHER: 'Other',
-}
 const ASSET_TYPES: InsuranceAssetType[] = ['VEHICLE','PROPERTY','BUSINESS','PERSON','OTHER']
-const ASSET_TYPE_LABELS: Record<InsuranceAssetType, string> = {
-  VEHICLE: 'Vehicle', PROPERTY: 'Property', BUSINESS: 'Business', PERSON: 'Person', OTHER: 'Other',
-}
 const PREM_FREQS: PremiumFrequency[] = ['MONTHLY','QUARTERLY','SEMI_ANNUAL','ANNUAL','ONE_OFF']
-const PREM_FREQ_LABELS: Record<PremiumFrequency, string> = {
-  MONTHLY: 'Monthly', QUARTERLY: 'Quarterly', SEMI_ANNUAL: 'Semi-Annual', ANNUAL: 'Annual', ONE_OFF: 'One-Off',
-}
 const CLAIM_STATUS_STYLES: Record<ClaimStatus, string> = {
   SUBMITTED:    'bg-blue-900/50 text-blue-300 border border-blue-700',
   UNDER_REVIEW: 'bg-yellow-900/50 text-yellow-300 border border-yellow-700',
@@ -41,6 +32,12 @@ const ENTITY_OPTIONS = [
   { id: '00000000-0000-0000-0001-000000000004', name: 'JAG Entertainment' },
   { id: '00000000-0000-0000-0001-000000000005', name: 'JAG Finance' },
   { id: '00000000-0000-0000-0001-000000000006', name: 'DragonBridge' },
+  { id: '00000000-0000-0000-0001-000000000008', name: 'Personal — Robert' },
+  { id: '00000000-0000-0000-0001-000000000009', name: 'Isabella Johnson-Attin' },
+  { id: '00000000-0000-0000-0001-000000000010', name: 'Phillip Ajack Johnson-Attin' },
+  { id: '00000000-0000-0000-0001-000000000011', name: 'Brian Johnson-Attin' },
+  { id: '00000000-0000-0000-0001-000000000012', name: 'Zhanghua Chang' },
+  { id: '00000000-0000-0000-0001-000000000013', name: 'Theresa Johnson-Attin' },
 ]
 
 const cls = 'w-full bg-slate-700 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500'
@@ -55,6 +52,7 @@ function uuidv4() {
 // ── Add Policy Modal ──────────────────────────────────────────────────────────
 
 function AddPolicyModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
+  const { t } = useTranslation()
   const [form, setForm] = useState({
     owner_entity_id: ENTITY_OPTIONS[0].id,
     policy_number: '',
@@ -84,7 +82,7 @@ function AddPolicyModal({ onClose, onCreated }: { onClose: () => void; onCreated
       insured_asset_type: form.insured_asset_type,
       coverage_amount: Number(form.coverage_amount),
       currency: form.currency || 'TTD',
-      coverage_amount_ttd: Number(form.coverage_amount), // assumes TTD or user handles FX separately
+      coverage_amount_ttd: Number(form.coverage_amount),
       premium_amount: Number(form.premium_amount),
       premium_amount_ttd: Number(form.premium_amount),
       premium_frequency: form.premium_frequency,
@@ -101,80 +99,80 @@ function AddPolicyModal({ onClose, onCreated }: { onClose: () => void; onCreated
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
       <div className="bg-slate-800 border border-slate-700 rounded-xl w-full max-w-lg p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
-        <h2 className="text-lg font-semibold mb-4 text-white">Add Insurance Policy</h2>
+        <h2 className="text-lg font-semibold mb-4 text-white">{t('insurance.addPolicy')}</h2>
         <div className="space-y-3">
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Entity</label>
+            <label className="block text-xs text-slate-400 mb-1">{t('common.entity')}</label>
             <select value={form.owner_entity_id} onChange={set('owner_entity_id')} className={cls}>
               {ENTITY_OPTIONS.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
             </select>
           </div>
           <div className="flex gap-3">
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Policy Type</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('insurance.policyType')}</label>
               <select value={form.policy_type} onChange={set('policy_type')} className={cls}>
-                {POLICY_TYPES.map(t => <option key={t} value={t}>{POLICY_TYPE_LABELS[t]}</option>)}
+                {POLICY_TYPES.map(tp => <option key={tp} value={tp}>{t(`insurance.policyTypes.${tp}`)}</option>)}
               </select>
             </div>
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Asset Type</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('insurance.assetType')}</label>
               <select value={form.insured_asset_type} onChange={set('insured_asset_type')} className={cls}>
-                {ASSET_TYPES.map(t => <option key={t} value={t}>{ASSET_TYPE_LABELS[t]}</option>)}
+                {ASSET_TYPES.map(tp => <option key={tp} value={tp}>{t(`insurance.assetTypes.${tp}`)}</option>)}
               </select>
             </div>
           </div>
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Policy Number</label>
+            <label className="block text-xs text-slate-400 mb-1">{t('insurance.policyNumber')}</label>
             <input value={form.policy_number} onChange={set('policy_number')} className={cls} placeholder="e.g. POL-2026-001" />
           </div>
           <div className="flex gap-3">
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Insurer</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('insurance.insurer')}</label>
               <input value={form.insurer_name} onChange={set('insurer_name')} className={cls} placeholder="e.g. Guardian Life" />
             </div>
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Broker (optional)</label>
-              <input value={form.broker_name} onChange={set('broker_name')} className={cls} placeholder="Broker name" />
+              <label className="block text-xs text-slate-400 mb-1">{t('insurance.broker')}</label>
+              <input value={form.broker_name} onChange={set('broker_name')} className={cls} />
             </div>
           </div>
           <div className="flex gap-3">
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Coverage Amount</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('insurance.coverageAmount')}</label>
               <input type="number" step="0.01" value={form.coverage_amount} onChange={set('coverage_amount')} className={cls} placeholder="0.00" />
             </div>
             <div className="w-20">
-              <label className="block text-xs text-slate-400 mb-1">Currency</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('common.currency')}</label>
               <input maxLength={3} value={form.currency} onChange={set('currency')} className={cls} />
             </div>
           </div>
           <div className="flex gap-3">
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Premium Amount</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('insurance.premiumAmount')}</label>
               <input type="number" step="0.01" value={form.premium_amount} onChange={set('premium_amount')} className={cls} placeholder="0.00" />
             </div>
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Frequency</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('insurance.frequency')}</label>
               <select value={form.premium_frequency} onChange={set('premium_frequency')} className={cls}>
-                {PREM_FREQS.map(f => <option key={f} value={f}>{PREM_FREQ_LABELS[f]}</option>)}
+                {PREM_FREQS.map(pf => <option key={pf} value={pf}>{t(`insurance.frequencies.${pf}`)}</option>)}
               </select>
             </div>
           </div>
           <div className="flex gap-3">
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Start Date</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('common.startDate')}</label>
               <input type="date" value={form.start_date} onChange={set('start_date')} className={cls} />
             </div>
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Expiry Date</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('insurance.expiryDate')}</label>
               <input type="date" value={form.expiry_date} onChange={set('expiry_date')} className={cls} />
             </div>
           </div>
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Renewal Alert (days before expiry)</label>
+            <label className="block text-xs text-slate-400 mb-1">{t('insurance.renewalAlert')}</label>
             <input type="number" min="7" max="365" value={form.renewal_alert_days} onChange={set('renewal_alert_days')} className={cls} />
           </div>
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Notes</label>
+            <label className="block text-xs text-slate-400 mb-1">{t('common.notes')}</label>
             <textarea rows={2} value={form.notes} onChange={set('notes')} className={cls} />
           </div>
           {error && <p className="text-red-400 text-xs">{error instanceof Error ? error.message : 'Failed.'}</p>}
@@ -185,9 +183,9 @@ function AddPolicyModal({ onClose, onCreated }: { onClose: () => void; onCreated
             disabled={isPending || !valid}
             className="flex-1 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-sm rounded-lg transition-colors"
           >
-            {isPending ? 'Saving…' : 'Add Policy'}
+            {isPending ? t('common.saving') : t('insurance.addBtn')}
           </button>
-          <button onClick={onClose} className="px-4 py-2 text-slate-400 hover:text-white text-sm transition-colors">Cancel</button>
+          <button onClick={onClose} className="px-4 py-2 text-slate-400 hover:text-white text-sm transition-colors">{t('common.cancel')}</button>
         </div>
       </div>
     </div>
@@ -197,6 +195,7 @@ function AddPolicyModal({ onClose, onCreated }: { onClose: () => void; onCreated
 // ── Policy Detail Panel (premiums + claims) ───────────────────────────────────
 
 function PolicyDetail({ policy, onClose }: { policy: InsurancePolicy; onClose: () => void }) {
+  const { t } = useTranslation()
   const [subTab, setSubTab] = useState<'premiums' | 'claims'>('premiums')
   const [showAddPremium, setShowAddPremium] = useState(false)
   const [showAddClaim, setShowAddClaim] = useState(false)
@@ -225,6 +224,11 @@ function PolicyDetail({ policy, onClose }: { policy: InsurancePolicy; onClose: (
   const daysToExpiry = Math.ceil((new Date(policy.expiry_date).getTime() - Date.now()) / 86_400_000)
   const expiryColor = daysToExpiry < 30 ? 'text-red-400' : daysToExpiry < 90 ? 'text-yellow-400' : 'text-green-400'
 
+  const SUB_TABS: { key: 'premiums' | 'claims'; label: string }[] = [
+    { key: 'premiums', label: t('insurance.premiums') },
+    { key: 'claims',   label: t('insurance.claims') },
+  ]
+
   return (
     <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
       <div className="bg-slate-800 border border-slate-700 rounded-xl w-full max-w-2xl shadow-2xl flex flex-col max-h-[90vh]">
@@ -234,24 +238,24 @@ function PolicyDetail({ policy, onClose }: { policy: InsurancePolicy; onClose: (
             <div>
               <h2 className="text-base font-semibold text-white">{policy.insurer_name} — {policy.policy_number}</h2>
               <p className="text-xs text-slate-400 mt-0.5">
-                {POLICY_TYPE_LABELS[policy.policy_type]} · {entityName(policy.owner_entity_id)}
+                {t(`insurance.policyTypes.${policy.policy_type}`)} · {entityName(policy.owner_entity_id)}
               </p>
             </div>
             <button onClick={onClose} className="text-slate-500 hover:text-white text-sm px-2">✕</button>
           </div>
           <div className="grid grid-cols-3 gap-3 mt-4">
             <div>
-              <p className="text-xs text-slate-400">Coverage</p>
+              <p className="text-xs text-slate-400">{t('insurance.colCoverage')}</p>
               <p className="text-sm font-mono font-medium text-white">{fmtTTD(policy.coverage_amount_ttd)}</p>
             </div>
             <div>
-              <p className="text-xs text-slate-400">Premium</p>
+              <p className="text-xs text-slate-400">{t('insurance.colPremium')}</p>
               <p className="text-sm font-mono font-medium text-white">
-                {fmtTTD(policy.premium_amount_ttd)} <span className="text-slate-500 font-normal">/ {PREM_FREQ_LABELS[policy.premium_frequency]}</span>
+                {fmtTTD(policy.premium_amount_ttd)} <span className="text-slate-500 font-normal">/ {t(`insurance.frequencies.${policy.premium_frequency}`)}</span>
               </p>
             </div>
             <div>
-              <p className="text-xs text-slate-400">Expiry</p>
+              <p className="text-xs text-slate-400">{t('insurance.colExpiry')}</p>
               <p className={`text-sm font-medium ${expiryColor}`}>
                 {fmtDate(policy.expiry_date)}
                 <span className="ml-1 text-xs">({daysToExpiry > 0 ? `${daysToExpiry}d` : 'EXPIRED'})</span>
@@ -262,8 +266,8 @@ function PolicyDetail({ policy, onClose }: { policy: InsurancePolicy; onClose: (
 
         {/* Sub-tabs */}
         <div className="flex border-b border-slate-700 px-5">
-          {(['premiums', 'claims'] as const).map(t => (
-            <button key={t} onClick={() => setSubTab(t)} className={`py-2.5 px-3 text-xs font-medium border-b-2 -mb-px transition-colors capitalize ${subTab === t ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400 hover:text-white'}`}>{t}</button>
+          {SUB_TABS.map(tb => (
+            <button key={tb.key} onClick={() => setSubTab(tb.key)} className={`py-2.5 px-3 text-xs font-medium border-b-2 -mb-px transition-colors ${subTab === tb.key ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400 hover:text-white'}`}>{tb.label}</button>
           ))}
         </div>
 
@@ -272,27 +276,27 @@ function PolicyDetail({ policy, onClose }: { policy: InsurancePolicy; onClose: (
           {subTab === 'premiums' && (
             <div>
               <div className="flex justify-end mb-3">
-                <button onClick={() => setShowAddPremium(true)} className="text-xs px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded transition-colors">+ Schedule Premium</button>
+                <button onClick={() => setShowAddPremium(true)} className="text-xs px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded transition-colors">{t('insurance.schedulePremium')}</button>
               </div>
-              {loadPrem && <p className="text-slate-400 text-xs">Loading…</p>}
-              {premiums.length === 0 && !loadPrem && <p className="text-slate-500 text-sm">No premiums scheduled.</p>}
+              {loadPrem && <p className="text-slate-400 text-xs">{t('common.loading')}</p>}
+              {premiums.length === 0 && !loadPrem && <p className="text-slate-500 text-sm">{t('insurance.noPremiums')}</p>}
               <div className="space-y-2">
                 {premiums.map(p => (
                   <div key={p.id} className="flex items-center justify-between bg-slate-700/50 rounded-lg px-3 py-2.5">
                     <div>
-                      <p className="text-sm text-slate-100">Due {fmtDate(p.due_date)}</p>
+                      <p className="text-sm text-slate-100">{t('common.dueDate')} {fmtDate(p.due_date)}</p>
                       <p className="text-xs text-slate-400">{p.payment_method.replace(/_/g, ' ')}</p>
                     </div>
                     <div className="flex items-center gap-3">
                       <p className="text-sm font-mono font-medium">{fmtTTD(p.amount_ttd)}</p>
                       <span className={`text-xs px-2 py-0.5 rounded-full ${
-                        p.status === 'PAID' ? 'bg-green-900/50 text-green-300 border border-green-700' :
+                        p.status === 'PAID'    ? 'bg-green-900/50 text-green-300 border border-green-700' :
                         p.status === 'OVERDUE' ? 'bg-red-900/50 text-red-400 border border-red-800' :
-                        p.status === 'WAIVED' ? 'bg-slate-600 text-slate-400' :
+                        p.status === 'WAIVED'  ? 'bg-slate-600 text-slate-400' :
                         'bg-yellow-900/50 text-yellow-300 border border-yellow-700'
-                      }`}>{p.status}</span>
+                      }`}>{t(`insurance.premiumStatuses.${p.status}`, p.status)}</span>
                       {(p.status === 'DUE' || p.status === 'OVERDUE') && (
-                        <button onClick={() => markPaid(p)} disabled={markingPaid} className="text-xs text-blue-400 hover:text-blue-300 transition-colors">Mark Paid</button>
+                        <button onClick={() => markPaid(p)} disabled={markingPaid} className="text-xs text-blue-400 hover:text-blue-300 transition-colors">{t('common.markPaid')}</button>
                       )}
                     </div>
                   </div>
@@ -303,10 +307,10 @@ function PolicyDetail({ policy, onClose }: { policy: InsurancePolicy; onClose: (
           {subTab === 'claims' && (
             <div>
               <div className="flex justify-end mb-3">
-                <button onClick={() => setShowAddClaim(true)} className="text-xs px-3 py-1.5 bg-orange-600 hover:bg-orange-500 text-white rounded transition-colors">+ Lodge Claim</button>
+                <button onClick={() => setShowAddClaim(true)} className="text-xs px-3 py-1.5 bg-orange-600 hover:bg-orange-500 text-white rounded transition-colors">{t('insurance.lodgeClaim')}</button>
               </div>
-              {loadClaim && <p className="text-slate-400 text-xs">Loading…</p>}
-              {claims.length === 0 && !loadClaim && <p className="text-slate-500 text-sm">No claims recorded.</p>}
+              {loadClaim && <p className="text-slate-400 text-xs">{t('common.loading')}</p>}
+              {claims.length === 0 && !loadClaim && <p className="text-slate-500 text-sm">{t('insurance.noClaims')}</p>}
               <div className="space-y-2">
                 {claims.map(c => (
                   <div key={c.id} className="bg-slate-700/50 rounded-lg px-3 py-2.5">
@@ -314,15 +318,15 @@ function PolicyDetail({ policy, onClose }: { policy: InsurancePolicy; onClose: (
                       <div>
                         <p className="text-sm text-slate-100">{c.description}</p>
                         <p className="text-xs text-slate-400 mt-0.5">
-                          Incident {fmtDate(c.incident_date)} · Claim {fmtDate(c.claim_date)}
+                          {t('insurance.incidentDate')} {fmtDate(c.incident_date)} · {t('insurance.claimDate')} {fmtDate(c.claim_date)}
                           {c.claim_reference && ` · Ref: ${c.claim_reference}`}
                         </p>
                       </div>
-                      <span className={`text-xs px-2 py-0.5 rounded-full ml-3 ${CLAIM_STATUS_STYLES[c.status]}`}>{c.status.replace('_', ' ')}</span>
+                      <span className={`text-xs px-2 py-0.5 rounded-full ml-3 ${CLAIM_STATUS_STYLES[c.status]}`}>{t(`insurance.claimStatuses.${c.status}`, c.status.replace('_', ' '))}</span>
                     </div>
                     <div className="flex gap-4 mt-2 text-xs font-mono">
-                      <span className="text-slate-400">Claimed: <span className="text-slate-100">{fmtTTD(c.claimed_amount_ttd)}</span></span>
-                      {c.settled_amount_ttd && <span className="text-slate-400">Settled: <span className="text-green-300">{fmtTTD(c.settled_amount_ttd)}</span></span>}
+                      <span className="text-slate-400">{t('insurance.amountClaimed')}: <span className="text-slate-100">{fmtTTD(c.claimed_amount_ttd)}</span></span>
+                      {c.settled_amount_ttd && <span className="text-slate-400">{t('insurance.amountTTD')}: <span className="text-green-300">{fmtTTD(c.settled_amount_ttd)}</span></span>}
                     </div>
                   </div>
                 ))}
@@ -341,6 +345,7 @@ function PolicyDetail({ policy, onClose }: { policy: InsurancePolicy; onClose: (
 // ── Add Premium Modal ─────────────────────────────────────────────────────────
 
 function AddPremiumModal({ policyId, onClose, onCreated }: { policyId: string; onClose: () => void; onCreated: () => void }) {
+  const { t } = useTranslation()
   const [form, setForm] = useState({ due_date: '', amount: '', payment_method: 'BANK_TRANSFER', notes: '' })
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
     setForm(f => ({ ...f, [k]: e.target.value }))
@@ -357,12 +362,12 @@ function AddPremiumModal({ policyId, onClose, onCreated }: { policyId: string; o
   return (
     <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-[60]">
       <div className="bg-slate-800 border border-slate-700 rounded-xl w-full max-w-sm p-5 shadow-2xl">
-        <h3 className="text-base font-semibold text-white mb-3">Schedule Premium</h3>
+        <h3 className="text-base font-semibold text-white mb-3">{t('insurance.scheduleTitle')}</h3>
         <div className="space-y-3">
-          <div><label className="block text-xs text-slate-400 mb-1">Due Date</label><input type="date" value={form.due_date} onChange={set('due_date')} className={cls} /></div>
-          <div><label className="block text-xs text-slate-400 mb-1">Amount (TTD)</label><input type="number" step="0.01" value={form.amount} onChange={set('amount')} className={cls} placeholder="0.00" /></div>
+          <div><label className="block text-xs text-slate-400 mb-1">{t('common.dueDate')}</label><input type="date" value={form.due_date} onChange={set('due_date')} className={cls} /></div>
+          <div><label className="block text-xs text-slate-400 mb-1">{t('insurance.amountTTD')}</label><input type="number" step="0.01" value={form.amount} onChange={set('amount')} className={cls} placeholder="0.00" /></div>
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Payment Method</label>
+            <label className="block text-xs text-slate-400 mb-1">{t('insurance.paymentMethod')}</label>
             <select value={form.payment_method} onChange={set('payment_method')} className={cls}>
               {['CASH','BANK_TRANSFER','CREDIT_CARD','CHEQUE','DIRECT_DEBIT','OTHER'].map(m => <option key={m} value={m}>{m.replace(/_/g, ' ')}</option>)}
             </select>
@@ -370,8 +375,8 @@ function AddPremiumModal({ policyId, onClose, onCreated }: { policyId: string; o
           {error && <p className="text-red-400 text-xs">{error instanceof Error ? error.message : 'Failed.'}</p>}
         </div>
         <div className="flex gap-3 mt-4">
-          <button onClick={() => mutate()} disabled={isPending || !form.due_date || !form.amount} className="flex-1 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-sm rounded-lg">{isPending ? 'Saving…' : 'Save'}</button>
-          <button onClick={onClose} className="px-4 py-2 text-slate-400 hover:text-white text-sm">Cancel</button>
+          <button onClick={() => mutate()} disabled={isPending || !form.due_date || !form.amount} className="flex-1 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-sm rounded-lg">{isPending ? t('common.saving') : t('common.save')}</button>
+          <button onClick={onClose} className="px-4 py-2 text-slate-400 hover:text-white text-sm">{t('common.cancel')}</button>
         </div>
       </div>
     </div>
@@ -381,6 +386,7 @@ function AddPremiumModal({ policyId, onClose, onCreated }: { policyId: string; o
 // ── Add Claim Modal ───────────────────────────────────────────────────────────
 
 function AddClaimModal({ policyId, onClose, onCreated }: { policyId: string; onClose: () => void; onCreated: () => void }) {
+  const { t } = useTranslation()
   const today = new Date().toISOString().slice(0, 10)
   const [form, setForm] = useState({ incident_date: today, claim_date: today, description: '', claimed_amount_ttd: '', claim_reference: '', notes: '' })
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
@@ -399,21 +405,138 @@ function AddClaimModal({ policyId, onClose, onCreated }: { policyId: string; onC
   return (
     <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-[60]">
       <div className="bg-slate-800 border border-slate-700 rounded-xl w-full max-w-sm p-5 shadow-2xl">
-        <h3 className="text-base font-semibold text-white mb-3">Lodge Claim</h3>
+        <h3 className="text-base font-semibold text-white mb-3">{t('insurance.lodgeTitle')}</h3>
         <div className="space-y-3">
           <div className="flex gap-3">
-            <div className="flex-1"><label className="block text-xs text-slate-400 mb-1">Incident Date</label><input type="date" value={form.incident_date} onChange={set('incident_date')} className={cls} /></div>
-            <div className="flex-1"><label className="block text-xs text-slate-400 mb-1">Claim Date</label><input type="date" value={form.claim_date} onChange={set('claim_date')} className={cls} /></div>
+            <div className="flex-1"><label className="block text-xs text-slate-400 mb-1">{t('insurance.incidentDate')}</label><input type="date" value={form.incident_date} onChange={set('incident_date')} className={cls} /></div>
+            <div className="flex-1"><label className="block text-xs text-slate-400 mb-1">{t('insurance.claimDate')}</label><input type="date" value={form.claim_date} onChange={set('claim_date')} className={cls} /></div>
           </div>
-          <div><label className="block text-xs text-slate-400 mb-1">Description</label><textarea rows={2} value={form.description} onChange={set('description')} className={cls} placeholder="What happened?" /></div>
-          <div><label className="block text-xs text-slate-400 mb-1">Claimed Amount (TTD)</label><input type="number" step="0.01" value={form.claimed_amount_ttd} onChange={set('claimed_amount_ttd')} className={cls} placeholder="0.00" /></div>
-          <div><label className="block text-xs text-slate-400 mb-1">Insurer Reference # (optional)</label><input value={form.claim_reference} onChange={set('claim_reference')} className={cls} placeholder="CL-2026-xxxx" /></div>
+          <div><label className="block text-xs text-slate-400 mb-1">{t('common.description')}</label><textarea rows={2} value={form.description} onChange={set('description')} className={cls} placeholder={t('insurance.whatHappened')} /></div>
+          <div><label className="block text-xs text-slate-400 mb-1">{t('insurance.amountClaimed')}</label><input type="number" step="0.01" value={form.claimed_amount_ttd} onChange={set('claimed_amount_ttd')} className={cls} placeholder="0.00" /></div>
+          <div><label className="block text-xs text-slate-400 mb-1">{t('insurance.insurerRef')}</label><input value={form.claim_reference} onChange={set('claim_reference')} className={cls} placeholder="CL-2026-xxxx" /></div>
           {error && <p className="text-red-400 text-xs">{error instanceof Error ? error.message : 'Failed.'}</p>}
         </div>
         <div className="flex gap-3 mt-4">
-          <button onClick={() => mutate()} disabled={isPending || !form.description || !form.claimed_amount_ttd} className="flex-1 py-2 bg-orange-600 hover:bg-orange-500 disabled:opacity-50 text-white text-sm rounded-lg">{isPending ? 'Saving…' : 'Lodge Claim'}</button>
-          <button onClick={onClose} className="px-4 py-2 text-slate-400 hover:text-white text-sm">Cancel</button>
+          <button onClick={() => mutate()} disabled={isPending || !form.description || !form.claimed_amount_ttd} className="flex-1 py-2 bg-orange-600 hover:bg-orange-500 disabled:opacity-50 text-white text-sm rounded-lg">{isPending ? t('common.saving') : t('insurance.lodgeClaim')}</button>
+          <button onClick={onClose} className="px-4 py-2 text-slate-400 hover:text-white text-sm">{t('common.cancel')}</button>
         </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Policy History Modal ──────────────────────────────────────────────────────
+
+function PolicyHistoryModal({ id, name, onClose }: { id: string; name: string; onClose: () => void }) {
+  const { t } = useTranslation()
+  const qc = useQueryClient()
+  const [showAdd, setShowAdd] = useState(false)
+  const [date, setDate] = useState('')
+  const [coverage, setCoverage] = useState('')
+  const [premium, setPremium] = useState('')
+  const [expiry, setExpiry] = useState('')
+  const [notes, setNotes] = useState('')
+
+  const { data: history = [], isLoading } = useQuery({
+    queryKey: ['finance', 'insurance', 'policies', id, 'history'],
+    queryFn: () => financeApi.getPolicyHistory(id),
+  })
+
+  const { mutate, isPending, error: addError } = useMutation({
+    mutationFn: () => financeApi.addPolicyHistory(id, {
+      as_of_date: date,
+      coverage_amount_ttd: Number(coverage),
+      premium_amount_ttd: Number(premium),
+      expiry_date: expiry || undefined,
+      notes: notes || undefined,
+    }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['finance', 'insurance', 'policies', id, 'history'] })
+      setDate(''); setCoverage(''); setPremium(''); setExpiry(''); setNotes('')
+      setShowAdd(false)
+    },
+  })
+
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 overflow-y-auto py-6">
+      <div className="bg-slate-800 border border-slate-700 rounded-xl w-full max-w-2xl mx-4 p-6 shadow-2xl">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-base font-semibold text-white">Policy History — {name}</h2>
+          <button onClick={onClose} className="text-slate-400 hover:text-white text-sm">{t('common.close', 'Close')}</button>
+        </div>
+
+        {!showAdd && (
+          <button onClick={() => setShowAdd(true)}
+            className="mb-4 px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-200 text-xs rounded-lg transition-colors">
+            + Add Past Entry
+          </button>
+        )}
+        {showAdd && (
+          <div className="mb-5 p-4 bg-slate-700/50 rounded-lg border border-slate-600 space-y-3">
+            <p className="text-xs text-slate-400 font-medium uppercase tracking-wide">Add Historical Entry</p>
+            <div className="flex gap-3">
+              <div className="flex-1">
+                <label className="block text-xs text-slate-400 mb-1">Date</label>
+                <input type="date" value={date} onChange={e => setDate(e.target.value)} className={cls} />
+              </div>
+              <div className="flex-1">
+                <label className="block text-xs text-slate-400 mb-1">Coverage (TTD)</label>
+                <input type="number" step="0.01" value={coverage} onChange={e => setCoverage(e.target.value)} className={cls} placeholder="0.00" />
+              </div>
+            </div>
+            <div className="flex gap-3">
+              <div className="flex-1">
+                <label className="block text-xs text-slate-400 mb-1">Premium (TTD)</label>
+                <input type="number" step="0.01" value={premium} onChange={e => setPremium(e.target.value)} className={cls} placeholder="0.00" />
+              </div>
+              <div className="flex-1">
+                <label className="block text-xs text-slate-400 mb-1">Expiry Date (optional)</label>
+                <input type="date" value={expiry} onChange={e => setExpiry(e.target.value)} className={cls} />
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">Notes</label>
+              <input value={notes} onChange={e => setNotes(e.target.value)} className={cls} placeholder="e.g. 2025 renewal terms" />
+            </div>
+            {addError && <p className="text-red-400 text-xs">{addError instanceof Error ? addError.message : 'Failed.'}</p>}
+            <div className="flex gap-3 pt-1">
+              <button onClick={() => mutate()} disabled={isPending || !date || !coverage || !premium}
+                className="px-4 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-xs rounded-lg transition-colors">
+                {isPending ? 'Saving...' : 'Save Entry'}
+              </button>
+              <button onClick={() => setShowAdd(false)} className="text-slate-400 hover:text-white text-xs transition-colors">Cancel</button>
+            </div>
+          </div>
+        )}
+
+        {isLoading && <p className="text-slate-400 text-sm">Loading...</p>}
+        {!isLoading && history.length === 0 && (
+          <p className="text-slate-400 text-sm">No history yet. History records automatically each time you update the policy.</p>
+        )}
+        {history.length > 0 && (
+          <div className="rounded-lg overflow-hidden border border-slate-700">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-slate-700/50 text-slate-400 text-xs uppercase tracking-wide">
+                  <th className="text-left px-3 py-2">Date</th>
+                  <th className="text-right px-3 py-2">Coverage (TTD)</th>
+                  <th className="text-right px-3 py-2">Premium (TTD)</th>
+                  <th className="text-right px-3 py-2">Expiry</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-700">
+                {history.map((row: InsurancePolicyHistory) => (
+                  <tr key={row.id} className="hover:bg-slate-700/30">
+                    <td className="px-3 py-2 text-slate-300">{row.as_of_date}</td>
+                    <td className="px-3 py-2 text-right font-mono text-slate-100 font-medium">{fmtTTD(row.coverage_amount_ttd)}</td>
+                    <td className="px-3 py-2 text-right font-mono text-slate-400">{fmtTTD(row.premium_amount_ttd)}</td>
+                    <td className="px-3 py-2 text-right text-slate-400">{row.expiry_date ? fmtDate(row.expiry_date) : '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   )
@@ -422,8 +545,10 @@ function AddClaimModal({ policyId, onClose, onCreated }: { policyId: string; onC
 // ── Main Panel ────────────────────────────────────────────────────────────────
 
 export default function InsurancePanel() {
+  const { t } = useTranslation()
   const [showAdd, setShowAdd] = useState(false)
   const [selected, setSelected] = useState<InsurancePolicy | null>(null)
+  const [policyHistory, setPolicyHistory] = useState<{ id: string; name: string } | null>(null)
   const [filterActive, setFilterActive] = useState<'true' | 'false' | ''>('')
   const [filterType, setFilterType] = useState<InsurancePolicyType | ''>('')
   const qc = useQueryClient()
@@ -451,15 +576,15 @@ export default function InsurancePanel() {
       {/* Summary cards */}
       <div className="grid grid-cols-3 gap-4 mb-6">
         <div className="bg-slate-800 rounded-lg p-4 border-l-4 border-blue-500">
-          <p className="text-xs text-slate-400 uppercase tracking-wide mb-1">Active Policies</p>
+          <p className="text-xs text-slate-400 uppercase tracking-wide mb-1">{t('insurance.activePolicies')}</p>
           <p className="text-2xl font-semibold text-white">{activePolicies.length}</p>
         </div>
         <div className="bg-slate-800 rounded-lg p-4 border-l-4 border-green-500">
-          <p className="text-xs text-slate-400 uppercase tracking-wide mb-1">Total Coverage</p>
+          <p className="text-xs text-slate-400 uppercase tracking-wide mb-1">{t('insurance.totalCoverage')}</p>
           <p className="text-lg font-semibold font-mono text-white">{fmtTTD(String(totalCoverage))}</p>
         </div>
         <div className={`bg-slate-800 rounded-lg p-4 border-l-4 ${expiring.length > 0 ? 'border-red-500' : 'border-slate-600'}`}>
-          <p className="text-xs text-slate-400 uppercase tracking-wide mb-1">Expiring Soon</p>
+          <p className="text-xs text-slate-400 uppercase tracking-wide mb-1">{t('insurance.expiringSoon')}</p>
           <p className={`text-2xl font-semibold ${expiring.length > 0 ? 'text-red-400' : 'text-slate-400'}`}>{expiring.length}</p>
         </div>
       </div>
@@ -467,13 +592,13 @@ export default function InsurancePanel() {
       {/* Expiry alerts */}
       {expiring.length > 0 && (
         <div className="bg-red-900/20 border border-red-700/50 rounded-lg p-3 mb-5">
-          <p className="text-xs font-medium text-red-300 mb-2">⚠️ Policies approaching renewal</p>
+          <p className="text-xs font-medium text-red-300 mb-2">⚠️ {t('insurance.expiringSoonSub')}</p>
           <div className="space-y-1">
             {expiring.map(p => {
               const days = Math.ceil((new Date(p.expiry_date).getTime() - Date.now()) / 86_400_000)
               return (
                 <div key={p.id} className="flex justify-between text-xs">
-                  <span className="text-red-200">{p.insurer_name} — {p.policy_number} ({POLICY_TYPE_LABELS[p.policy_type]})</span>
+                  <span className="text-red-200">{p.insurer_name} — {p.policy_number} ({t(`insurance.policyTypes.${p.policy_type}`)})</span>
                   <span className="text-red-400 font-medium">{days > 0 ? `${days}d` : 'EXPIRED'}</span>
                 </div>
               )
@@ -485,35 +610,35 @@ export default function InsurancePanel() {
       {/* Filters + Add */}
       <div className="flex gap-3 mb-4 items-center">
         <select value={filterType} onChange={e => setFilterType(e.target.value as InsurancePolicyType | '')} className="bg-slate-700 border border-slate-600 rounded px-2 py-1.5 text-sm text-slate-300 focus:outline-none">
-          <option value="">All Types</option>
-          {POLICY_TYPES.map(t => <option key={t} value={t}>{POLICY_TYPE_LABELS[t]}</option>)}
+          <option value="">{t('insurance.allTypes')}</option>
+          {POLICY_TYPES.map(tp => <option key={tp} value={tp}>{t(`insurance.policyTypes.${tp}`)}</option>)}
         </select>
         <select value={filterActive} onChange={e => setFilterActive(e.target.value as 'true' | 'false' | '')} className="bg-slate-700 border border-slate-600 rounded px-2 py-1.5 text-sm text-slate-300 focus:outline-none">
-          <option value="">All Status</option>
-          <option value="true">Active</option>
-          <option value="false">Inactive</option>
+          <option value="">{t('insurance.allStatus')}</option>
+          <option value="true">{t('common.active')}</option>
+          <option value="false">{t('common.inactive')}</option>
         </select>
         <div className="ml-auto">
-          <button onClick={() => setShowAdd(true)} className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-sm rounded-lg transition-colors">+ Add Policy</button>
+          <button onClick={() => setShowAdd(true)} className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-sm rounded-lg transition-colors">{t('insurance.addBtn')}</button>
         </div>
       </div>
 
       {/* Policies list */}
-      {isLoading && <p className="text-slate-400 text-sm">Loading…</p>}
-      {!isLoading && policies.length === 0 && <p className="text-slate-500 text-sm">No insurance policies found.</p>}
+      {isLoading && <p className="text-slate-400 text-sm">{t('common.loading')}</p>}
+      {!isLoading && policies.length === 0 && <p className="text-slate-500 text-sm">{t('insurance.noPolicies')}</p>}
 
       {policies.length > 0 && (
         <div className="rounded-lg overflow-hidden border border-slate-700">
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-slate-700/50 text-slate-400 text-xs uppercase tracking-wide">
-                <th className="text-left px-4 py-2">Insurer / Policy</th>
-                <th className="text-left px-4 py-2">Type</th>
-                <th className="text-left px-4 py-2">Entity</th>
-                <th className="text-right px-4 py-2">Coverage</th>
-                <th className="text-right px-4 py-2">Premium</th>
-                <th className="text-right px-4 py-2">Expiry</th>
-                <th className="text-right px-4 py-2">Status</th>
+                <th className="text-left px-4 py-2">{t('insurance.colInsurer')}</th>
+                <th className="text-left px-4 py-2">{t('insurance.colType')}</th>
+                <th className="text-left px-4 py-2">{t('insurance.colEntity')}</th>
+                <th className="text-right px-4 py-2">{t('insurance.colCoverage')}</th>
+                <th className="text-right px-4 py-2">{t('insurance.colPremium')}</th>
+                <th className="text-right px-4 py-2">{t('insurance.colExpiry')}</th>
+                <th className="text-right px-4 py-2">{t('insurance.colStatus')}</th>
                 <th className="px-4 py-2"></th>
               </tr>
             </thead>
@@ -527,20 +652,27 @@ export default function InsurancePanel() {
                       <p className="text-slate-100 font-medium">{p.insurer_name}</p>
                       <p className="text-xs text-slate-500">{p.policy_number}</p>
                     </td>
-                    <td className="px-4 py-3 text-slate-400">{POLICY_TYPE_LABELS[p.policy_type]}</td>
+                    <td className="px-4 py-3 text-slate-400">{t(`insurance.policyTypes.${p.policy_type}`)}</td>
                     <td className="px-4 py-3 text-slate-400">{entityName(p.owner_entity_id)}</td>
                     <td className="px-4 py-3 text-right font-mono text-slate-200">{fmtTTD(p.coverage_amount_ttd)}</td>
                     <td className="px-4 py-3 text-right font-mono text-slate-400">
                       {fmtTTD(p.premium_amount_ttd)}
-                      <span className="text-xs text-slate-600 ml-1">/{PREM_FREQ_LABELS[p.premium_frequency].slice(0,3)}</span>
+                      <span className="text-xs text-slate-600 ml-1">/{t(`insurance.frequencies.${p.premium_frequency}`)}</span>
                     </td>
                     <td className={`px-4 py-3 text-right text-xs ${expiryColor}`}>{fmtDate(p.expiry_date)}</td>
                     <td className="px-4 py-3 text-right">
                       <span className={`text-xs px-2 py-0.5 rounded-full ${p.is_active ? 'bg-green-900/50 text-green-300 border border-green-700' : 'bg-slate-700 text-slate-500'}`}>
-                        {p.is_active ? 'Active' : 'Inactive'}
+                        {p.is_active ? t('common.active') : t('common.inactive')}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-right text-xs text-slate-500 hover:text-blue-400">View →</td>
+                    <td className="px-4 py-3 text-right">
+                      <button
+                        onClick={e => { e.stopPropagation(); setPolicyHistory({ id: p.id, name: `${p.insurer_name} — ${p.policy_number}` }) }}
+                        className="text-xs text-slate-500 hover:text-slate-300 transition-colors mr-3">
+                        History
+                      </button>
+                      <span className="text-xs text-slate-500 hover:text-blue-400">{t('insurance.view')}</span>
+                    </td>
                   </tr>
                 )
               })}
@@ -549,8 +681,9 @@ export default function InsurancePanel() {
         </div>
       )}
 
-      {showAdd  && <AddPolicyModal onClose={() => setShowAdd(false)} onCreated={refresh} />}
-      {selected && <PolicyDetail policy={selected} onClose={() => setSelected(null)} />}
+      {showAdd       && <AddPolicyModal onClose={() => setShowAdd(false)} onCreated={refresh} />}
+      {selected      && <PolicyDetail policy={selected} onClose={() => setSelected(null)} />}
+      {policyHistory && <PolicyHistoryModal id={policyHistory.id} name={policyHistory.name} onClose={() => setPolicyHistory(null)} />}
     </div>
   )
 }

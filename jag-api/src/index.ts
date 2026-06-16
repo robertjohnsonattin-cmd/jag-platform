@@ -18,9 +18,11 @@ app.use((_req: Request, res: Response, next: NextFunction) => {
 });
 
 // ── In-memory rate limiter — 300 req/min per IP ───────────────────────────────
-// Resets every 60 s window. Sufficient for a closed enterprise API.
+// Resets every 60 s window. SSE /listen is exempt — it's a long-lived connection.
 const _rateWindows = new Map<string, { count: number; reset: number }>();
 app.use((req: Request, res: Response, next: NextFunction) => {
+  // SSE endpoint holds one persistent connection — exclude from per-request counting
+  if (req.path === '/api/v1/finance/document-jobs/listen') return next();
   const ip = (req.headers['x-forwarded-for'] as string | undefined)?.split(',')[0]?.trim()
            ?? req.socket.remoteAddress ?? 'unknown';
   const now = Date.now();
@@ -30,7 +32,7 @@ app.use((req: Request, res: Response, next: NextFunction) => {
     return next();
   }
   window.count += 1;
-  if (window.count > 300) {
+  if (window.count > 1000) {
     res.status(429).json({ success: false, data: null, error: 'Too many requests. Retry after 60 s.', code: 'RATE_LIMITED' });
     return;
   }
@@ -80,6 +82,10 @@ app.get('/health/ready', async (_req: Request, res: Response) => {
     res.status(503).json({ status: 'not_ready', error: 'database_unreachable' });
   }
 });
+
+// ── Internal routes (Docker-network-only, no Keycloak auth) ──────────────────
+import { minioAuditRouter } from './routes/internal/minio-audit';
+app.use('/internal/minio-audit', minioAuditRouter);
 
 // ── Phase 1B routes (STD-05: all API routes prefixed /api/v1/) ─────────────────
 import { authRouter }          from './routes/auth';

@@ -1,19 +1,16 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { useTranslation } from 'react-i18next'
 import { glApi } from '../../api/gl'
 import { fmtTTD } from '../../lib/entities'
 import type { GlAccountType, TrialBalanceRow } from '../../types/gl'
 
-const TYPE_LABELS: Record<GlAccountType, string> = {
-  ASSET: 'Assets', LIABILITY: 'Liabilities', EQUITY: 'Equity',
-  REVENUE: 'Revenue', EXPENSE: 'Expenses',
-  OTHER_INCOME: 'Other Income', OTHER_EXPENSE: 'Other Expense',
-}
 const TYPE_ORDER: GlAccountType[] = ['ASSET','LIABILITY','EQUITY','REVENUE','EXPENSE','OTHER_INCOME','OTHER_EXPENSE']
 
 const now = new Date()
 
 export default function TrialBalance() {
+  const { t } = useTranslation()
   const [year, setYear]   = useState(now.getFullYear())
   const [month, setMonth] = useState(now.getMonth() + 1)
 
@@ -23,9 +20,9 @@ export default function TrialBalance() {
   })
 
   const activeRows = rows.filter(r => parseFloat(r.total_debit) > 0 || parseFloat(r.total_credit) > 0)
-  const grouped = TYPE_ORDER.reduce<Partial<Record<GlAccountType, TrialBalanceRow[]>>>((acc, t) => {
-    const group = activeRows.filter(r => r.account_type === t)
-    if (group.length > 0) acc[t] = group
+  const grouped = TYPE_ORDER.reduce<Partial<Record<GlAccountType, TrialBalanceRow[]>>>((acc, tp) => {
+    const group = activeRows.filter(r => r.account_type === tp)
+    if (group.length > 0) acc[tp] = group
     return acc
   }, {})
 
@@ -33,12 +30,14 @@ export default function TrialBalance() {
   const grandCredit = rows.reduce((s, r) => s + parseFloat(r.total_credit), 0)
   const isBalanced  = Math.round(grandDebit * 100) === Math.round(grandCredit * 100)
 
+  const monthNames = [1,2,3,4,5,6,7,8,9,10,11,12].map(m => t(`intercompany.months.${m}`))
+
   return (
     <div>
       {/* Period selector */}
       <div className="flex gap-3 mb-6 items-end">
         <div>
-          <label className="block text-xs text-slate-400 mb-1">Year</label>
+          <label className="block text-xs text-slate-400 mb-1">{t('trialBalance.year')}</label>
           <input
             type="number"
             value={year}
@@ -47,29 +46,29 @@ export default function TrialBalance() {
           />
         </div>
         <div>
-          <label className="block text-xs text-slate-400 mb-1">Month</label>
+          <label className="block text-xs text-slate-400 mb-1">{t('trialBalance.month')}</label>
           <select
             value={month}
             onChange={e => setMonth(Number(e.target.value))}
             className="bg-slate-700 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500"
           >
-            {['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'].map((m, i) => (
+            {monthNames.map((m, i) => (
               <option key={i} value={i + 1}>{m}</option>
             ))}
           </select>
         </div>
         {!isLoading && rows.length > 0 && (
           <div className={`text-xs px-3 py-1.5 rounded border ${isBalanced ? 'border-green-700 text-green-400' : 'border-red-700 text-red-400'}`}>
-            {isBalanced ? '✓ Balanced' : '⚠ Out of balance'}
+            {isBalanced ? `✓ ${t('trialBalance.balanced')}` : `⚠ ${t('trialBalance.outOfBalance')}`}
           </div>
         )}
       </div>
 
-      {isLoading && <p className="text-slate-400 text-sm">Loading…</p>}
-      {error   && <p className="text-red-400 text-sm">Failed to load trial balance.</p>}
+      {isLoading && <p className="text-slate-400 text-sm">{t('common.loading')}</p>}
+      {error   && <p className="text-red-400 text-sm">{t('trialBalance.failed')}</p>}
 
       {!isLoading && activeRows.length === 0 && (
-        <p className="text-slate-400 text-sm">No posted entries for this period.</p>
+        <p className="text-slate-400 text-sm">{t('trialBalance.noEntries')}</p>
       )}
 
       {activeRows.length > 0 && (
@@ -80,16 +79,18 @@ export default function TrialBalance() {
               const subtotalCr = typeRows.reduce((s, r) => s + parseFloat(r.total_credit), 0)
               return (
                 <div key={type}>
-                  <h3 className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-2">{TYPE_LABELS[type]}</h3>
+                  <h3 className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-2">
+                    {t(`trialBalance.types.${type}`)}
+                  </h3>
                   <div className="rounded-lg overflow-hidden border border-slate-700">
                     <table className="w-full text-sm">
                       <thead>
                         <tr className="bg-slate-700/50 text-slate-400 text-xs uppercase tracking-wide">
-                          <th className="text-left px-4 py-2 w-24">Code</th>
-                          <th className="text-left px-4 py-2">Account</th>
-                          <th className="text-right px-4 py-2">Debit</th>
-                          <th className="text-right px-4 py-2">Credit</th>
-                          <th className="text-right px-4 py-2">Balance</th>
+                          <th className="text-left px-4 py-2 w-24">{t('trialBalance.colCode')}</th>
+                          <th className="text-left px-4 py-2">{t('trialBalance.colAccount')}</th>
+                          <th className="text-right px-4 py-2">{t('trialBalance.colDebit')}</th>
+                          <th className="text-right px-4 py-2">{t('trialBalance.colCredit')}</th>
+                          <th className="text-right px-4 py-2">{t('trialBalance.colBalance')}</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-700">
@@ -116,7 +117,7 @@ export default function TrialBalance() {
                       </tbody>
                       <tfoot className="border-t border-slate-600 bg-slate-700/20 text-xs text-slate-400 font-semibold">
                         <tr>
-                          <td colSpan={2} className="px-4 py-2">Subtotal</td>
+                          <td colSpan={2} className="px-4 py-2">{t('trialBalance.subtotal')}</td>
                           <td className="px-4 py-2 text-right font-mono text-blue-300">{fmtTTD(subtotalDr)}</td>
                           <td className="px-4 py-2 text-right font-mono text-green-300">{fmtTTD(subtotalCr)}</td>
                           <td />
@@ -129,13 +130,12 @@ export default function TrialBalance() {
             })}
           </div>
 
-          {/* Grand total */}
           <div className="mt-6 rounded-lg border border-slate-600 bg-slate-800 p-4">
             <div className="flex justify-between text-sm font-semibold">
-              <span className="text-slate-300">Grand Total</span>
+              <span className="text-slate-300">{t('trialBalance.grandTotal')}</span>
               <div className="flex gap-8">
-                <span className="font-mono text-blue-300">{fmtTTD(grandDebit)} Dr</span>
-                <span className="font-mono text-green-300">{fmtTTD(grandCredit)} Cr</span>
+                <span className="font-mono text-blue-300">{fmtTTD(grandDebit)} {t('trialBalance.dr')}</span>
+                <span className="font-mono text-green-300">{fmtTTD(grandCredit)} {t('trialBalance.cr')}</span>
               </div>
             </div>
           </div>

@@ -1,4 +1,5 @@
 import { useState, useCallback } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { imsApi } from '../api/ims'
 import ConfirmDeleteModal from '../components/ui/ConfirmDeleteModal'
@@ -61,6 +62,7 @@ function AddItemModal({
   onClose: () => void
 }) {
   const qc = useQueryClient()
+  const { t } = useTranslation()
   const [form, setForm] = useState({
     name: '', location_id: '', sku: '', category_id: '',
     unit_of_measure: 'each', description: '',
@@ -98,28 +100,28 @@ function AddItemModal({
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
       <div className="bg-slate-800 border border-slate-700 rounded-xl w-full max-w-lg p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
-        <h2 className="text-lg font-semibold mb-4 text-white">Add Item / Asset</h2>
+        <h2 className="text-lg font-semibold mb-4 text-white">{t('inv.addItemTitle')}</h2>
         <div className="space-y-3">
           <div className="flex gap-3">
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Name *</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('inv.nameStar')}</label>
               <input value={form.name} onChange={set('name')} className={cls} placeholder="e.g. Cement 40kg bag" />
             </div>
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">SKU</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('inv.sku')}</label>
               <input value={form.sku} onChange={set('sku')} className={cls} placeholder="optional" />
             </div>
           </div>
           <div className="flex gap-3">
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Location *</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('inv.locationStar')}</label>
               <select value={form.location_id} onChange={set('location_id')} className={cls}>
                 <option value="">— select —</option>
                 {locations.map(l => <option key={l.id} value={l.id}>[{l.code}] {l.name}</option>)}
               </select>
             </div>
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Category</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('inv.category')}</label>
               <select value={form.category_id} onChange={set('category_id')} className={cls}>
                 <option value="">— none —</option>
                 {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
@@ -128,37 +130,37 @@ function AddItemModal({
           </div>
           <div className="flex gap-3">
             <div className="w-28">
-              <label className="block text-xs text-slate-400 mb-1">UOM</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('inv.uom')}</label>
               <input value={form.unit_of_measure} onChange={set('unit_of_measure')} className={cls} placeholder="each" />
             </div>
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Qty on Hand</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('inv.qtyOnHand')}</label>
               <input type="number" step="0.01" min="0" value={form.quantity_on_hand} onChange={set('quantity_on_hand')} className={cls} />
             </div>
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Reorder Point</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('inv.reorderPoint')}</label>
               <input type="number" step="0.01" min="0" value={form.reorder_point} onChange={set('reorder_point')} className={cls} />
             </div>
           </div>
           <div className="flex gap-3">
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Unit Value (TTD)</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('inv.unitValueTTD')}</label>
               <input type="number" step="0.01" min="0" value={form.unit_value} onChange={set('unit_value')} className={cls} />
             </div>
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Serial Number</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('inv.serialNumber')}</label>
               <input value={form.serial_number} onChange={set('serial_number')} className={cls} />
             </div>
           </div>
           <div className="flex gap-3">
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Condition</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('inv.condition')}</label>
               <select value={form.condition} onChange={set('condition')} className={cls}>
                 {['NEW','GOOD','FAIR','POOR','WRITTEN_OFF'].map(c => <option key={c} value={c}>{c}</option>)}
               </select>
             </div>
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">VAT Code</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('inv.vatCode')}</label>
               <select value={form.vat_code} onChange={set('vat_code')} className={cls}>
                 {['STANDARD','ZERO','EXEMPT'].map(v => <option key={v} value={v}>{v}</option>)}
               </select>
@@ -166,10 +168,10 @@ function AddItemModal({
           </div>
           <div className="flex items-center gap-2">
             <input type="checkbox" id="is_asset" checked={form.is_asset} onChange={setCheck('is_asset')} className="rounded" />
-            <label htmlFor="is_asset" className="text-sm text-slate-300">Capital Asset (tracked individually, not bulk stock)</label>
+            <label htmlFor="is_asset" className="text-sm text-slate-300">{t('inv.capitalAsset')}</label>
           </div>
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Description</label>
+            <label className="block text-xs text-slate-400 mb-1">{t('common.description')}</label>
             <textarea value={form.description} onChange={set('description')} rows={2} className={cls} />
           </div>
           {error && <p className="text-red-400 text-xs">{error instanceof Error ? error.message : 'Failed.'}</p>}
@@ -180,9 +182,9 @@ function AddItemModal({
             disabled={isPending || !form.name || !form.location_id}
             className="flex-1 py-2 bg-orange-600 hover:bg-orange-500 disabled:opacity-50 text-white text-sm rounded-lg transition-colors"
           >
-            {isPending ? 'Saving…' : 'Add Item'}
+            {isPending ? t('inv.addingItem') : t('inv.addItemBtn')}
           </button>
-          <button onClick={onClose} className="px-4 py-2 text-slate-400 hover:text-white text-sm transition-colors">Cancel</button>
+          <button onClick={onClose} className="px-4 py-2 text-slate-400 hover:text-white text-sm transition-colors">{t('common.cancel')}</button>
         </div>
       </div>
     </div>
@@ -193,6 +195,7 @@ function AddItemModal({
 
 function CreateLocationModal({ onClose, onCreated }: { onClose: () => void; onCreated: (loc: { id: string; name: string; code: string }) => void }) {
   const qc = useQueryClient()
+  const { t } = useTranslation()
   const [name, setName] = useState('')
   const [code, setCode] = useState('')
   const [address, setAddress] = useState('')
@@ -212,18 +215,18 @@ function CreateLocationModal({ onClose, onCreated }: { onClose: () => void; onCr
   return (
     <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[60]">
       <div className="bg-slate-800 border border-slate-700 rounded-xl w-full max-w-sm p-5 shadow-2xl">
-        <h3 className="text-base font-semibold mb-4 text-white">Create Location</h3>
+        <h3 className="text-base font-semibold mb-4 text-white">{t('inv.createLocationTitle')}</h3>
         <div className="space-y-3">
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Name *</label>
+            <label className="block text-xs text-slate-400 mb-1">{t('inv.nameStar')}</label>
             <input value={name} onChange={e => setName(e.target.value)} className={cls} placeholder="e.g. JABCO Yard" />
           </div>
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Code * (uppercase, no spaces)</label>
+            <label className="block text-xs text-slate-400 mb-1">{t('inv.codeStar')}</label>
             <input value={code} onChange={e => setCode(e.target.value.toUpperCase().replace(/[^A-Z0-9_]/g,''))} className={cls} placeholder="e.g. JABCO_YARD" />
           </div>
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Address</label>
+            <label className="block text-xs text-slate-400 mb-1">{t('inv.address')}</label>
             <input value={address} onChange={e => setAddress(e.target.value)} className={cls} />
           </div>
           {error && <p className="text-red-400 text-xs">{error}</p>}
@@ -231,9 +234,9 @@ function CreateLocationModal({ onClose, onCreated }: { onClose: () => void; onCr
         <div className="flex gap-3 mt-4">
           <button onClick={submit} disabled={saving || !name || !code}
             className="flex-1 py-2 bg-orange-600 hover:bg-orange-500 disabled:opacity-50 text-white text-sm rounded-lg">
-            {saving ? 'Creating…' : 'Create'}
+            {saving ? t('inv.creating') : t('common.create')}
           </button>
-          <button onClick={onClose} className="px-4 py-2 text-slate-400 hover:text-white text-sm">Cancel</button>
+          <button onClick={onClose} className="px-4 py-2 text-slate-400 hover:text-white text-sm">{t('common.cancel')}</button>
         </div>
       </div>
     </div>
@@ -244,6 +247,7 @@ function CreateLocationModal({ onClose, onCreated }: { onClose: () => void; onCr
 
 function LogServiceModal({ vehicle, onClose }: { vehicle: Vehicle; onClose: () => void }) {
   const qc = useQueryClient()
+  const { t } = useTranslation()
   const todayStr = new Date().toISOString().split('T')[0]
   const [serviceDate, setServiceDate] = useState(todayStr)
   const [mileage, setMileage] = useState(String(vehicle.current_mileage_km ?? ''))
@@ -273,20 +277,20 @@ function LogServiceModal({ vehicle, onClose }: { vehicle: Vehicle; onClose: () =
   return (
     <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[60]">
       <div className="bg-slate-800 border border-slate-700 rounded-xl w-full max-w-sm p-5 shadow-2xl">
-        <h3 className="text-base font-semibold mb-1 text-white">Log Service</h3>
+        <h3 className="text-base font-semibold mb-1 text-white">{t('inv.logServiceTitle')}</h3>
         <p className="text-xs text-slate-400 mb-4">{vehicle.registration_number} — {vehicle.make} {vehicle.model}</p>
         <div className="space-y-3">
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Service Date</label>
+            <label className="block text-xs text-slate-400 mb-1">{t('inv.serviceDate')}</label>
             <input type="date" value={serviceDate} onChange={e => setServiceDate(e.target.value)} className={cls} />
           </div>
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Service Interval (days)</label>
+            <label className="block text-xs text-slate-400 mb-1">{t('inv.serviceIntervalDays')}</label>
             <input type="number" min="1" max="3650" value={intervalDays} onChange={e => setIntervalDays(e.target.value)} className={cls} />
-            <p className="text-xs text-slate-500 mt-1">Next service due: <span className="text-orange-400 font-medium">{fmtDate(nextDate)}</span></p>
+            <p className="text-xs text-slate-500 mt-1">{t('inv.nextServiceDue')} <span className="text-orange-400 font-medium">{fmtDate(nextDate)}</span></p>
           </div>
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Current Mileage (km)</label>
+            <label className="block text-xs text-slate-400 mb-1">{t('inv.currentMileageKm')}</label>
             <input type="number" min="0" value={mileage} onChange={e => setMileage(e.target.value)} className={cls} />
           </div>
           {error && <p className="text-red-400 text-xs">{error}</p>}
@@ -294,9 +298,9 @@ function LogServiceModal({ vehicle, onClose }: { vehicle: Vehicle; onClose: () =
         <div className="flex gap-3 mt-4">
           <button onClick={submit} disabled={saving}
             className="flex-1 py-2 bg-orange-600 hover:bg-orange-500 disabled:opacity-50 text-white text-sm rounded-lg">
-            {saving ? 'Saving…' : 'Save Service Log'}
+            {saving ? t('common.saving') : t('inv.saveServiceLog')}
           </button>
-          <button onClick={onClose} className="px-4 py-2 text-slate-400 hover:text-white text-sm">Cancel</button>
+          <button onClick={onClose} className="px-4 py-2 text-slate-400 hover:text-white text-sm">{t('common.cancel')}</button>
         </div>
       </div>
     </div>
@@ -313,6 +317,7 @@ function AddVehicleModal({
   onClose: () => void
 }) {
   const qc = useQueryClient()
+  const { t } = useTranslation()
   const [locations, setLocations] = useState(initLocations)
   const [showCreateLoc, setShowCreateLoc] = useState(false)
 
@@ -367,21 +372,21 @@ function AddVehicleModal({
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
       <div className="bg-slate-800 border border-slate-700 rounded-xl w-full max-w-lg p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
-        <h2 className="text-lg font-semibold mb-4 text-white">Add Vehicle</h2>
+        <h2 className="text-lg font-semibold mb-4 text-white">{t('inv.addVehicleTitle')}</h2>
         <div className="space-y-3">
           <div className="flex gap-3">
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Display Name *</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('inv.displayNameStar')}</label>
               <input value={form.name} onChange={set('name')} className={cls} placeholder="e.g. Toyota Hilux — White" />
             </div>
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Owner / Entity *</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('inv.ownerEntityStar')}</label>
               <select value={form.owner_entity} onChange={set('owner_entity')} className={cls}>
                 {VEHICLE_OWNER_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
               </select>
               {form.owner_entity === 'Other' && (
                 <input value={form.owner_entity_custom} onChange={set('owner_entity_custom')}
-                  className={`${cls} mt-1`} placeholder="Enter owner / entity name" />
+                  className={`${cls} mt-1`} placeholder={t('inv.ownerEntityPlaceholder')} />
               )}
             </div>
           </div>
@@ -389,49 +394,49 @@ function AddVehicleModal({
           {/* Location — optional, with inline create */}
           <div>
             <div className="flex items-center justify-between mb-1">
-              <label className="text-xs text-slate-400">Location</label>
+              <label className="text-xs text-slate-400">{t('inv.colLocation')}</label>
               <button type="button" onClick={() => setShowCreateLoc(true)}
-                className="text-xs text-orange-400 hover:text-orange-300">+ Create location</button>
+                className="text-xs text-orange-400 hover:text-orange-300">{t('inv.createLocation')}</button>
             </div>
             <select value={form.location_id} onChange={set('location_id')} className={cls}>
-              <option value="">— No location —</option>
+              <option value="">{t('inv.noLocation')}</option>
               {locations.map(l => <option key={l.id} value={l.id}>[{l.code}] {l.name}</option>)}
             </select>
           </div>
 
           <div className="flex gap-3">
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Registration # *</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('inv.registrationStar')}</label>
               <input value={form.registration_number} onChange={set('registration_number')} className={cls} placeholder="e.g. PAB 1234" />
             </div>
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Type</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('inv.vehicleType')}</label>
               <select value={form.vehicle_type} onChange={set('vehicle_type')} className={cls}>
-                {VEHICLE_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                {VEHICLE_TYPES.map(vt => <option key={vt} value={vt}>{vt}</option>)}
               </select>
             </div>
           </div>
           <div className="flex gap-3">
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Make *</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('inv.makeStar')}</label>
               <input value={form.make} onChange={set('make')} className={cls} placeholder="Toyota" />
             </div>
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Model *</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('inv.modelStar')}</label>
               <input value={form.model} onChange={set('model')} className={cls} placeholder="Hilux" />
             </div>
             <div className="w-24">
-              <label className="block text-xs text-slate-400 mb-1">Year *</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('inv.yearStar')}</label>
               <input type="number" min="1900" max="2100" value={form.year} onChange={set('year')} className={cls} />
             </div>
           </div>
           <div className="flex gap-3">
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Colour</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('inv.colour')}</label>
               <input value={form.colour} onChange={set('colour')} className={cls} />
             </div>
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Fuel Type</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('inv.fuelType')}</label>
               <select value={form.fuel_type} onChange={set('fuel_type')} className={cls}>
                 {['PETROL','DIESEL','HYBRID','ELECTRIC','NONE'].map(f => <option key={f} value={f}>{f}</option>)}
               </select>
@@ -439,73 +444,73 @@ function AddVehicleModal({
           </div>
           <div className="flex gap-3">
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Insurance Expiry</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('inv.insuranceExpiry')}</label>
               <input type="date" value={form.insurance_expiry} onChange={set('insurance_expiry')} className={cls} />
             </div>
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Reg Expiry</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('inv.regExpiry')}</label>
               <input type="date" value={form.registration_expiry} onChange={set('registration_expiry')} className={cls} />
             </div>
           </div>
           <div className="flex gap-3">
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Insurance Provider</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('inv.insuranceProvider')}</label>
               <input value={form.insurance_provider} onChange={set('insurance_provider')} className={cls} />
             </div>
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Policy Number</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('inv.policyNumber')}</label>
               <input value={form.insurance_policy_number} onChange={set('insurance_policy_number')} className={cls} />
             </div>
           </div>
           <div className="flex gap-3">
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Purchase Date</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('inv.purchaseDate')}</label>
               <input type="date" value={form.purchase_date} onChange={set('purchase_date')} className={cls} />
             </div>
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Purchase Price (TTD)</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('inv.purchasePriceTTD')}</label>
               <input type="number" step="0.01" value={form.purchase_price} onChange={set('purchase_price')} className={cls} />
             </div>
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Current Value (TTD)</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('inv.currentValueTTD')}</label>
               <input type="number" step="0.01" value={form.unit_value} onChange={set('unit_value')} className={cls} />
             </div>
           </div>
           <div className="flex gap-3">
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">VIN</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('inv.vin')}</label>
               <input value={form.vin} onChange={set('vin')} className={cls} />
             </div>
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Engine Number</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('inv.engineNumber')}</label>
               <input value={form.engine_number} onChange={set('engine_number')} className={cls} />
             </div>
           </div>
           <div className="flex gap-3">
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Condition</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('inv.condition')}</label>
               <select value={form.condition} onChange={set('condition')} className={cls}>
                 {['NEW','GOOD','FAIR','POOR'].map(c => <option key={c} value={c}>{c}</option>)}
               </select>
             </div>
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Mileage (km)</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('inv.mileageKm')}</label>
               <input type="number" min="0" value={form.current_mileage_km} onChange={set('current_mileage_km')} className={cls} />
             </div>
           </div>
 
           {/* Service tracking */}
           <div className="border-t border-slate-700 pt-3">
-            <p className="text-xs text-slate-400 mb-2 font-medium">Service Tracking</p>
+            <p className="text-xs text-slate-400 mb-2 font-medium">{t('inv.serviceTracking')}</p>
             <div className="flex gap-3">
               <div className="flex-1">
-                <label className="block text-xs text-slate-400 mb-1">Last Service Date</label>
+                <label className="block text-xs text-slate-400 mb-1">{t('inv.serviceDate')}</label>
                 <input type="date" value={form.last_service_date} onChange={set('last_service_date')} className={cls} />
               </div>
               <div className="flex-1">
-                <label className="block text-xs text-slate-400 mb-1">Service Interval (days)</label>
+                <label className="block text-xs text-slate-400 mb-1">{t('inv.serviceIntervalDays')}</label>
                 <input type="number" min="1" max="3650" value={form.service_interval_days} onChange={set('service_interval_days')} className={cls} />
-                <p className="text-xs text-slate-500 mt-0.5">Default 90 days (3 months)</p>
+                <p className="text-xs text-slate-500 mt-0.5">{t('inv.defaultServiceInterval')}</p>
               </div>
             </div>
           </div>
@@ -518,9 +523,9 @@ function AddVehicleModal({
             disabled={isPending || !form.name || !form.registration_number || !form.make || !form.model || !form.year || !ownerEntityFinal}
             className="flex-1 py-2 bg-orange-600 hover:bg-orange-500 disabled:opacity-50 text-white text-sm rounded-lg transition-colors"
           >
-            {isPending ? 'Saving…' : 'Add Vehicle'}
+            {isPending ? t('common.saving') : t('inv.addVehicleBtn')}
           </button>
-          <button onClick={onClose} className="px-4 py-2 text-slate-400 hover:text-white text-sm transition-colors">Cancel</button>
+          <button onClick={onClose} className="px-4 py-2 text-slate-400 hover:text-white text-sm transition-colors">{t('common.cancel')}</button>
         </div>
       </div>
 
@@ -550,6 +555,7 @@ function EditVehicleModal({
   onClose: () => void
 }) {
   const qc = useQueryClient()
+  const { t } = useTranslation()
   const [form, setForm] = useState({
     owner_entity: vehicle.owner_entity ?? vehicle.fleet_type ?? '',
     owner_entity_custom: '',
@@ -587,66 +593,66 @@ function EditVehicleModal({
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[60]">
       <div className="bg-slate-800 border border-slate-700 rounded-xl w-full max-w-md p-5 shadow-2xl max-h-[90vh] overflow-y-auto">
-        <h3 className="text-base font-semibold mb-1 text-white">Edit Vehicle</h3>
+        <h3 className="text-base font-semibold mb-1 text-white">{t('inv.editVehicleTitle')}</h3>
         <p className="text-xs text-slate-400 mb-4">{vehicle.registration_number} — {vehicle.make} {vehicle.model}</p>
         <div className="space-y-3">
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Owner / Entity</label>
+            <label className="block text-xs text-slate-400 mb-1">{t('inv.ownerEntityStar')}</label>
             <select value={form.owner_entity} onChange={set('owner_entity')} className={cls}>
               {VEHICLE_OWNER_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
               <option value="Other">Other</option>
             </select>
             {form.owner_entity === 'Other' && (
               <input value={form.owner_entity_custom} onChange={set('owner_entity_custom')}
-                className={`${cls} mt-1`} placeholder="Enter owner / entity name" />
+                className={`${cls} mt-1`} placeholder={t('inv.ownerEntityPlaceholder')} />
             )}
           </div>
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Location</label>
+            <label className="block text-xs text-slate-400 mb-1">{t('inv.colLocation')}</label>
             <select value={form.location_id} onChange={set('location_id')} className={cls}>
-              <option value="">— No location —</option>
+              <option value="">{t('inv.noLocation')}</option>
               {locations.map(l => <option key={l.id} value={l.id}>[{l.code}] {l.name}</option>)}
             </select>
           </div>
           <div className="flex gap-3">
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Condition</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('inv.condition')}</label>
               <select value={form.condition} onChange={set('condition')} className={cls}>
                 {['NEW','GOOD','FAIR','POOR'].map(c => <option key={c} value={c}>{c}</option>)}
               </select>
             </div>
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Colour</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('inv.colour')}</label>
               <input value={form.colour} onChange={set('colour')} className={cls} />
             </div>
           </div>
           <div className="flex gap-3">
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Current Value (TTD)</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('inv.currentValueTTD')}</label>
               <input type="number" step="0.01" min="0" value={form.unit_value} onChange={set('unit_value')} className={cls} />
             </div>
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Mileage (km)</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('inv.mileageKm')}</label>
               <input type="number" min="0" value={form.current_mileage_km} onChange={set('current_mileage_km')} className={cls} />
             </div>
           </div>
           <div className="flex gap-3">
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Insurance Expiry</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('inv.insuranceExpiry')}</label>
               <input type="date" value={form.insurance_expiry} onChange={set('insurance_expiry')} className={cls} />
             </div>
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Reg Expiry</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('inv.regExpiry')}</label>
               <input type="date" value={form.registration_expiry} onChange={set('registration_expiry')} className={cls} />
             </div>
           </div>
           <div className="flex gap-3">
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Insurance Provider</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('inv.insuranceProvider')}</label>
               <input value={form.insurance_provider} onChange={set('insurance_provider')} className={cls} />
             </div>
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Policy Number</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('inv.policyNumber')}</label>
               <input value={form.insurance_policy_number} onChange={set('insurance_policy_number')} className={cls} />
             </div>
           </div>
@@ -654,13 +660,13 @@ function EditVehicleModal({
             <div className="flex gap-3">
               {vehicle.vin && (
                 <div className="flex-1">
-                  <label className="block text-xs text-slate-400 mb-1">VIN / Chassis</label>
+                  <label className="block text-xs text-slate-400 mb-1">{t('inv.vinChassis')}</label>
                   <input readOnly value={vehicle.vin} className="w-full bg-slate-700/50 border border-slate-600 rounded-lg px-3 py-2 text-xs text-slate-300 font-mono cursor-default select-all" />
                 </div>
               )}
               {vehicle.engine_number && (
                 <div className="flex-1">
-                  <label className="block text-xs text-slate-400 mb-1">Engine Number</label>
+                  <label className="block text-xs text-slate-400 mb-1">{t('inv.engineNumber')}</label>
                   <input readOnly value={vehicle.engine_number} className="w-full bg-slate-700/50 border border-slate-600 rounded-lg px-3 py-2 text-xs text-slate-300 font-mono cursor-default select-all" />
                 </div>
               )}
@@ -671,9 +677,9 @@ function EditVehicleModal({
         <div className="flex gap-3 mt-4">
           <button onClick={() => mutate()} disabled={isPending}
             className="flex-1 py-2 bg-orange-600 hover:bg-orange-500 disabled:opacity-50 text-white text-sm rounded-lg transition-colors">
-            {isPending ? 'Saving…' : 'Save Changes'}
+            {isPending ? t('common.saving') : t('inv.saveChanges')}
           </button>
-          <button onClick={onClose} className="px-4 py-2 text-slate-400 hover:text-white text-sm transition-colors">Cancel</button>
+          <button onClick={onClose} className="px-4 py-2 text-slate-400 hover:text-white text-sm transition-colors">{t('common.cancel')}</button>
         </div>
       </div>
     </div>
@@ -692,6 +698,7 @@ function RecordMovementModal({
   onClose: () => void
 }) {
   const qc = useQueryClient()
+  const { t } = useTranslation()
   const [type, setType] = useState<MovementType>('RECEIVE')
   const [quantity, setQuantity] = useState('')
   const [toLoc, setToLoc] = useState('')
@@ -725,29 +732,29 @@ function RecordMovementModal({
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
       <div className="bg-slate-800 border border-slate-700 rounded-lg w-full max-w-md shadow-xl">
         <div className="flex items-center justify-between px-5 py-4 border-b border-slate-700">
-          <h2 className="text-white font-semibold">Record Movement</h2>
+          <h2 className="text-white font-semibold">{t('inv.recordMovementTitle')}</h2>
           <button onClick={onClose} className="text-slate-400 hover:text-white text-xl leading-none">&times;</button>
         </div>
         <div className="px-5 py-4 space-y-4">
-          <div className="text-slate-400 text-sm">Item: <span className="text-white font-medium">{item.name}</span>
-            <span className="ml-2 text-slate-500">({item.quantity_on_hand} {item.unit_of_measure} on hand)</span>
+          <div className="text-slate-400 text-sm">{t('common.name')}: <span className="text-white font-medium">{item.name}</span>
+            <span className="ml-2 text-slate-500">({t('inv.itemOnHand', { qty: item.quantity_on_hand, uom: item.unit_of_measure })})</span>
           </div>
 
           <div>
-            <label className="block text-slate-400 text-xs mb-1">Movement Type</label>
+            <label className="block text-slate-400 text-xs mb-1">{t('inv.movementType')}</label>
             <select
               value={type}
               onChange={e => setType(e.target.value as MovementType)}
               className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-white text-sm"
             >
-              {(['RECEIVE','RETURN','CONSUME','ADJUSTMENT','TRANSFER','DISPOSAL','SALE'] as MovementType[]).map(t => (
-                <option key={t} value={t}>{t}</option>
+              {(['RECEIVE','RETURN','CONSUME','ADJUSTMENT','TRANSFER','DISPOSAL','SALE'] as MovementType[]).map(mt => (
+                <option key={mt} value={mt}>{mt}</option>
               ))}
             </select>
           </div>
 
           <div>
-            <label className="block text-slate-400 text-xs mb-1">Quantity</label>
+            <label className="block text-slate-400 text-xs mb-1">{t('inv.quantity')}</label>
             <input
               type="number"
               value={quantity}
@@ -761,13 +768,13 @@ function RecordMovementModal({
 
           {type === 'TRANSFER' && (
             <div>
-              <label className="block text-slate-400 text-xs mb-1">Destination Location</label>
+              <label className="block text-slate-400 text-xs mb-1">{t('inv.destLocation')}</label>
               <select
                 value={toLoc}
                 onChange={e => setToLoc(e.target.value)}
                 className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-white text-sm"
               >
-                <option value="">— select location —</option>
+                <option value="">{t('inv.selectLocation')}</option>
                 {locations.map(l => (
                   <option key={l.id} value={l.id}>[{l.code}] {l.name}</option>
                 ))}
@@ -778,7 +785,7 @@ function RecordMovementModal({
           {type === 'SALE' && (
             <>
               <div>
-                <label className="block text-slate-400 text-xs mb-1">Sale Price (TTD, per unit)</label>
+                <label className="block text-slate-400 text-xs mb-1">{t('inv.salePriceTTD')}</label>
                 <input
                   type="number"
                   value={salePrice}
@@ -790,7 +797,7 @@ function RecordMovementModal({
                 />
               </div>
               <div>
-                <label className="block text-slate-400 text-xs mb-1">Customer Name (optional)</label>
+                <label className="block text-slate-400 text-xs mb-1">{t('inv.customerNameOpt')}</label>
                 <input
                   type="text"
                   value={customerName}
@@ -802,7 +809,7 @@ function RecordMovementModal({
           )}
 
           <div>
-            <label className="block text-slate-400 text-xs mb-1">Notes (optional)</label>
+            <label className="block text-slate-400 text-xs mb-1">{t('inv.notesOpt')}</label>
             <textarea
               value={notes}
               onChange={e => setNotes(e.target.value)}
@@ -817,13 +824,13 @@ function RecordMovementModal({
           <button
             onClick={onClose}
             className="px-4 py-2 rounded text-sm text-slate-300 hover:text-white transition-colors"
-          >Cancel</button>
+          >{t('common.cancel')}</button>
           <button
             onClick={() => mutation.mutate()}
             disabled={mutation.isPending || !quantity || (type === 'TRANSFER' && !toLoc) || (type === 'SALE' && !salePrice)}
             className="px-4 py-2 rounded text-sm bg-orange-600 hover:bg-orange-500 text-white disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
-            {mutation.isPending ? 'Saving…' : 'Record'}
+            {mutation.isPending ? t('common.saving') : t('inv.record')}
           </button>
         </div>
       </div>
@@ -835,6 +842,7 @@ function RecordMovementModal({
 
 function AddBarcodeModal({ itemId, onClose }: { itemId: string; onClose: () => void }) {
   const qc = useQueryClient()
+  const { t } = useTranslation()
   const [value, setValue] = useState('')
   const [type, setType] = useState('CODE128')
   const [isPrimary, setIsPrimary] = useState(false)
@@ -847,29 +855,29 @@ function AddBarcodeModal({ itemId, onClose }: { itemId: string; onClose: () => v
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
       <div className="bg-slate-800 border border-slate-700 rounded-xl w-full max-w-sm p-6 shadow-2xl">
-        <h2 className="text-base font-semibold mb-4 text-white">Add Barcode</h2>
+        <h2 className="text-base font-semibold mb-4 text-white">{t('inv.addBarcodeTitle')}</h2>
         <div className="space-y-3">
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Barcode Value *</label>
+            <label className="block text-xs text-slate-400 mb-1">{t('inv.barcodeValueStar')}</label>
             <input value={value} onChange={e => setValue(e.target.value)} className={cls} placeholder="e.g. 123456789012" autoFocus />
           </div>
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Type</label>
+            <label className="block text-xs text-slate-400 mb-1">{t('common.type')}</label>
             <select value={type} onChange={e => setType(e.target.value)} className={cls}>
-              {['EAN13','EAN8','UPC_A','CODE128','QR','CUSTOM'].map(t => <option key={t} value={t}>{t}</option>)}
+              {['EAN13','EAN8','UPC_A','CODE128','QR','CUSTOM'].map(bt => <option key={bt} value={bt}>{bt}</option>)}
             </select>
           </div>
           <div className="flex items-center gap-2">
             <input type="checkbox" id="bc_primary" checked={isPrimary} onChange={e => setIsPrimary(e.target.checked)} className="rounded" />
-            <label htmlFor="bc_primary" className="text-sm text-slate-300">Set as primary barcode</label>
+            <label htmlFor="bc_primary" className="text-sm text-slate-300">{t('inv.setPrimary')}</label>
           </div>
           {error && <p className="text-red-400 text-xs">{error instanceof Error ? error.message : 'Failed.'}</p>}
         </div>
         <div className="flex gap-3 mt-5">
           <button onClick={() => mutate()} disabled={isPending || !value} className="flex-1 py-2 bg-orange-600 hover:bg-orange-500 disabled:opacity-50 text-white text-sm rounded-lg transition-colors">
-            {isPending ? 'Saving…' : 'Add'}
+            {isPending ? t('common.saving') : t('common.add')}
           </button>
-          <button onClick={onClose} className="px-4 py-2 text-slate-400 hover:text-white text-sm transition-colors">Cancel</button>
+          <button onClick={onClose} className="px-4 py-2 text-slate-400 hover:text-white text-sm transition-colors">{t('common.cancel')}</button>
         </div>
       </div>
     </div>
@@ -888,6 +896,7 @@ function EditItemModal({
   onClose: () => void
 }) {
   const qc = useQueryClient()
+  const { t } = useTranslation()
   const [form, setForm] = useState({
     name: item.name,
     description: '',
@@ -917,44 +926,44 @@ function EditItemModal({
   return (
     <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[60]">
       <div className="bg-slate-800 border border-slate-700 rounded-xl w-full max-w-sm p-5 shadow-2xl">
-        <h3 className="text-base font-semibold mb-1 text-white">Edit Item</h3>
+        <h3 className="text-base font-semibold mb-1 text-white">{t('inv.editItemTitle')}</h3>
         <p className="text-xs text-slate-400 mb-4">{item.sku ? item.sku + ' · ' : ''}{item.location_name}</p>
         <div className="space-y-3">
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Name *</label>
+            <label className="block text-xs text-slate-400 mb-1">{t('inv.nameStar')}</label>
             <input value={form.name} onChange={set('name')} className={cls} />
           </div>
           <div className="flex gap-3">
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Unit Value (TTD)</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('inv.unitValueTTD')}</label>
               <input type="number" step="0.01" min="0" value={form.unit_value} onChange={set('unit_value')} className={cls} />
             </div>
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Condition</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('inv.condition')}</label>
               <select value={form.condition} onChange={set('condition')} className={cls}>
                 {['NEW','GOOD','FAIR','POOR','WRITTEN_OFF'].map(c => <option key={c} value={c}>{c}</option>)}
               </select>
             </div>
           </div>
           <div>
-            <label className="block text-xs text-slate-400 mb-1">New Location</label>
+            <label className="block text-xs text-slate-400 mb-1">{t('inv.newLocation')}</label>
             <select value={form.location_id} onChange={set('location_id')} className={cls}>
-              <option value="">— keep current —</option>
+              <option value="">{t('inv.keepCurrent')}</option>
               {locations.map(l => <option key={l.id} value={l.id}>[{l.code}] {l.name}</option>)}
             </select>
           </div>
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Description (replaces existing)</label>
-            <textarea value={form.description} onChange={set('description')} rows={2} className={cls} placeholder="Leave blank to keep current" />
+            <label className="block text-xs text-slate-400 mb-1">{t('inv.descriptionReplaces')}</label>
+            <textarea value={form.description} onChange={set('description')} rows={2} className={cls} placeholder={t('inv.leaveBlankKeep')} />
           </div>
           {error && <p className="text-red-400 text-xs">{error instanceof Error ? error.message : 'Failed.'}</p>}
         </div>
         <div className="flex gap-3 mt-4">
           <button onClick={() => mutate()} disabled={isPending || !form.name}
             className="flex-1 py-2 bg-orange-600 hover:bg-orange-500 disabled:opacity-50 text-white text-sm rounded-lg transition-colors">
-            {isPending ? 'Saving…' : 'Save Changes'}
+            {isPending ? t('common.saving') : t('inv.saveChanges')}
           </button>
-          <button onClick={onClose} className="px-4 py-2 text-slate-400 hover:text-white text-sm transition-colors">Cancel</button>
+          <button onClick={onClose} className="px-4 py-2 text-slate-400 hover:text-white text-sm transition-colors">{t('common.cancel')}</button>
         </div>
       </div>
     </div>
@@ -976,6 +985,7 @@ function ItemDetailPanel({
   const [showDeleteItem, setShowDeleteItem] = useState(false)
   const [detailTab, setDetailTab] = useState<'info' | 'movements' | 'barcodes' | 'photos'>('info')
   const qc = useQueryClient()
+  const { t } = useTranslation()
 
   const { data: detail } = useQuery({
     queryKey: ['ims-item', item.id],
@@ -1003,7 +1013,7 @@ function ItemDetailPanel({
           <div className="min-w-0">
             <h2 className="text-white font-semibold truncate">{d.name}</h2>
             <p className="text-slate-400 text-sm mt-0.5">
-              {d.sku ? `SKU: ${d.sku}` : 'No SKU'} · {d.location_code} {d.location_name}
+              {d.sku ? `SKU: ${d.sku}` : t('inv.noSku')} · {d.location_code} {d.location_name}
             </p>
           </div>
           <div className="flex items-center gap-2 shrink-0">
@@ -1011,18 +1021,18 @@ function ItemDetailPanel({
               onClick={() => setEditModal(true)}
               className="px-3 py-1.5 rounded text-xs bg-slate-600 hover:bg-slate-500 text-white transition-colors"
             >
-              Edit
+              {t('common.edit')}
             </button>
             <button
               onClick={() => setShowDeleteItem(true)}
               className="px-3 py-1.5 rounded text-xs bg-slate-700 hover:bg-red-700 text-slate-400 hover:text-white transition-colors"
               title="Delete item"
-            >Delete</button>
+            >{t('common.delete')}</button>
             <button
               onClick={() => setMovementModal(true)}
               className="px-3 py-1.5 rounded text-xs bg-orange-600 hover:bg-orange-500 text-white transition-colors"
             >
-              + Movement
+              {t('inv.addMovement')}
             </button>
             <button onClick={onClose} className="text-slate-400 hover:text-white text-xl leading-none">&times;</button>
           </div>
@@ -1030,17 +1040,25 @@ function ItemDetailPanel({
 
         {/* Tabs */}
         <div className="flex border-b border-slate-700 px-5">
-          {(['info', 'movements', 'barcodes', 'photos'] as const).map(t => (
-            <button
-              key={t}
-              onClick={() => setDetailTab(t)}
-              className={`py-2 px-3 text-sm capitalize font-medium border-b-2 -mb-px transition-colors ${
-                detailTab === t
-                  ? 'border-orange-500 text-orange-400'
-                  : 'border-transparent text-slate-400 hover:text-white'
-              }`}
-            >{t}</button>
-          ))}
+          {(['info', 'movements', 'barcodes', 'photos'] as const).map(dtab => {
+            const tabLabels = {
+              info:      t('inv.detailTabInfo'),
+              movements: t('inv.detailTabMovements'),
+              barcodes:  t('inv.detailTabBarcodes'),
+              photos:    t('inv.detailTabPhotos'),
+            }
+            return (
+              <button
+                key={dtab}
+                onClick={() => setDetailTab(dtab)}
+                className={`py-2 px-3 text-sm capitalize font-medium border-b-2 -mb-px transition-colors ${
+                  detailTab === dtab
+                    ? 'border-orange-500 text-orange-400'
+                    : 'border-transparent text-slate-400 hover:text-white'
+                }`}
+              >{tabLabels[dtab]}</button>
+            )
+          })}
         </div>
 
         {/* Content */}
@@ -1051,33 +1069,33 @@ function ItemDetailPanel({
               <div className="grid grid-cols-3 gap-3">
                 <div className="bg-slate-700/50 rounded-lg p-3 text-center">
                   <p className="text-2xl font-bold text-white">{d.quantity_on_hand}</p>
-                  <p className="text-xs text-slate-400 mt-1">On Hand</p>
+                  <p className="text-xs text-slate-400 mt-1">{t('inv.onHand')}</p>
                 </div>
                 <div className="bg-slate-700/50 rounded-lg p-3 text-center">
                   <p className="text-2xl font-bold text-white">{d.quantity_reserved}</p>
-                  <p className="text-xs text-slate-400 mt-1">Reserved</p>
+                  <p className="text-xs text-slate-400 mt-1">{t('inv.reserved')}</p>
                 </div>
                 <div className="bg-slate-700/50 rounded-lg p-3 text-center">
                   <p className="text-2xl font-bold text-white">{d.reorder_point ?? '—'}</p>
-                  <p className="text-xs text-slate-400 mt-1">Reorder At</p>
+                  <p className="text-xs text-slate-400 mt-1">{t('inv.reorderAt')}</p>
                 </div>
               </div>
 
               {/* Fields */}
               <div className="space-y-2">
-                {[
-                  ['Unit of Measure', d.unit_of_measure],
-                  ['Unit Value', fmtMoney(d.unit_value)],
-                  ['Total Value', fmtMoney(d.unit_value != null ? d.unit_value * d.quantity_on_hand : null)],
-                  ['Condition', null],
-                  ['Category', d.category_name ?? '—'],
-                  ['Serial Number', d.serial_number ?? '—'],
-                  ['Asset', d.is_asset ? 'Yes' : 'No'],
-                  ['Last Modified', fmtDate(d.last_modified_at)],
-                ].map(([label, value]) => (
-                  <div key={label as string} className="flex justify-between text-sm">
-                    <span className="text-slate-400">{label as string}</span>
-                    {label === 'Condition'
+                {([
+                  ['unitOfMeasure', t('inv.unitOfMeasure'), d.unit_of_measure],
+                  ['unitValue',     t('inv.unitValue'),     fmtMoney(d.unit_value)],
+                  ['totalValue',    t('inv.totalValue'),     fmtMoney(d.unit_value != null ? d.unit_value * d.quantity_on_hand : null)],
+                  ['condition',     t('inv.conditionLbl'),   null],
+                  ['category',      t('inv.categoryLbl'),    d.category_name ?? '—'],
+                  ['serialNumber',  t('inv.serialNumberLbl'), d.serial_number ?? '—'],
+                  ['asset',         t('inv.assetLbl'),       d.is_asset ? t('common.yes') : t('common.no')],
+                  ['lastModified',  t('inv.lastModified'),   fmtDate(d.last_modified_at)],
+                ] as [string, string, string | null][]).map(([key, label, value]) => (
+                  <div key={key} className="flex justify-between text-sm">
+                    <span className="text-slate-400">{label}</span>
+                    {key === 'condition'
                       ? <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${CONDITION_STYLES[d.condition]}`}>{d.condition}</span>
                       : <span className="text-white">{value as string}</span>
                     }
@@ -1122,9 +1140,9 @@ function ItemDetailPanel({
 
           {detailTab === 'movements' && (
             <div className="space-y-2">
-              {!movData && <p className="text-slate-400 text-sm">Loading…</p>}
+              {!movData && <p className="text-slate-400 text-sm">{t('common.loading')}</p>}
               {movData?.movements.length === 0 && (
-                <p className="text-slate-500 text-sm text-center py-8">No movements recorded.</p>
+                <p className="text-slate-500 text-sm text-center py-8">{t('inv.noMovements')}</p>
               )}
               {movData?.movements.map(m => (
                 <div key={m.id} className="bg-slate-700/50 rounded-lg p-3 space-y-1">
@@ -1139,12 +1157,12 @@ function ItemDetailPanel({
                       {['CONSUME','DISPOSAL','SALE'].includes(m.movement_type) ? '−' : '+'}{m.quantity}
                     </span>
                     <span className="text-slate-400">{item.unit_of_measure}</span>
-                    {m.from_location_name && <span className="text-slate-500 text-xs">from {m.from_location_name}</span>}
+                    {m.from_location_name && <span className="text-slate-500 text-xs">{t('inv.fromLbl')} {m.from_location_name}</span>}
                     {m.to_location_name && <span className="text-slate-500 text-xs">→ {m.to_location_name}</span>}
                   </div>
                   {m.sale_price && (
                     <p className="text-slate-400 text-xs">
-                      Sale: {fmtMoney(m.sale_price)}/unit · VAT: {fmtMoney(m.vat_amount)}
+                      {t('inv.saleLbl')} {fmtMoney(m.sale_price)}{t('inv.perUnitVat')} {fmtMoney(m.vat_amount)}
                       {m.customer_name ? ` · ${m.customer_name}` : ''}
                     </p>
                   )}
@@ -1193,6 +1211,7 @@ function ItemDetailPanel({
 
 function BarcodesTab({ item, onAdd }: { item: ItemDetail; onAdd: () => void }) {
   const qc = useQueryClient()
+  const { t } = useTranslation()
 
   const { mutate: deleteBarcode } = useMutation({
     mutationFn: (barcodeId: string) => imsApi.deleteBarcode(item.id, barcodeId),
@@ -1204,15 +1223,15 @@ function BarcodesTab({ item, onAdd }: { item: ItemDetail; onAdd: () => void }) {
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <p className="text-slate-400 text-xs">{barcodes.length} barcode{barcodes.length !== 1 ? 's' : ''}</p>
+        <p className="text-slate-400 text-xs">{t('inv.barcodeCount', { count: barcodes.length })}</p>
         <button
           onClick={onAdd}
           className="px-2.5 py-1 text-xs bg-orange-600 hover:bg-orange-500 text-white rounded transition-colors"
-        >+ Add Barcode</button>
+        >{t('inv.addBarcode')}</button>
       </div>
 
       {barcodes.length === 0 && (
-        <p className="text-slate-500 text-sm text-center py-8">No barcodes assigned.</p>
+        <p className="text-slate-500 text-sm text-center py-8">{t('inv.noBarcodes')}</p>
       )}
 
       {barcodes.map(b => (
@@ -1220,13 +1239,13 @@ function BarcodesTab({ item, onAdd }: { item: ItemDetail; onAdd: () => void }) {
           <div>
             <p className="text-white font-mono text-sm">{b.barcode_value}</p>
             <p className="text-slate-400 text-xs mt-0.5">
-              {b.barcode_type}{b.is_primary ? ' · primary' : ''}
+              {b.barcode_type}{b.is_primary ? ` · ${t('inv.primary')}` : ''}
             </p>
           </div>
           <button
             onClick={() => deleteBarcode(b.id)}
             className="text-slate-500 hover:text-red-400 transition-colors text-lg leading-none px-1"
-            title="Remove barcode"
+            title={t('inv.removeBarcode')}
           >&times;</button>
         </div>
       ))}
@@ -1238,6 +1257,7 @@ function BarcodesTab({ item, onAdd }: { item: ItemDetail; onAdd: () => void }) {
 
 function PhotosTab({ itemId }: { itemId: string }) {
   const qc = useQueryClient()
+  const { t } = useTranslation()
   const fileRef = useCallback((node: HTMLInputElement | null) => { if (node) node.value = '' }, [])
   const [uploading, setUploading] = useState(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
@@ -1271,18 +1291,18 @@ function PhotosTab({ itemId }: { itemId: string }) {
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <p className="text-slate-400 text-xs">{photos.length} photo{photos.length !== 1 ? 's' : ''}</p>
+        <p className="text-slate-400 text-xs">{t('inv.photoCount', { count: photos.length })}</p>
         <label className={`px-2.5 py-1 text-xs rounded transition-colors cursor-pointer ${uploading ? 'bg-slate-600 text-slate-400' : 'bg-orange-600 hover:bg-orange-500 text-white'}`}>
-          {uploading ? 'Uploading…' : '+ Add Photo'}
+          {uploading ? t('inv.uploading') : t('inv.addPhoto')}
           <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={handleFileChange} disabled={uploading} />
         </label>
       </div>
 
       {uploadError && <p className="text-red-400 text-xs">{uploadError}</p>}
 
-      {isLoading && <p className="text-slate-400 text-sm text-center py-8">Loading…</p>}
+      {isLoading && <p className="text-slate-400 text-sm text-center py-8">{t('common.loading')}</p>}
       {!isLoading && photos.length === 0 && (
-        <p className="text-slate-500 text-sm text-center py-8">No photos uploaded.</p>
+        <p className="text-slate-500 text-sm text-center py-8">{t('inv.noPhotos')}</p>
       )}
 
       <div className="grid grid-cols-2 gap-2">
@@ -1290,16 +1310,16 @@ function PhotosTab({ itemId }: { itemId: string }) {
           <div key={p.id} className="relative group rounded-lg overflow-hidden bg-slate-700 aspect-square">
             <img
               src={`/api/v1${imsApi.photoDownloadUrl(itemId, p.id)}`}
-              alt="Item photo"
+              alt={t('inv.itemPhoto')}
               className="w-full h-full object-cover"
             />
             {p.is_primary && (
-              <span className="absolute top-1 left-1 bg-orange-600 text-white text-xs px-1.5 py-0.5 rounded">Primary</span>
+              <span className="absolute top-1 left-1 bg-orange-600 text-white text-xs px-1.5 py-0.5 rounded">{t('inv.primaryLabel')}</span>
             )}
             <button
               onClick={() => deletePhoto(p.id)}
               className="absolute top-1 right-1 bg-black/60 text-white rounded-full w-6 h-6 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-600"
-              title="Delete photo"
+              title={t('inv.deletePhoto')}
             >&times;</button>
           </div>
         ))}
@@ -1311,6 +1331,7 @@ function PhotosTab({ itemId }: { itemId: string }) {
 // ── Items Tab ─────────────────────────────────────────────────────────────────
 
 function ItemsTab() {
+  const { t } = useTranslation()
   const [search, setSearch] = useState('')
   const [locationId, setLocationId] = useState('')
   const [categoryId, setCategoryId] = useState('')
@@ -1350,7 +1371,7 @@ function ItemsTab() {
           <div className="flex gap-2">
             <input
               type="text"
-              placeholder="Search name or SKU…"
+              placeholder={t('inv.searchNameSku')}
               value={search}
               onChange={e => { setSearch(e.target.value); setPage(1) }}
               className="flex-1 bg-slate-700 border border-slate-600 rounded px-3 py-2 text-white text-sm placeholder:text-slate-500"
@@ -1358,7 +1379,7 @@ function ItemsTab() {
             <button
               onClick={() => setShowAdd(true)}
               className="px-3 py-1.5 bg-orange-600 hover:bg-orange-500 text-white text-xs rounded-lg transition-colors whitespace-nowrap"
-            >+ Add Item</button>
+            >{t('inv.addItemBtn')}</button>
           </div>
           <div className="flex gap-2">
             <select
@@ -1366,7 +1387,7 @@ function ItemsTab() {
               onChange={e => { setLocationId(e.target.value); setPage(1) }}
               className="flex-1 bg-slate-700 border border-slate-600 rounded px-2 py-1.5 text-white text-xs"
             >
-              <option value="">All Locations</option>
+              <option value="">{t('inv.allLocations')}</option>
               {(locData ?? []).map(l => <option key={l.id} value={l.id}>[{l.code}] {l.name}</option>)}
             </select>
             <select
@@ -1374,7 +1395,7 @@ function ItemsTab() {
               onChange={e => { setCategoryId(e.target.value); setPage(1) }}
               className="flex-1 bg-slate-700 border border-slate-600 rounded px-2 py-1.5 text-white text-xs"
             >
-              <option value="">All Categories</option>
+              <option value="">{t('inv.allCategories')}</option>
               {(catData ?? []).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
             <select
@@ -1382,14 +1403,14 @@ function ItemsTab() {
               onChange={e => { setIsAsset(e.target.value as 'all' | 'true' | 'false'); setPage(1) }}
               className="bg-slate-700 border border-slate-600 rounded px-2 py-1.5 text-white text-xs"
             >
-              <option value="all">All</option>
-              <option value="true">Assets</option>
-              <option value="false">Stock</option>
+              <option value="all">{t('common.all')}</option>
+              <option value="true">{t('inv.assets')}</option>
+              <option value="false">{t('inv.stock')}</option>
             </select>
           </div>
           {(search || locationId || categoryId || isAsset !== 'all') && (
             <button onClick={resetFilters} className="text-xs text-slate-400 hover:text-white transition-colors">
-              Clear filters
+              {t('inv.clearFilters')}
             </button>
           )}
         </div>
@@ -1397,10 +1418,10 @@ function ItemsTab() {
         {/* List */}
         <div className="flex-1 overflow-y-auto">
           {isLoading && (
-            <div className="flex items-center justify-center h-32 text-slate-400 text-sm">Loading…</div>
+            <div className="flex items-center justify-center h-32 text-slate-400 text-sm">{t('common.loading')}</div>
           )}
           {!isLoading && items.length === 0 && (
-            <div className="flex items-center justify-center h-32 text-slate-500 text-sm">No items found.</div>
+            <div className="flex items-center justify-center h-32 text-slate-500 text-sm">{t('inv.noItemsFound')}</div>
           )}
           {items.map(item => {
             const lowStock = item.reorder_point != null && item.quantity_on_hand <= item.reorder_point
@@ -1414,7 +1435,7 @@ function ItemsTab() {
                   <div className="min-w-0">
                     <p className="text-white text-sm font-medium truncate">{item.name}</p>
                     <p className="text-slate-400 text-xs mt-0.5 truncate">
-                      {item.sku ? `${item.sku} · ` : ''}{item.location_code} · {item.category_name ?? 'Uncategorised'}
+                      {item.sku ? `${item.sku} · ` : ''}{item.location_code} · {item.category_name ?? t('inv.uncategorised')}
                     </p>
                   </div>
                   <div className="shrink-0 text-right">
@@ -1429,12 +1450,12 @@ function ItemsTab() {
                 </div>
                 {item.tags.length > 0 && (
                   <div className="flex gap-1 mt-1.5 flex-wrap">
-                    {item.tags.map(t => (
+                    {item.tags.map(tag => (
                       <span
-                        key={t.id}
+                        key={tag.id}
                         className="px-1.5 py-0.5 rounded text-xs text-white"
-                        style={{ backgroundColor: t.color + '55' }}
-                      >{t.name}</span>
+                        style={{ backgroundColor: tag.color + '55' }}
+                      >{tag.name}</span>
                     ))}
                   </div>
                 )}
@@ -1446,7 +1467,7 @@ function ItemsTab() {
         {/* Pagination */}
         {pagination && pagination.pages > 1 && (
           <div className="flex items-center justify-between px-4 py-2 border-t border-slate-700 text-xs text-slate-400">
-            <span>{pagination.total} items · page {pagination.page} of {pagination.pages}</span>
+            <span>{t('inv.itemsPagination', { total: pagination.total, page: pagination.page, pages: pagination.pages })}</span>
             <div className="flex gap-1">
               <button
                 onClick={() => setPage(p => Math.max(1, p - 1))}
@@ -1484,6 +1505,7 @@ function ItemsTab() {
 // ── Vehicles Tab ──────────────────────────────────────────────────────────────
 
 function VehiclesTab() {
+  const { t } = useTranslation()
   const [ownerFilter, setOwnerFilter] = useState('ALL')
   const [page, setPage] = useState(1)
   const [showAdd, setShowAdd] = useState(false)
@@ -1531,8 +1553,8 @@ function VehiclesTab() {
         <div className="mx-4 mt-3 px-4 py-2.5 bg-red-900/40 border border-red-700 rounded-lg text-sm text-red-300 flex items-start gap-2">
           <span className="text-base">🛡️</span>
           <div>
-            <span className="font-semibold">Insurance alert: </span>
-            {alertInsurance.map(v => `${v.registration_number} (${isExpired(v.insurance_expiry) ? 'EXPIRED' : fmtDate(v.insurance_expiry)})`).join(' · ')}
+            <span className="font-semibold">{t('inv.insuranceAlert')} </span>
+            {alertInsurance.map(v => `${v.registration_number} (${isExpired(v.insurance_expiry) ? t('inv.expired') : fmtDate(v.insurance_expiry)})`).join(' · ')}
           </div>
         </div>
       )}
@@ -1540,8 +1562,8 @@ function VehiclesTab() {
         <div className="mx-4 mt-2 px-4 py-2.5 bg-orange-900/40 border border-orange-700 rounded-lg text-sm text-orange-300 flex items-start gap-2">
           <span className="text-base">📋</span>
           <div>
-            <span className="font-semibold">Registration alert: </span>
-            {alertReg.map(v => `${v.registration_number} (${isExpired(v.registration_expiry) ? 'EXPIRED' : fmtDate(v.registration_expiry)})`).join(' · ')}
+            <span className="font-semibold">{t('inv.registrationAlert')} </span>
+            {alertReg.map(v => `${v.registration_number} (${isExpired(v.registration_expiry) ? t('inv.expired') : fmtDate(v.registration_expiry)})`).join(' · ')}
           </div>
         </div>
       )}
@@ -1549,8 +1571,8 @@ function VehiclesTab() {
         <div className="mx-4 mt-2 px-4 py-2.5 bg-yellow-900/40 border border-yellow-700 rounded-lg text-sm text-yellow-300 flex items-start gap-2">
           <span className="text-base">🔧</span>
           <div>
-            <span className="font-semibold">Service due: </span>
-            {alertService.map(v => `${v.registration_number} (due ${v.next_service_date ? fmtDate(v.next_service_date) : 'overdue'})`).join(' · ')}
+            <span className="font-semibold">{t('inv.serviceDueAlert')} </span>
+            {alertService.map(v => `${v.registration_number} (${t('inv.due')} ${v.next_service_date ? fmtDate(v.next_service_date) : t('inv.overdue')})`).join(' · ')}
           </div>
         </div>
       )}
@@ -1559,7 +1581,7 @@ function VehiclesTab() {
       <div className="px-4 py-3 border-b border-slate-700 flex gap-2 items-center flex-wrap mt-2">
         <button onClick={() => { setOwnerFilter('ALL'); setPage(1) }}
           className={`px-3 py-1.5 rounded text-xs font-medium transition-colors ${ownerFilter === 'ALL' ? 'bg-orange-700 text-white' : 'bg-slate-700 text-slate-300 hover:text-white'}`}>
-          All Vehicles
+          {t('inv.allVehicles')}
         </button>
         {ownerOptions.map(o => (
           <button key={o} onClick={() => { setOwnerFilter(o); setPage(1) }}
@@ -1570,23 +1592,35 @@ function VehiclesTab() {
         <button
           onClick={() => setShowAdd(true)}
           className="ml-auto px-3 py-1.5 bg-orange-600 hover:bg-orange-500 text-white text-xs rounded-lg transition-colors"
-        >+ Add Vehicle</button>
+        >{t('inv.addVehicleFilterBtn')}</button>
       </div>
 
       {/* Table */}
       <div className="flex-1 overflow-auto">
         {isLoading && (
-          <div className="flex items-center justify-center h-32 text-slate-400 text-sm">Loading…</div>
+          <div className="flex items-center justify-center h-32 text-slate-400 text-sm">{t('common.loading')}</div>
         )}
         {!isLoading && vehicles.length === 0 && (
-          <div className="flex items-center justify-center h-32 text-slate-500 text-sm">No vehicles found.</div>
+          <div className="flex items-center justify-center h-32 text-slate-500 text-sm">{t('inv.noVehiclesFound')}</div>
         )}
         {vehicles.length > 0 && (
           <table className="w-full text-sm">
             <thead className="text-slate-400 text-xs uppercase tracking-wide border-b border-slate-700 sticky top-0 bg-slate-800">
               <tr>
-                {['Registration', 'Make / Model', 'Year', 'Owner', 'Location', 'Value', 'Condition', 'Insurance', 'Reg Expiry', 'Next Service', ''].map(h => (
-                  <th key={h} className="px-4 py-2.5 text-left font-medium">{h}</th>
+                {([
+                  ['registration', t('inv.colRegistration')],
+                  ['makeModel',    t('inv.colMakeModel')],
+                  ['year',         t('inv.colYear')],
+                  ['owner',        t('inv.colOwner')],
+                  ['location',     t('inv.colLocation')],
+                  ['value',        t('inv.colValue')],
+                  ['condition',    t('inv.colCondition')],
+                  ['insurance',    t('inv.colInsurance')],
+                  ['regExpiry',    t('inv.colRegExpiry')],
+                  ['nextService',  t('inv.colNextService')],
+                  ['actions',      ''],
+                ] as [string, string][]).map(([key, label]) => (
+                  <th key={key} className="px-4 py-2.5 text-left font-medium">{label}</th>
                 ))}
               </tr>
             </thead>
@@ -1613,18 +1647,18 @@ function VehiclesTab() {
                     {(isExpired(v.registration_expiry) || isExpiringSoon(v.registration_expiry)) && <span className="ml-1">⚠</span>}
                   </td>
                   <td className={`px-4 py-2.5 text-xs ${isServiceDue(v) ? 'text-yellow-400 font-medium' : 'text-slate-300'}`}>
-                    {v.next_service_date ? fmtDate(v.next_service_date) : v.last_service_date ? '—' : <span className="text-slate-500 italic">Not set</span>}
+                    {v.next_service_date ? fmtDate(v.next_service_date) : v.last_service_date ? '—' : <span className="text-slate-500 italic">{t('inv.notSet')}</span>}
                     {isServiceDue(v) && <span className="ml-1">🔧</span>}
                   </td>
                   <td className="px-4 py-2.5">
                     <div className="flex gap-1">
                       <button onClick={() => setEditVehicle(v)}
                         className="text-xs px-2 py-1 rounded bg-slate-700 hover:bg-slate-600 text-slate-300 hover:text-white transition-colors">
-                        Edit
+                        {t('common.edit')}
                       </button>
                       <button onClick={() => setLogServiceFor(v)}
                         className="text-xs px-2 py-1 rounded bg-slate-700 hover:bg-orange-700 text-slate-300 hover:text-white transition-colors">
-                        Service
+                        {t('inv.serviceBtn')}
                       </button>
                       <button onClick={() => setDeletingVehicle(v)}
                         className="text-xs px-2 py-1 rounded bg-slate-700 hover:bg-red-700 text-slate-500 hover:text-white transition-colors"
@@ -1642,7 +1676,7 @@ function VehiclesTab() {
 
       {pagination && pagination.pages > 1 && (
         <div className="flex items-center justify-between px-4 py-2 border-t border-slate-700 text-xs text-slate-400">
-          <span>{pagination.total} vehicles · page {pagination.page} of {pagination.pages}</span>
+          <span>{t('inv.vehiclesPagination', { total: pagination.total, page: pagination.page, pages: pagination.pages })}</span>
           <div className="flex gap-1">
             <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1} className="px-2 py-1 rounded bg-slate-700 disabled:opacity-40">‹</button>
             <button onClick={() => setPage(p => Math.min(pagination.pages, p + 1))} disabled={page === pagination.pages} className="px-2 py-1 rounded bg-slate-700 disabled:opacity-40">›</button>
@@ -1669,6 +1703,7 @@ function VehiclesTab() {
 // ── Movements Tab ─────────────────────────────────────────────────────────────
 
 function MovementsTab() {
+  const { t } = useTranslation()
   const [movType, setMovType] = useState('')
   const [page, setPage] = useState(1)
 
@@ -1688,15 +1723,15 @@ function MovementsTab() {
     <div className="flex flex-col h-full">
       {/* Filter */}
       <div className="px-4 py-3 border-b border-slate-700 flex items-center gap-2">
-        <label className="text-slate-400 text-xs">Type:</label>
+        <label className="text-slate-400 text-xs">{t('inv.typeLbl')}</label>
         <select
           value={movType}
           onChange={e => { setMovType(e.target.value); setPage(1) }}
           className="bg-slate-700 border border-slate-600 rounded px-2 py-1.5 text-white text-xs"
         >
-          <option value="">All</option>
-          {(['RECEIVE','RETURN','TRANSFER','ADJUSTMENT','CONSUME','DISPOSAL','SALE'] as const).map(t => (
-            <option key={t} value={t}>{t}</option>
+          <option value="">{t('common.all')}</option>
+          {(['RECEIVE','RETURN','TRANSFER','ADJUSTMENT','CONSUME','DISPOSAL','SALE'] as const).map(mt => (
+            <option key={mt} value={mt}>{mt}</option>
           ))}
         </select>
       </div>
@@ -1704,10 +1739,10 @@ function MovementsTab() {
       {/* List */}
       <div className="flex-1 overflow-y-auto divide-y divide-slate-700/50">
         {isLoading && (
-          <div className="flex items-center justify-center h-32 text-slate-400 text-sm">Loading…</div>
+          <div className="flex items-center justify-center h-32 text-slate-400 text-sm">{t('common.loading')}</div>
         )}
         {!isLoading && movements.length === 0 && (
-          <div className="flex items-center justify-center h-32 text-slate-500 text-sm">No movements recorded.</div>
+          <div className="flex items-center justify-center h-32 text-slate-500 text-sm">{t('inv.noMovements')}</div>
         )}
         {movements.map(m => (
           <div key={m.id} className="px-4 py-3 hover:bg-slate-700/20 transition-colors">
@@ -1727,9 +1762,9 @@ function MovementsTab() {
               </div>
             </div>
             <div className="flex items-center gap-3 mt-1 text-xs text-slate-500">
-              {m.from_location_name && <span>From: {m.from_location_name}</span>}
-              {m.to_location_name && <span>To: {m.to_location_name}</span>}
-              {m.sale_price && <span>Sale: {fmtMoney(m.sale_price)}/unit{m.customer_name ? ` · ${m.customer_name}` : ''}</span>}
+              {m.from_location_name && <span>{t('inv.fromLbl')} {m.from_location_name}</span>}
+              {m.to_location_name && <span>{t('inv.toLbl')} {m.to_location_name}</span>}
+              {m.sale_price && <span>{t('inv.saleLbl')} {fmtMoney(m.sale_price)}/unit{m.customer_name ? ` · ${m.customer_name}` : ''}</span>}
               {m.notes && <span className="truncate">{m.notes}</span>}
             </div>
           </div>
@@ -1738,7 +1773,7 @@ function MovementsTab() {
 
       {pagination && pagination.pages > 1 && (
         <div className="flex items-center justify-between px-4 py-2 border-t border-slate-700 text-xs text-slate-400">
-          <span>{pagination.total} movements · page {pagination.page} of {pagination.pages}</span>
+          <span>{t('inv.movementsPagination', { total: pagination.total, page: pagination.page, pages: pagination.pages })}</span>
           <div className="flex gap-1">
             <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1} className="px-2 py-1 rounded bg-slate-700 disabled:opacity-40">‹</button>
             <button onClick={() => setPage(p => Math.min(pagination.pages, p + 1))} disabled={page === pagination.pages} className="px-2 py-1 rounded bg-slate-700 disabled:opacity-40">›</button>
@@ -1755,12 +1790,13 @@ const fmtTTD = (v: number) =>
   `TTD ${new Intl.NumberFormat('en-TT', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(v)}`
 
 function ValuationTab() {
+  const { t } = useTranslation()
   const { data, isLoading } = useQuery({
     queryKey: ['ims-valuation'],
     queryFn: imsApi.getValuation,
   })
 
-  if (isLoading) return <div className="flex items-center justify-center h-32 text-slate-400 text-sm">Loading…</div>
+  if (isLoading) return <div className="flex items-center justify-center h-32 text-slate-400 text-sm">{t('common.loading')}</div>
   if (!data) return null
 
   const { summary, by_location, by_category } = data
@@ -1769,14 +1805,14 @@ function ValuationTab() {
     <div className="flex flex-col h-full overflow-y-auto p-4 space-y-6">
       {/* Summary cards */}
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
-        {[
-          { label: 'Total Items',    value: summary.total_items.toLocaleString() },
-          { label: 'Low Stock',      value: summary.low_stock_count.toLocaleString(),     red: summary.low_stock_count > 0 },
-          { label: 'Out of Stock',   value: summary.out_of_stock_count.toLocaleString(),  red: summary.out_of_stock_count > 0 },
-          { label: 'Stock Value',    value: fmtTTD(summary.total_stock_value) },
-          { label: 'Asset Value',    value: fmtTTD(summary.total_asset_value) },
-        ].map(({ label, value, red }) => (
-          <div key={label} className="bg-slate-700/50 rounded-lg p-3 text-center">
+        {([
+          { key: 'totalItems',  label: t('inv.totalItems'),  value: summary.total_items.toLocaleString() },
+          { key: 'lowStock',    label: t('inv.lowStock'),    value: summary.low_stock_count.toLocaleString(),    red: summary.low_stock_count > 0 },
+          { key: 'outOfStock',  label: t('inv.outOfStock'),  value: summary.out_of_stock_count.toLocaleString(), red: summary.out_of_stock_count > 0 },
+          { key: 'stockValue',  label: t('inv.stockValue'),  value: fmtTTD(summary.total_stock_value) },
+          { key: 'assetValue',  label: t('inv.assetValue'),  value: fmtTTD(summary.total_asset_value) },
+        ] as { key: string; label: string; value: string; red?: boolean }[]).map(({ key, label, value, red }) => (
+          <div key={key} className="bg-slate-700/50 rounded-lg p-3 text-center">
             <p className={`text-xl font-bold ${red ? 'text-orange-400' : 'text-white'}`}>{value}</p>
             <p className="text-xs text-slate-400 mt-1">{label}</p>
           </div>
@@ -1786,13 +1822,13 @@ function ValuationTab() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* By location */}
         <div>
-          <h3 className="text-sm font-medium text-slate-300 mb-3">Value by Location</h3>
+          <h3 className="text-sm font-medium text-slate-300 mb-3">{t('inv.valueByLocation')}</h3>
           <table className="w-full text-sm">
             <thead>
               <tr className="text-slate-400 text-xs border-b border-slate-700">
-                <th className="text-left py-1.5">Location</th>
-                <th className="text-right py-1.5">Items</th>
-                <th className="text-right py-1.5">Value</th>
+                <th className="text-left py-1.5">{t('inv.colLocation')}</th>
+                <th className="text-right py-1.5">{t('inv.colItems')}</th>
+                <th className="text-right py-1.5">{t('inv.colValueHeader')}</th>
               </tr>
             </thead>
             <tbody>
@@ -1809,13 +1845,13 @@ function ValuationTab() {
 
         {/* By category */}
         <div>
-          <h3 className="text-sm font-medium text-slate-300 mb-3">Value by Category</h3>
+          <h3 className="text-sm font-medium text-slate-300 mb-3">{t('inv.valueByCategory')}</h3>
           <table className="w-full text-sm">
             <thead>
               <tr className="text-slate-400 text-xs border-b border-slate-700">
-                <th className="text-left py-1.5">Category</th>
-                <th className="text-right py-1.5">Items</th>
-                <th className="text-right py-1.5">Value</th>
+                <th className="text-left py-1.5">{t('inv.colCategory')}</th>
+                <th className="text-right py-1.5">{t('inv.colItems')}</th>
+                <th className="text-right py-1.5">{t('inv.colValueHeader')}</th>
               </tr>
             </thead>
             <tbody>
@@ -1837,6 +1873,7 @@ function ValuationTab() {
 // ── Low Stock Tab ─────────────────────────────────────────────────────────────
 
 function LowStockTab() {
+  const { t } = useTranslation()
   const { data: items = [], isLoading } = useQuery({
     queryKey: ['ims-low-stock'],
     queryFn: imsApi.getLowStock,
@@ -1845,21 +1882,30 @@ function LowStockTab() {
   return (
     <div className="flex flex-col h-full">
       <div className="px-4 py-3 border-b border-slate-700 flex items-center gap-3">
-        <span className="text-orange-400 font-medium text-sm">{items.length} item{items.length !== 1 ? 's' : ''} below reorder point</span>
+        <span className="text-orange-400 font-medium text-sm">{t('inv.lowStockCount', { count: items.length })}</span>
       </div>
       <div className="flex-1 overflow-auto">
         {isLoading && (
-          <div className="flex items-center justify-center h-32 text-slate-400 text-sm">Loading…</div>
+          <div className="flex items-center justify-center h-32 text-slate-400 text-sm">{t('common.loading')}</div>
         )}
         {!isLoading && items.length === 0 && (
-          <div className="flex items-center justify-center h-32 text-slate-500 text-sm">All items are sufficiently stocked.</div>
+          <div className="flex items-center justify-center h-32 text-slate-500 text-sm">{t('inv.allSufficient')}</div>
         )}
         {items.length > 0 && (
           <table className="w-full text-sm">
             <thead className="text-slate-400 text-xs uppercase tracking-wide border-b border-slate-700 sticky top-0 bg-slate-800">
               <tr>
-                {['Item', 'SKU', 'Location', 'Category', 'On Hand', 'Reorder At', 'Deficit', 'Value / Unit'].map(h => (
-                  <th key={h} className="px-4 py-2.5 text-left font-medium">{h}</th>
+                {([
+                  ['item',        t('inv.colItem')],
+                  ['sku',         t('inv.sku')],
+                  ['location',    t('inv.colLocation')],
+                  ['category',    t('inv.colCategory')],
+                  ['onHand',      t('inv.colOnHand')],
+                  ['reorderAt',   t('inv.colReorderAt')],
+                  ['deficit',     t('inv.colDeficit')],
+                  ['valuePerUnit', t('inv.colValuePerUnit')],
+                ] as [string, string][]).map(([key, label]) => (
+                  <th key={key} className="px-4 py-2.5 text-left font-medium">{label}</th>
                 ))}
               </tr>
             </thead>
@@ -1900,6 +1946,7 @@ const ST_STATUS_STYLES: Record<StockTakeStatus, string> = {
 
 function StockTakeDetail({ st, onClose }: { st: StockTakeSummary; onClose: () => void }) {
   const qc = useQueryClient()
+  const { t } = useTranslation()
   const [edits, setEdits] = useState<Record<string, string>>({})
 
   const { data: detail, isLoading } = useQuery({
@@ -1949,13 +1996,13 @@ function StockTakeDetail({ st, onClose }: { st: StockTakeSummary; onClose: () =>
           {canFinalise && (
             <button onClick={() => finalise()} disabled={finalising}
               className="px-3 py-1.5 text-xs bg-green-700 hover:bg-green-600 disabled:opacity-50 text-white rounded transition-colors">
-              {finalising ? 'Finalising…' : 'Finalise'}
+              {finalising ? t('inv.finalising') : t('inv.finalise')}
             </button>
           )}
           {hasEdits && canEdit && (
             <button onClick={() => saveCount()} disabled={saving}
               className="px-3 py-1.5 text-xs bg-orange-600 hover:bg-orange-500 disabled:opacity-50 text-white rounded transition-colors">
-              {saving ? 'Saving…' : 'Save Counts'}
+              {saving ? t('common.saving') : t('inv.saveCounts')}
             </button>
           )}
           <button onClick={onClose} className="text-slate-400 hover:text-white text-xl leading-none">&times;</button>
@@ -1964,27 +2011,27 @@ function StockTakeDetail({ st, onClose }: { st: StockTakeSummary; onClose: () =>
 
       <div className="px-5 py-2 border-b border-slate-700 flex gap-4 text-xs text-slate-400">
         <span><span className={`px-2 py-0.5 rounded-full ${ST_STATUS_STYLES[st.status]}`}>{st.status}</span></span>
-        <span>{st.counted_count} / {st.line_count} counted</span>
-        {st.variance_count > 0 && <span className="text-orange-400">{st.variance_count} variances</span>}
-        {pendingLines.length > 0 && <span className="text-yellow-500">{pendingLines.length} uncounted</span>}
+        <span>{st.counted_count} / {st.line_count} {t('inv.counted')}</span>
+        {st.variance_count > 0 && <span className="text-orange-400">{st.variance_count} {t('inv.variances')}</span>}
+        {pendingLines.length > 0 && <span className="text-yellow-500">{pendingLines.length} {t('inv.uncounted')}</span>}
       </div>
 
       <div className="flex-1 overflow-y-auto">
-        {isLoading && <div className="flex items-center justify-center h-32 text-slate-400 text-sm">Loading…</div>}
+        {isLoading && <div className="flex items-center justify-center h-32 text-slate-400 text-sm">{t('common.loading')}</div>}
 
         {variantLines.length > 0 && (
           <div className="px-5 pt-3 pb-1">
-            <p className="text-xs text-orange-400 font-medium mb-1">Variances</p>
+            <p className="text-xs text-orange-400 font-medium mb-1">{t('inv.variancesTitle')}</p>
           </div>
         )}
 
         <table className="w-full text-sm">
           <thead className="text-slate-400 text-xs border-b border-slate-700 sticky top-0 bg-slate-800">
             <tr>
-              <th className="px-5 py-2 text-left">Item</th>
-              <th className="px-3 py-2 text-right">Expected</th>
-              <th className="px-3 py-2 text-right">Counted</th>
-              <th className="px-3 py-2 text-right">Variance</th>
+              <th className="px-5 py-2 text-left">{t('inv.colItem')}</th>
+              <th className="px-3 py-2 text-right">{t('inv.colExpected')}</th>
+              <th className="px-3 py-2 text-right">{t('inv.colCounted')}</th>
+              <th className="px-3 py-2 text-right">{t('inv.colVariance')}</th>
             </tr>
           </thead>
           <tbody>
@@ -2037,6 +2084,7 @@ function StockTakeDetail({ st, onClose }: { st: StockTakeSummary; onClose: () =>
 
 function StockTakesTab() {
   const qc = useQueryClient()
+  const { t } = useTranslation()
   const [selected, setSelected] = useState<StockTakeSummary | null>(null)
   const { data: takes = [], isLoading } = useQuery({ queryKey: ['ims-stock-takes'], queryFn: imsApi.getStockTakes })
 
@@ -2056,15 +2104,15 @@ function StockTakesTab() {
     <div className="flex h-full gap-0">
       <div className={`flex flex-col ${selected ? 'hidden lg:flex lg:w-80 lg:shrink-0' : 'flex-1'}`}>
         <div className="px-4 py-3 border-b border-slate-700 flex items-center justify-between">
-          <span className="text-slate-400 text-sm">{takes.length} stock take{takes.length !== 1 ? 's' : ''}</span>
+          <span className="text-slate-400 text-sm">{t('inv.stockTakeCount', { count: takes.length })}</span>
           <button onClick={() => createTake()} disabled={creating}
             className="px-3 py-1.5 bg-orange-600 hover:bg-orange-500 disabled:opacity-50 text-white text-xs rounded-lg transition-colors">
-            {creating ? 'Creating…' : '+ New Stock Take'}
+            {creating ? t('inv.creating') : t('inv.newStockTake')}
           </button>
         </div>
         <div className="flex-1 overflow-y-auto divide-y divide-slate-700/50">
-          {isLoading && <div className="flex items-center justify-center h-32 text-slate-400 text-sm">Loading…</div>}
-          {!isLoading && takes.length === 0 && <div className="flex items-center justify-center h-32 text-slate-500 text-sm">No stock takes yet.</div>}
+          {isLoading && <div className="flex items-center justify-center h-32 text-slate-400 text-sm">{t('common.loading')}</div>}
+          {!isLoading && takes.length === 0 && <div className="flex items-center justify-center h-32 text-slate-500 text-sm">{t('inv.noStockTakes')}</div>}
           {takes.map(st => (
             <button key={st.id} onClick={() => setSelected(st)}
               className={`w-full text-left px-4 py-3 hover:bg-slate-700/40 transition-colors ${selected?.id === st.id ? 'bg-slate-700/60' : ''}`}>
@@ -2074,8 +2122,8 @@ function StockTakesTab() {
               </div>
               <p className="text-slate-400 text-xs mt-0.5">{st.location_name ?? 'All Locations'}</p>
               <div className="flex items-center gap-3 mt-1 text-xs text-slate-500">
-                <span>{st.counted_count}/{st.line_count} counted</span>
-                {st.variance_count > 0 && <span className="text-orange-400">{st.variance_count} variances</span>}
+                <span>{st.counted_count}/{st.line_count} {t('inv.counted')}</span>
+                {st.variance_count > 0 && <span className="text-orange-400">{st.variance_count} {t('inv.variances')}</span>}
                 <span className="ml-auto">{new Date(st.created_at).toLocaleDateString('en-TT')}</span>
               </div>
             </button>
@@ -2095,6 +2143,7 @@ function StockTakesTab() {
 
 function AddScheduleModal({ onClose }: { onClose: () => void }) {
   const qc = useQueryClient()
+  const { t } = useTranslation()
   const { data: assetsData } = useQuery({
     queryKey: ['ims-items-assets'],
     queryFn: () => imsApi.getItems({ is_asset: true, limit: 100 }),
@@ -2125,44 +2174,44 @@ function AddScheduleModal({ onClose }: { onClose: () => void }) {
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
       <div className="bg-slate-800 border border-slate-700 rounded-xl w-full max-w-md p-6 shadow-2xl">
-        <h2 className="text-lg font-semibold mb-4 text-white">Add Depreciation Schedule</h2>
+        <h2 className="text-lg font-semibold mb-4 text-white">{t('inv.addDepScheduleTitle')}</h2>
         <div className="space-y-3">
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Asset *</label>
+            <label className="block text-xs text-slate-400 mb-1">{t('inv.assetStar')}</label>
             <select value={form.item_id} onChange={set('item_id')} className={cls}>
-              <option value="">— select asset —</option>
+              <option value="">{t('inv.selectAsset')}</option>
               {assets.map(a => <option key={a.id} value={a.id}>{a.name}{a.sku ? ` (${a.sku})` : ''}</option>)}
             </select>
           </div>
           <div className="flex gap-3">
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Method</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('inv.method')}</label>
               <select value={form.method} onChange={set('method')} className={cls}>
-                <option value="STRAIGHT_LINE">Straight Line</option>
-                <option value="DECLINING_BALANCE">Declining Balance</option>
+                <option value="STRAIGHT_LINE">{t('inv.straightLine')}</option>
+                <option value="DECLINING_BALANCE">{t('inv.decliningBalance')}</option>
               </select>
             </div>
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Useful Life (years) *</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('inv.usefulLifeStar')}</label>
               <input type="number" min="0.5" step="0.5" value={form.useful_life_years} onChange={set('useful_life_years')} className={cls} />
             </div>
           </div>
           <div className="flex gap-3">
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Cost at Start (TTD) *</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('inv.costAtStartStar')}</label>
               <input type="number" min="0.01" step="0.01" value={form.cost_at_start} onChange={set('cost_at_start')} className={cls} />
             </div>
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Residual Value (TTD)</label>
+              <label className="block text-xs text-slate-400 mb-1">{t('inv.residualValueTTD')}</label>
               <input type="number" min="0" step="0.01" value={form.residual_value} onChange={set('residual_value')} className={cls} />
             </div>
           </div>
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Depreciation Start Date *</label>
+            <label className="block text-xs text-slate-400 mb-1">{t('inv.depStartDateStar')}</label>
             <input type="date" value={form.depreciation_start} onChange={set('depreciation_start')} className={cls} />
           </div>
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Notes</label>
+            <label className="block text-xs text-slate-400 mb-1">{t('common.notes')}</label>
             <textarea value={form.notes} onChange={set('notes')} rows={2} className={cls} />
           </div>
           {error && <p className="text-red-400 text-xs">{error instanceof Error ? error.message : 'Failed.'}</p>}
@@ -2170,9 +2219,9 @@ function AddScheduleModal({ onClose }: { onClose: () => void }) {
         <div className="flex gap-3 mt-5">
           <button onClick={() => mutate()} disabled={isPending || !form.item_id || !form.cost_at_start}
             className="flex-1 py-2 bg-orange-600 hover:bg-orange-500 disabled:opacity-50 text-white text-sm rounded-lg transition-colors">
-            {isPending ? 'Saving…' : 'Create Schedule'}
+            {isPending ? t('common.saving') : t('inv.createSchedule')}
           </button>
-          <button onClick={onClose} className="px-4 py-2 text-slate-400 hover:text-white text-sm transition-colors">Cancel</button>
+          <button onClick={onClose} className="px-4 py-2 text-slate-400 hover:text-white text-sm transition-colors">{t('common.cancel')}</button>
         </div>
       </div>
     </div>
@@ -2181,6 +2230,7 @@ function AddScheduleModal({ onClose }: { onClose: () => void }) {
 
 function ScheduleDetail({ sched, onClose }: { sched: DepreciationSchedule; onClose: () => void }) {
   const qc = useQueryClient()
+  const { t } = useTranslation()
   const today = new Date().toISOString().slice(0, 10)
   const [periodStart, setPeriodStart] = useState(() => {
     if (!sched.last_posted_period) return sched.depreciation_start
@@ -2216,20 +2266,20 @@ function ScheduleDetail({ sched, onClose }: { sched: DepreciationSchedule; onClo
       <div className="px-5 py-4 border-b border-slate-700 flex items-start justify-between">
         <div>
           <h2 className="text-white font-semibold">{sched.item_name}</h2>
-          <p className="text-slate-400 text-sm mt-0.5">{sched.method.replace('_', ' ')} · {sched.useful_life_years}yr useful life</p>
+          <p className="text-slate-400 text-sm mt-0.5">{sched.method.replace('_', ' ')} · {sched.useful_life_years}{t('inv.yr')} {t('inv.usefulLife')}</p>
         </div>
         <button onClick={onClose} className="text-slate-400 hover:text-white text-xl leading-none">&times;</button>
       </div>
 
       {/* Summary */}
       <div className="px-5 py-3 border-b border-slate-700 grid grid-cols-4 gap-3">
-        {[
-          { label: 'Cost',        value: fmtMon(sched.cost_at_start) },
-          { label: 'Accumulated', value: fmtMon(sched.accumulated_depreciation) },
-          { label: 'Net Book Val', value: fmtMon(sched.net_book_value) },
-          { label: 'Residual',    value: fmtMon(sched.residual_value) },
-        ].map(({ label, value }) => (
-          <div key={label} className="text-center">
+        {([
+          { key: 'cost',        label: t('inv.cost'),        value: fmtMon(sched.cost_at_start) },
+          { key: 'accumulated', label: t('inv.accumulated'), value: fmtMon(sched.accumulated_depreciation) },
+          { key: 'netBookVal',  label: t('inv.netBookVal'),  value: fmtMon(sched.net_book_value) },
+          { key: 'residual',    label: t('inv.residual'),    value: fmtMon(sched.residual_value) },
+        ] as { key: string; label: string; value: string }[]).map(({ key, label, value }) => (
+          <div key={key} className="text-center">
             <p className="text-white text-sm font-medium">{value}</p>
             <p className="text-slate-500 text-xs">{label}</p>
           </div>
@@ -2237,7 +2287,7 @@ function ScheduleDetail({ sched, onClose }: { sched: DepreciationSchedule; onClo
       </div>
       <div className="px-5 py-2 border-b border-slate-700">
         <div className="flex items-center justify-between text-xs text-slate-400 mb-1">
-          <span>Depreciated</span><span>{pctDepreciated.toFixed(1)}%</span>
+          <span>{t('inv.depreciated')}</span><span>{pctDepreciated.toFixed(1)}%</span>
         </div>
         <div className="h-2 bg-slate-700 rounded-full overflow-hidden">
           <div className="h-full bg-orange-500 rounded-full transition-all" style={{ width: `${Math.min(100, pctDepreciated)}%` }} />
@@ -2248,18 +2298,18 @@ function ScheduleDetail({ sched, onClose }: { sched: DepreciationSchedule; onClo
       {sched.is_active && (
         <div className="px-5 py-3 border-b border-slate-700 flex items-end gap-3">
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Period Start</label>
+            <label className="block text-xs text-slate-400 mb-1">{t('inv.periodStart')}</label>
             <input type="date" value={periodStart} onChange={e => setPeriodStart(e.target.value)}
               className="bg-slate-700 border border-slate-600 rounded px-2 py-1.5 text-white text-xs" />
           </div>
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Period End</label>
+            <label className="block text-xs text-slate-400 mb-1">{t('inv.periodEnd')}</label>
             <input type="date" value={periodEnd} onChange={e => setPeriodEnd(e.target.value)}
               className="bg-slate-700 border border-slate-600 rounded px-2 py-1.5 text-white text-xs" />
           </div>
           <button onClick={() => postEntry()} disabled={posting || !periodStart || !periodEnd}
             className="px-3 py-1.5 text-xs bg-orange-600 hover:bg-orange-500 disabled:opacity-50 text-white rounded transition-colors whitespace-nowrap">
-            {posting ? 'Posting…' : 'Post Entry'}
+            {posting ? t('inv.posting') : t('inv.postEntry')}
           </button>
           {error && <p className="text-red-400 text-xs">{error instanceof Error ? error.message : 'Failed.'}</p>}
         </div>
@@ -2267,14 +2317,19 @@ function ScheduleDetail({ sched, onClose }: { sched: DepreciationSchedule; onClo
 
       {/* Entries */}
       <div className="flex-1 overflow-y-auto">
-        {isLoading && <div className="flex items-center justify-center h-32 text-slate-400 text-sm">Loading…</div>}
-        {!isLoading && entries.length === 0 && <div className="flex items-center justify-center h-32 text-slate-500 text-sm">No entries posted yet.</div>}
+        {isLoading && <div className="flex items-center justify-center h-32 text-slate-400 text-sm">{t('common.loading')}</div>}
+        {!isLoading && entries.length === 0 && <div className="flex items-center justify-center h-32 text-slate-500 text-sm">{t('inv.noEntries')}</div>}
         {entries.length > 0 && (
           <table className="w-full text-sm">
             <thead className="text-slate-400 text-xs border-b border-slate-700 sticky top-0 bg-slate-800">
               <tr>
-                {['Period', 'Depreciation', 'Accumulated', 'NBV'].map(h => (
-                  <th key={h} className="px-5 py-2 text-left font-medium">{h}</th>
+                {([
+                  ['period',      t('inv.colPeriod')],
+                  ['depreciation', t('inv.colDepreciation')],
+                  ['accumulated', t('inv.colAccumulated')],
+                  ['nbv',         t('inv.colNBV')],
+                ] as [string, string][]).map(([key, label]) => (
+                  <th key={key} className="px-5 py-2 text-left font-medium">{label}</th>
                 ))}
               </tr>
             </thead>
@@ -2300,6 +2355,7 @@ function ScheduleDetail({ sched, onClose }: { sched: DepreciationSchedule; onClo
 }
 
 function DepreciationTab() {
+  const { t } = useTranslation()
   const [selected, setSelected] = useState<DepreciationSchedule | null>(null)
   const [showAdd, setShowAdd] = useState(false)
 
@@ -2315,18 +2371,24 @@ function DepreciationTab() {
     <div className="flex h-full gap-0">
       <div className={`flex flex-col ${selected ? 'hidden lg:flex lg:w-96 lg:shrink-0' : 'flex-1'}`}>
         <div className="px-4 py-3 border-b border-slate-700 flex items-center justify-between">
-          <span className="text-slate-400 text-sm">{schedules.length} asset{schedules.length !== 1 ? 's' : ''}</span>
-          <button onClick={() => setShowAdd(true)} className="px-3 py-1.5 bg-orange-600 hover:bg-orange-500 text-white text-xs rounded-lg transition-colors">+ Add Schedule</button>
+          <span className="text-slate-400 text-sm">{t('inv.assetCount', { count: schedules.length })}</span>
+          <button onClick={() => setShowAdd(true)} className="px-3 py-1.5 bg-orange-600 hover:bg-orange-500 text-white text-xs rounded-lg transition-colors">{t('inv.addScheduleBtn')}</button>
         </div>
         <div className="flex-1 overflow-y-auto">
-          {isLoading && <div className="flex items-center justify-center h-32 text-slate-400 text-sm">Loading…</div>}
-          {!isLoading && schedules.length === 0 && <div className="flex items-center justify-center h-32 text-slate-500 text-sm">No depreciation schedules.</div>}
+          {isLoading && <div className="flex items-center justify-center h-32 text-slate-400 text-sm">{t('common.loading')}</div>}
+          {!isLoading && schedules.length === 0 && <div className="flex items-center justify-center h-32 text-slate-500 text-sm">{t('inv.noSchedules')}</div>}
           {schedules.length > 0 && (
             <table className="w-full text-sm">
               <thead className="text-slate-400 text-xs uppercase tracking-wide border-b border-slate-700 sticky top-0 bg-slate-800">
                 <tr>
-                  {['Asset', 'Method', 'Cost', 'NBV', 'Last Period'].map(h => (
-                    <th key={h} className="px-4 py-2.5 text-left font-medium">{h}</th>
+                  {([
+                    ['asset',      t('inv.colAsset')],
+                    ['method',     t('inv.colMethod')],
+                    ['cost',       t('inv.colCost')],
+                    ['nbv',        t('inv.colNBV')],
+                    ['lastPeriod', t('inv.colLastPeriod')],
+                  ] as [string, string][]).map(([key, label]) => (
+                    <th key={key} className="px-4 py-2.5 text-left font-medium">{label}</th>
                   ))}
                 </tr>
               </thead>
@@ -2368,26 +2430,27 @@ function DepreciationTab() {
 type Tab = 'items' | 'vehicles' | 'movements' | 'low-stock' | 'valuation' | 'stock-takes' | 'depreciation'
 
 export default function Inventory() {
+  const { t } = useTranslation()
   const [tab, setTab] = useState<Tab>('items')
 
   return (
     <div className="flex flex-col h-full bg-slate-900">
       {/* Page header */}
       <div className="px-6 py-4 border-b border-slate-700">
-        <h1 className="text-xl font-semibold text-white">Inventory & Assets</h1>
-        <p className="text-slate-400 text-sm mt-0.5">Stock, assets, fleet, and movement log — all entities</p>
+        <h1 className="text-xl font-semibold text-white">{t('inv.pageTitle')}</h1>
+        <p className="text-slate-400 text-sm mt-0.5">{t('inv.pageSubtitle')}</p>
       </div>
 
       {/* Tab bar */}
       <div className="flex border-b border-slate-700 px-6">
         {([
-          { key: 'items',      label: 'Items & Assets' },
-          { key: 'vehicles',   label: 'Vehicles' },
-          { key: 'movements',  label: 'Movements' },
-          { key: 'low-stock',  label: 'Low Stock' },
-          { key: 'valuation',    label: 'Valuation' },
-          { key: 'stock-takes',  label: 'Stock Takes' },
-          { key: 'depreciation', label: 'Depreciation' },
+          { key: 'items',        label: t('inv.tabItemsAssets') },
+          { key: 'vehicles',     label: t('inv.tabVehicles') },
+          { key: 'movements',    label: t('inv.tabMovements') },
+          { key: 'low-stock',    label: t('inv.tabLowStock') },
+          { key: 'valuation',    label: t('inv.tabValuation') },
+          { key: 'stock-takes',  label: t('inv.tabStockTakes') },
+          { key: 'depreciation', label: t('inv.tabDepreciation') },
         ] as { key: Tab; label: string }[]).map(({ key, label }) => (
           <button
             key={key}

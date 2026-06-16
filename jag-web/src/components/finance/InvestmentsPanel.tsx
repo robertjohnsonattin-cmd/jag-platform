@@ -1,9 +1,10 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { financeApi } from '../../api/finance'
 import { entityName, fmtTTD } from '../../lib/entities'
 import type { InvestmentType } from '../../types/finance'
+import type { InvestmentValuation } from '../../types/finance'
 
 function fmtNative(value: string, currency: string): string {
   const num = parseFloat(value)
@@ -13,7 +14,7 @@ function fmtNative(value: string, currency: string): string {
 
 const INVESTMENT_TYPES: InvestmentType[] = [
   'EQUITY', 'BOND', 'MUTUAL_FUND', 'ETF', 'UNIT_TRUST',
-  'REAL_ESTATE', 'PRIVATE_EQUITY', 'CASH_EQUIVALENT', 'OTHER',
+  'REAL_ESTATE', 'PRIVATE_EQUITY', 'CASH_EQUIVALENT', 'ANNUITY', 'OTHER',
 ]
 
 const CURRENCIES = ['TTD', 'USD', 'CAD', 'CNY']
@@ -135,36 +136,307 @@ function AddModal({ onClose, onCreated }: { onClose: () => void; onCreated: () =
   )
 }
 
-function UpdateValueModal({ id, name, currency, onClose, onUpdated }: { id: string; name: string; currency: string; onClose: () => void; onUpdated: () => void }) {
+function HistoryModal({ id, name, currency, onClose }: { id: string; name: string; currency: string; onClose: () => void }) {
   const { t } = useTranslation()
-  const [value, setValue] = useState('')
-  const [gain, setGain] = useState('')
+  const qc = useQueryClient()
+  const [showAdd, setShowAdd] = useState(false)
 
-  const { mutate, isPending, error } = useMutation({
-    mutationFn: () => financeApi.updateInvestment(id, {
+  // Add entry form state
+  const [date, setDate] = useState('')
+  const [units, setUnits] = useState('')
+  const [price, setPrice] = useState('')
+  const [value, setValue] = useState('')
+  const [valueManual, setValueManual] = useState(false)
+  const [gain, setGain] = useState('')
+  const [notes, setNotes] = useState('')
+
+  useEffect(() => {
+    if (valueManual) return
+    const u = parseFloat(units)
+    const p = parseFloat(price)
+    if (!isNaN(u) && !isNaN(p) && u > 0 && p > 0) setValue((u * p).toFixed(2))
+  }, [units, price, valueManual])
+
+  const { data: valuations = [], isLoading } = useQuery({
+    queryKey: ['finance', 'investments', id, 'valuations'],
+    queryFn: () => financeApi.getInvestmentValuations(id),
+  })
+
+  const { mutate, isPending, error: addError } = useMutation({
+    mutationFn: () => financeApi.addInvestmentValuation(id, {
+      as_of_date: date,
+      units_held: units ? Number(units) : undefined,
+      price_per_unit: price ? Number(price) : undefined,
       current_value_ttd: Number(value),
       unrealised_gain_ttd: gain ? Number(gain) : undefined,
+      notes: notes || undefined,
+    }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['finance', 'investments', id, 'valuations'] })
+      setDate(''); setUnits(''); setPrice(''); setValue(''); setGain(''); setNotes('')
+      setValueManual(false); setShowAdd(false)
+    },
+  })
+
+  const fmtNum = (v: string) => parseFloat(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 overflow-y-auto py-6">
+      <div className="bg-slate-800 border border-slate-700 rounded-xl w-full max-w-2xl mx-4 p-6 shadow-2xl">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-base font-semibold text-white">Valuation History — {name}</h2>
+          <button onClick={onClose} className="text-slate-400 hover:text-white text-sm">{t('common.close', 'Close')}</button>
+        </div>
+
+        {/* Add past entry form */}
+        {!showAdd && (
+          <button onClick={() => setShowAdd(true)}
+            className="mb-4 px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-200 text-xs rounded-lg transition-colors">
+            + Add Past Entry
+          </button>
+        )}
+        {showAdd && (
+          <div className="mb-5 p-4 bg-slate-700/50 rounded-lg border border-slate-600 space-y-3">
+            <p className="text-xs text-slate-400 font-medium uppercase tracking-wide">Add Historical Entry</p>
+            <div className="flex gap-3">
+              <div className="flex-1">
+                <label className="block text-xs text-slate-400 mb-1">Date</label>
+                <input type="date" value={date} onChange={e => setDate(e.target.value)} className={cls} />
+              </div>
+              <div className="flex-1">
+                <label className="block text-xs text-slate-400 mb-1">No. of Shares</label>
+                <input type="number" step="0.01" value={units} onChange={e => setUnits(e.target.value)} className={cls} placeholder="0" />
+              </div>
+              <div className="flex-1">
+                <label className="block text-xs text-slate-400 mb-1">Price / Share ({currency})</label>
+                <input type="number" step="0.01" value={price} onChange={e => setPrice(e.target.value)} className={cls} placeholder="0.00" />
+              </div>
+            </div>
+            <div className="flex gap-3">
+              <div className="flex-1">
+                <label className="block text-xs text-slate-400 mb-1">
+                  Value ({currency})
+                  {!valueManual && units && price
+                    ? <span className="ml-1 text-slate-500 italic">auto</span>
+                    : <button type="button" onClick={() => setValueManual(false)} className="ml-1 text-slate-500 hover:text-blue-400 text-xs italic">auto</button>
+                  }
+                </label>
+                <input type="number" step="0.01" value={value}
+                  onChange={e => { setValueManual(true); setValue(e.target.value) }}
+                  className={cls} placeholder="0.00" />
+              </div>
+              <div className="flex-1">
+                <label className="block text-xs text-slate-400 mb-1">Gain/Loss ({currency})</label>
+                <input type="number" step="0.01" value={gain} onChange={e => setGain(e.target.value)} className={cls} placeholder="optional" />
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">Notes</label>
+              <input value={notes} onChange={e => setNotes(e.target.value)} className={cls} placeholder="e.g. Q1 2025 broker statement" />
+            </div>
+            {addError && <p className="text-red-400 text-xs">{addError instanceof Error ? addError.message : 'Failed.'}</p>}
+            <div className="flex gap-3 pt-1">
+              <button onClick={() => mutate()} disabled={isPending || !date || !value}
+                className="px-4 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-xs rounded-lg transition-colors">
+                {isPending ? 'Saving...' : 'Save Entry'}
+              </button>
+              <button onClick={() => setShowAdd(false)} className="text-slate-400 hover:text-white text-xs transition-colors">Cancel</button>
+            </div>
+          </div>
+        )}
+
+        {isLoading && <p className="text-slate-400 text-sm">Loading...</p>}
+        {!isLoading && valuations.length === 0 && (
+          <p className="text-slate-400 text-sm">No history yet. Add a past entry above, or history records automatically each time you save an update.</p>
+        )}
+        {valuations.length > 0 && (
+          <div className="rounded-lg overflow-hidden border border-slate-700">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-slate-700/50 text-slate-400 text-xs uppercase tracking-wide">
+                  <th className="text-left px-3 py-2">Date</th>
+                  <th className="text-right px-3 py-2">Shares</th>
+                  <th className="text-right px-3 py-2">Price ({currency})</th>
+                  <th className="text-right px-3 py-2">Value ({currency})</th>
+                  <th className="text-right px-3 py-2">Gain/Loss</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-700">
+                {valuations.map((v: InvestmentValuation) => {
+                  const gain = v.unrealised_gain_ttd ? parseFloat(v.unrealised_gain_ttd) : null
+                  return (
+                    <tr key={v.id} className="hover:bg-slate-700/30">
+                      <td className="px-3 py-2 text-slate-300">{v.as_of_date}</td>
+                      <td className="px-3 py-2 text-right font-mono text-slate-300">
+                        {v.units_held ? fmtNum(v.units_held) : '—'}
+                      </td>
+                      <td className="px-3 py-2 text-right font-mono text-slate-300">
+                        {v.price_per_unit ? fmtNum(v.price_per_unit) : '—'}
+                      </td>
+                      <td className="px-3 py-2 text-right font-mono text-slate-100 font-medium">
+                        {fmtTTD(v.current_value_ttd)}
+                      </td>
+                      <td className={`px-3 py-2 text-right font-mono text-sm ${gain == null ? 'text-slate-500' : gain >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                        {gain == null ? '—' : `${gain >= 0 ? '+' : ''}${fmtTTD(String(gain))}`}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+type UpdatingInv = {
+  id: string; currency: string
+  asset_name: string; investment_type: InvestmentType; institution_name: string
+  ticker_symbol: string; units_held: string; current_price: string
+  average_cost_per_unit: string; current_value_ttd: string
+  unrealised_gain_ttd: string; purchase_date: string
+  maturity_date: string; last_valued_at: string; notes: string
+}
+
+function UpdateValueModal({ inv, onClose, onUpdated }: {
+  inv: UpdatingInv; onClose: () => void; onUpdated: () => void
+}) {
+  const { t } = useTranslation()
+  const [assetName, setAssetName] = useState(inv.asset_name)
+  const [investType, setInvestType] = useState<InvestmentType>(inv.investment_type)
+  const [institution, setInstitution] = useState(inv.institution_name)
+  const [ticker, setTicker] = useState(inv.ticker_symbol)
+  const fmt = (v: string) => v ? parseFloat(v).toFixed(2) : ''
+  const [units, setUnits] = useState(() => fmt(inv.units_held))
+  const [pricePerUnit, setPricePerUnit] = useState(() => fmt(inv.current_price))
+  const [costPerUnit, setCostPerUnit] = useState(() => fmt(inv.average_cost_per_unit))
+  const [value, setValue] = useState(() => fmt(inv.current_value_ttd))
+  const [valueManual, setValueManual] = useState(false)
+  const [gain, setGain] = useState(inv.unrealised_gain_ttd)
+
+  useEffect(() => {
+    if (valueManual) return
+    const u = parseFloat(units)
+    const p = parseFloat(pricePerUnit)
+    if (!isNaN(u) && !isNaN(p) && u > 0 && p > 0) {
+      setValue((u * p).toFixed(2))
+    }
+  }, [units, pricePerUnit, valueManual])
+  const [maturity, setMaturity] = useState(
+    inv.maturity_date ? inv.maturity_date.slice(0, 10) : ''
+  )
+  const [valuedDate, setValuedDate] = useState(
+    inv.last_valued_at ? inv.last_valued_at.slice(0, 10) : ''
+  )
+  const [notes, setNotes] = useState(inv.notes)
+
+  const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
+  const { mutate, isPending, error } = useMutation({
+    mutationFn: () => financeApi.updateInvestment(inv.id, {
+      asset_name: assetName || undefined,
+      investment_type: investType,
+      institution_name: institution || undefined,
+      ticker_symbol: ticker || undefined,
+      units_held: units ? Number(units) : undefined,
+      current_price: pricePerUnit ? Number(pricePerUnit) : undefined,
+      average_cost_per_unit: costPerUnit ? Number(costPerUnit) : undefined,
+      current_value_ttd: value ? Number(value) : undefined,
+      unrealised_gain_ttd: gain ? Number(gain) : undefined,
+      maturity_date: (maturity && DATE_RE.test(maturity)) ? maturity : undefined,
+      last_valued_at: (valuedDate && DATE_RE.test(valuedDate)) ? new Date(valuedDate).toISOString() : undefined,
+      notes: notes || undefined,
     }),
     onSuccess: () => { onUpdated(); onClose() },
   })
 
+  const cur = inv.currency
+
   return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
-      <div className="bg-slate-800 border border-slate-700 rounded-xl w-full max-w-sm p-6 shadow-2xl">
-        <h2 className="text-base font-semibold mb-4 text-white">{t('finance.investments.updateTitle', { name })}</h2>
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 overflow-y-auto py-6">
+      <div className="bg-slate-800 border border-slate-700 rounded-xl w-full max-w-md mx-4 p-6 shadow-2xl">
+        <h2 className="text-base font-semibold mb-4 text-white">{t('finance.investments.updateTitle', { name: inv.asset_name })}</h2>
         <div className="space-y-3">
+
           <div>
-            <label className="block text-xs text-slate-400 mb-1">{t('finance.investments.currentValue')} ({currency})</label>
-            <input type="number" step="0.01" value={value} onChange={e => setValue(e.target.value)} className={cls} placeholder="0.00" />
+            <label className="block text-xs text-slate-400 mb-1">{t('finance.investments.assetName')}</label>
+            <input value={assetName} onChange={e => setAssetName(e.target.value)} className={cls} />
           </div>
+
+          <div className="flex gap-3">
+            <div className="flex-1">
+              <label className="block text-xs text-slate-400 mb-1">{t('common.type')}</label>
+              <select value={investType} onChange={e => setInvestType(e.target.value as InvestmentType)} className={cls}>
+                {INVESTMENT_TYPES.map(tp => <option key={tp} value={tp}>{t(`finance.investments.investmentTypes.${tp}`)}</option>)}
+              </select>
+            </div>
+            <div className="w-28">
+              <label className="block text-xs text-slate-400 mb-1">{t('finance.investments.ticker')}</label>
+              <input value={ticker} onChange={e => setTicker(e.target.value)} className={cls} placeholder="e.g. AHL" />
+            </div>
+          </div>
+
           <div>
-            <label className="block text-xs text-slate-400 mb-1">{t('finance.investments.unrealisedGainLossLabel')} ({currency})</label>
-            <input type="number" step="0.01" value={gain} onChange={e => setGain(e.target.value)} className={cls} placeholder="0.00 (optional)" />
+            <label className="block text-xs text-slate-400 mb-1">{t('finance.accounts.institution')}</label>
+            <input value={institution} onChange={e => setInstitution(e.target.value)} className={cls} placeholder="e.g. TTSE" />
           </div>
+
+          <div className="flex gap-3">
+            <div className="flex-1">
+              <label className="block text-xs text-slate-400 mb-1">No. of Shares</label>
+              <input type="number" step="0.000001" value={units} onChange={e => setUnits(e.target.value)} className={cls} placeholder="0" />
+            </div>
+            <div className="flex-1">
+              <label className="block text-xs text-slate-400 mb-1">Price / Share ({cur})</label>
+              <input type="number" step="0.0001" value={pricePerUnit} onChange={e => setPricePerUnit(e.target.value)} className={cls} placeholder="0.00" />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">Purchase Price / Share ({cur})</label>
+            <input type="number" step="0.0001" value={costPerUnit} onChange={e => setCostPerUnit(e.target.value)} className={cls} placeholder="Avg cost per unit" />
+          </div>
+
+          <div className="flex gap-3">
+            <div className="flex-1">
+              <label className="block text-xs text-slate-400 mb-1">
+                {t('finance.investments.currentValue')} ({cur})
+                {!valueManual && units && pricePerUnit
+                  ? <span className="ml-1 text-slate-500 italic">auto</span>
+                  : <button type="button" onClick={() => setValueManual(false)} className="ml-1 text-slate-500 hover:text-blue-400 text-xs italic">auto</button>
+                }
+              </label>
+              <input type="number" step="0.01" value={value}
+                onChange={e => { setValueManual(true); setValue(e.target.value) }}
+                className={cls} placeholder="0.00" />
+            </div>
+            <div className="flex-1">
+              <label className="block text-xs text-slate-400 mb-1">{t('finance.investments.unrealisedGainLossLabel')} ({cur})</label>
+              <input type="number" step="0.01" value={gain} onChange={e => setGain(e.target.value)} className={cls} placeholder="0.00" />
+            </div>
+          </div>
+
+          <div className="flex gap-3">
+            <div className="flex-1">
+              <label className="block text-xs text-slate-400 mb-1">Value Date</label>
+              <input type="date" value={valuedDate} onChange={e => setValuedDate(e.target.value)} className={cls} />
+            </div>
+            <div className="flex-1">
+              <label className="block text-xs text-slate-400 mb-1">{t('finance.investments.maturityDateOptional')}</label>
+              <input type="date" value={maturity} onChange={e => setMaturity(e.target.value)} className={cls} />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">{t('common.notes')}</label>
+            <textarea value={notes} onChange={e => setNotes(e.target.value)} className={cls} rows={2} placeholder="Optional notes" />
+          </div>
+
           {error && <p className="text-red-400 text-xs">{error instanceof Error ? error.message : 'Failed.'}</p>}
         </div>
         <div className="flex gap-3 mt-5">
-          <button onClick={() => mutate()} disabled={isPending || !value}
+          <button onClick={() => mutate()} disabled={isPending || !assetName}
             className="flex-1 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-sm rounded-lg transition-colors">
             {isPending ? t('common.saving') : t('finance.investments.update')}
           </button>
@@ -178,7 +450,8 @@ function UpdateValueModal({ id, name, currency, onClose, onUpdated }: { id: stri
 export default function InvestmentsPanel() {
   const { t } = useTranslation()
   const [showAdd, setShowAdd] = useState(false)
-  const [updating, setUpdating] = useState<{ id: string; name: string; currency: string } | null>(null)
+  const [updating, setUpdating] = useState<UpdatingInv | null>(null)
+  const [history, setHistory] = useState<{ id: string; name: string; currency: string } | null>(null)
   const qc = useQueryClient()
 
   const { data: investments = [], isLoading } = useQuery({
@@ -273,7 +546,26 @@ export default function InvestmentsPanel() {
                         {inv.unrealised_gain_ttd != null ? `${gain >= 0 ? '+' : ''}${fmtNative(inv.unrealised_gain_ttd, invCurrency)}` : '—'}
                       </td>
                       <td className="px-4 py-3 text-right">
-                        <button onClick={() => setUpdating({ id: inv.id, name: inv.asset_name, currency: inv.currency ?? 'TTD' })}
+                        <button onClick={() => setHistory({ id: inv.id, name: inv.asset_name, currency: inv.currency ?? 'TTD' })}
+                          className="text-xs text-slate-500 hover:text-slate-300 transition-colors mr-3">
+                          History
+                        </button>
+                        <button onClick={() => setUpdating({
+                          id: inv.id, currency: inv.currency ?? 'TTD',
+                          asset_name: inv.asset_name,
+                          investment_type: inv.investment_type,
+                          institution_name: inv.institution_name ?? '',
+                          ticker_symbol: inv.ticker_symbol ?? '',
+                          units_held: inv.units_held ?? '',
+                          current_price: inv.current_price ?? '',
+                          average_cost_per_unit: inv.average_cost_per_unit ?? '',
+                          current_value_ttd: inv.current_value_ttd ?? '',
+                          unrealised_gain_ttd: inv.unrealised_gain_ttd ?? '',
+                          purchase_date: inv.purchase_date ?? '',
+                          maturity_date: inv.maturity_date ?? '',
+                          last_valued_at: inv.last_valued_at ?? '',
+                          notes: inv.notes ?? '',
+                        })}
                           className="text-xs text-slate-500 hover:text-blue-400 transition-colors">
                           {t('finance.investments.update')}
                         </button>
@@ -288,7 +580,8 @@ export default function InvestmentsPanel() {
       ))}
 
       {showAdd && <AddModal onClose={() => setShowAdd(false)} onCreated={refresh} />}
-      {updating && <UpdateValueModal id={updating.id} name={updating.name} currency={updating.currency} onClose={() => setUpdating(null)} onUpdated={refresh} />}
+      {updating && <UpdateValueModal inv={updating} onClose={() => setUpdating(null)} onUpdated={refresh} />}
+      {history && <HistoryModal id={history.id} name={history.name} currency={history.currency} onClose={() => setHistory(null)} />}
     </div>
   )
 }

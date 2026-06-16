@@ -7,6 +7,12 @@ export const ENTITY_NAMES: Record<string, string> = {
   '00000000-0000-0000-0001-000000000005': 'JAG Finance',
   '00000000-0000-0000-0001-000000000006': 'DragonBridge',
   '00000000-0000-0000-0001-000000000007': 'NLCB',
+  '00000000-0000-0000-0001-000000000008': 'Personal — Robert',
+  '00000000-0000-0000-0001-000000000009': 'Isabella Johnson-Attin',
+  '00000000-0000-0000-0001-000000000010': 'Phillip Ajack Johnson-Attin',
+  '00000000-0000-0000-0001-000000000011': 'Brian Johnson-Attin',
+  '00000000-0000-0000-0001-000000000012': 'Zhanghua Chang',
+  '00000000-0000-0000-0001-000000000013': 'Theresa Johnson-Attin',
 }
 
 export function entityName(id: string): string {

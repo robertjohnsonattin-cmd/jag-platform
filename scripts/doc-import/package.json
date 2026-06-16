@@ -1,0 +1,19 @@
+{
+  "name": "jag-doc-import",
+  "version": "1.0.0",
+  "description": "JAG local document extraction — Path 2",
+  "private": true,
+  "scripts": {
+    "build": "tsc",
+    "extract": "node dist/extract.js"
+  },
+  "dependencies": {
+    "@types/pdf-parse": "^1.1.5",
+    "node-fetch": "^3.3.2",
+    "pdf-parse": "^1.1.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0"
+  }
+}

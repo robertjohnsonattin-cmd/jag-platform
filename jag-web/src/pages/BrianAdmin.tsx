@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useTranslation } from 'react-i18next'
 import { brianApi } from '../api/brian'
 import type { AccessLevel, BrianModule } from '../api/brian'
 
@@ -26,6 +27,7 @@ const LEVEL_STYLES: Record<AccessLevel, string> = {
 }
 
 export default function BrianAdmin() {
+  const { t } = useTranslation()
   const qc = useQueryClient()
 
   const { data: permissions = [], isLoading } = useQuery({
@@ -45,15 +47,15 @@ export default function BrianAdmin() {
   return (
     <div className="flex flex-col h-full bg-slate-900">
       <div className="px-6 py-4 border-b border-slate-700">
-        <h1 className="text-xl font-semibold text-white">Brian's Portal — Access Control</h1>
+        <h1 className="text-xl font-semibold text-white">{t('brianAdmin.title')}</h1>
         <p className="text-slate-400 text-sm mt-0.5">
-          Set module-level access for Brian's portal. Changes take effect within 60 seconds (cache TTL).
+          {t('brianAdmin.description')}
         </p>
       </div>
 
       <div className="flex-1 overflow-y-auto p-6">
         {isLoading && (
-          <p className="text-slate-400 text-sm">Loading permissions…</p>
+          <p className="text-slate-400 text-sm">{t('brianAdmin.loading')}</p>
         )}
 
         {!isLoading && (
@@ -67,7 +69,7 @@ export default function BrianAdmin() {
                 <div className="w-40 shrink-0">
                   <p className="text-white text-sm font-medium">{MODULE_LABELS[p.module]}</p>
                   {p.granted_at && (
-                    <p className="text-slate-500 text-xs mt-0.5">Updated {fmtDate(p.updated_at ?? p.granted_at)}</p>
+                    <p className="text-slate-500 text-xs mt-0.5">{t('brianAdmin.updated')} {fmtDate(p.updated_at ?? p.granted_at)}</p>
                   )}
                 </div>
 
@@ -98,7 +100,7 @@ export default function BrianAdmin() {
 
             {permissions.length === 0 && (
               <p className="text-slate-500 text-sm text-center py-12">
-                No permissions configured. Brian's account may not be provisioned yet.
+                {t('brianAdmin.noPermissions')}
               </p>
             )}
           </div>
@@ -106,10 +108,10 @@ export default function BrianAdmin() {
 
         {/* Notes */}
         <div className="max-w-2xl mt-8 p-4 bg-slate-800/50 border border-slate-700 rounded-lg text-sm text-slate-400 space-y-1">
-          <p><span className="text-slate-300 font-medium">NONE</span> — module is hidden and all requests are blocked</p>
-          <p><span className="text-slate-300 font-medium">READ</span> — Brian can view data; all write operations are blocked</p>
-          <p><span className="text-slate-300 font-medium">WRITE</span> — full create, read, update access within the module</p>
-          <p className="pt-1 text-slate-500">Changes are cached for up to 60 seconds before taking effect.</p>
+          <p><span className="text-slate-300 font-medium">NONE</span> — {t('brianAdmin.noteNone')}</p>
+          <p><span className="text-slate-300 font-medium">READ</span> — {t('brianAdmin.noteRead')}</p>
+          <p><span className="text-slate-300 font-medium">WRITE</span> — {t('brianAdmin.noteWrite')}</p>
+          <p className="pt-1 text-slate-500">{t('brianAdmin.cacheNote')}</p>
         </div>
       </div>
     </div>

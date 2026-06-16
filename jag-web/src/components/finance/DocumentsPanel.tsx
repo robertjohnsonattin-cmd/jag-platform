@@ -31,6 +31,12 @@ const ENTITY_OPTIONS = [
   { id: '00000000-0000-0000-0001-000000000004', label: 'JAG Entertainment' },
   { id: '00000000-0000-0000-0001-000000000005', label: 'JAG Finance' },
   { id: '00000000-0000-0000-0001-000000000006', label: 'DragonBridge' },
+  { id: '00000000-0000-0000-0001-000000000008', label: 'Personal — Robert' },
+  { id: '00000000-0000-0000-0001-000000000009', label: 'Isabella Johnson-Attin' },
+  { id: '00000000-0000-0000-0001-000000000010', label: 'Phillip Ajack Johnson-Attin' },
+  { id: '00000000-0000-0000-0001-000000000011', label: 'Brian Johnson-Attin' },
+  { id: '00000000-0000-0000-0001-000000000012', label: 'Zhanghua Chang' },
+  { id: '00000000-0000-0000-0001-000000000013', label: 'Theresa Johnson-Attin' },
 ]
 
 function fmt(dt: string | null) {
@@ -53,12 +59,36 @@ function ReviewCard({ job, onApproved, onDeleted }: {
   const [entityId, setEntityId] = useState(ENTITY_OPTIONS[0].id)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
+  const [holdingsJson, setHoldingsJson] = useState('')
+  const [holdingsJsonErr, setHoldingsJsonErr] = useState<string | null>(null)
+  const [overrideHoldings, setOverrideHoldings] = useState(false)
   const ex = job.extracted_data ?? {}
 
+  const hasHoldings = job.doc_type === 'INVESTMENT' && (ex['holdings'] as unknown[])?.length > 0
+  const needsHoldings = job.doc_type === 'INVESTMENT' && (!hasHoldings || overrideHoldings)
+
   const approve = async () => {
-    setBusy(true); setErr(null)
+    setBusy(true); setErr(null); setHoldingsJsonErr(null)
+
+    let overrides: Record<string, unknown> | undefined
+    if (needsHoldings) {
+      if (!holdingsJson.trim()) {
+        setHoldingsJsonErr('Enter at least one holding before approving.')
+        setBusy(false)
+        return
+      }
+      try {
+        const parsed: unknown = JSON.parse(holdingsJson)
+        overrides = { holdings: Array.isArray(parsed) ? parsed : [parsed] }
+      } catch {
+        setHoldingsJsonErr('Invalid JSON — check your brackets and quotes.')
+        setBusy(false)
+        return
+      }
+    }
+
     try {
-      await financeApi.approveDocumentJob(job.id, { owner_entity_id: entityId })
+      await financeApi.approveDocumentJob(job.id, { owner_entity_id: entityId, overrides })
       onApproved()
     } catch (e) {
       setErr((e as Error).message)
@@ -91,10 +121,11 @@ function ReviewCard({ job, onApproved, onDeleted }: {
       </div>
 
       <div className="bg-slate-900 rounded p-3 overflow-auto max-h-48">
-        {job.doc_type === 'INVESTMENT' && (ex['holdings'] as unknown[])?.length ? (
+        {hasHoldings && !overrideHoldings ? (
           <div className="space-y-1">
             <p className="text-xs text-slate-400 mb-2">
               {String(ex['institution_name'] ?? '')} — {String(ex['as_of_date'] ?? '')}
+              <button className="ml-3 text-slate-500 hover:text-slate-300 underline" onClick={() => setOverrideHoldings(true)}>override</button>
             </p>
             {(ex['holdings'] as Record<string, unknown>[]).map((h, i) => (
               <div key={i} className="flex justify-between text-xs text-slate-300">
@@ -109,6 +140,30 @@ function ReviewCard({ job, onApproved, onDeleted }: {
           </pre>
         )}
       </div>
+
+      {needsHoldings && (
+        <div className="space-y-1">
+          <p className="text-xs text-yellow-400">
+            No holdings extracted — enter them manually as a JSON array:
+          </p>
+          <textarea
+            className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-xs text-slate-300 font-mono h-36 resize-y focus:outline-none focus:ring-1 focus:ring-purple-500"
+            value={holdingsJson}
+            onChange={e => setHoldingsJson(e.target.value)}
+            placeholder={`[
+  {
+    "asset_name": "NCB Financial Group",
+    "investment_type": "EQUITY",
+    "ticker_symbol": "NCBFG",
+    "units_held": 100,
+    "currency": "TTD",
+    "current_value_ttd": 15000
+  }
+]`}
+          />
+          {holdingsJsonErr && <p className="text-xs text-red-400">{holdingsJsonErr}</p>}
+        </div>
+      )}
 
       <div className="flex items-center gap-3 flex-wrap">
         <select
@@ -297,6 +352,18 @@ export default function DocumentsPanel() {
           <p className={`text-xs ${triggerMsg.type === 'error' ? 'text-red-400' : triggerMsg.type === 'success' ? 'text-green-400' : 'text-slate-400'}`}>
             {triggerMsg.text}
           </p>
+        )}
+        {triggerStatus?.pending && (
+          <button
+            className="text-xs text-slate-500 hover:text-slate-300 underline"
+            onClick={async () => {
+              await financeApi.clearBatchTrigger()
+              setTriggerMsg(null)
+              void qc.invalidateQueries({ queryKey: ['document-jobs', 'trigger-status'] })
+            }}
+          >
+            Cancel
+          </button>
         )}
       </div>
 

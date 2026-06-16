@@ -1,35 +1,37 @@
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import PropertiesPanel from '../components/properties/PropertiesPanel'
 import TenantsPanel from '../components/properties/TenantsPanel'
 import PipelinePanel from '../components/properties/PipelinePanel'
 
 const TABS = [
-  { id: 'properties', label: 'Properties' },
-  { id: 'tenants',    label: 'Tenants' },
-  { id: 'pipeline',   label: 'Acquisition Pipeline' },
+  { id: 'properties', key: 'properties.tabs.properties' },
+  { id: 'tenants',    key: 'properties.tabs.tenants' },
+  { id: 'pipeline',   key: 'properties.tabs.pipeline' },
 ] as const
 
 type TabId = (typeof TABS)[number]['id']
 
 export default function Properties() {
+  const { t } = useTranslation()
   const [tab, setTab] = useState<TabId>('properties')
 
   return (
     <div>
-      <h1 className="text-2xl font-semibold mb-6">Properties</h1>
+      <h1 className="text-2xl font-semibold mb-6">{t('properties.title')}</h1>
 
       <div className="flex gap-1 mb-6 border-b border-slate-700">
-        {TABS.map(t => (
+        {TABS.map(tb => (
           <button
-            key={t.id}
-            onClick={() => setTab(t.id)}
+            key={tb.id}
+            onClick={() => setTab(tb.id)}
             className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-px ${
-              tab === t.id
+              tab === tb.id
                 ? 'border-blue-500 text-white'
                 : 'border-transparent text-slate-400 hover:text-slate-200'
             }`}
           >
-            {t.label}
+            {t(tb.key)}
           </button>
         ))}
       </div>

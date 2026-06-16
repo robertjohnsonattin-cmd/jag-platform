@@ -1,8 +1,10 @@
 import { api } from './client'
 import type {
-  FinAccount, FinTransaction, NetWorthSnapshot, FxRate, Investment, InvestmentType, Loan, LoanType,
+  FinAccount, FinTransaction, NetWorthSnapshot, FxRate,
+  Investment, InvestmentValuation, InvestmentType,
+  Loan, LoanType, LoanBalanceHistory,
   IncomeStatement, BalanceSheet, CashFlow,
-  InsurancePolicy, InsurancePremium, InsuranceClaim,
+  InsurancePolicy, InsurancePremium, InsuranceClaim, InsurancePolicyHistory,
   IntercompanyCharge, IntercompanyElimination,
   InsurancePolicyType, InsuranceAssetType, PremiumFrequency,
   IntercompanyChargeType,
@@ -72,10 +74,20 @@ export const financeApi = {
     quantity?: number; maturity_date?: string; notes?: string
   }) => api.post<Investment>('/finance/investments', data),
 
+  getInvestmentValuations: (id: string) =>
+    api.get<InvestmentValuation[]>(`/finance/investments/${id}/valuations`),
+
+  addInvestmentValuation: (id: string, data: {
+    as_of_date: string; units_held?: number; price_per_unit?: number
+    current_value_ttd: number; unrealised_gain_ttd?: number; notes?: string
+  }) => api.post<InvestmentValuation>(`/finance/investments/${id}/valuations`, data),
+
   updateInvestment: (id: string, data: Partial<{
-    asset_name: string; current_value_ttd: number; cost_basis_ttd: number
-    unrealised_gain_ttd: number; institution_name: string; ticker_symbol: string
-    quantity: number; maturity_date: string; notes: string
+    investment_type: InvestmentType; asset_name: string
+    institution_name: string; ticker_symbol: string
+    units_held: number; average_cost_per_unit: number; current_price: number
+    current_value_ttd: number; unrealised_gain_ttd: number
+    maturity_date: string; last_valued_at: string; notes: string
   }>) => api.patch<Investment>(`/finance/investments/${id}`, data),
 
   getLoans: (params?: { owner_entity_id?: string; loan_type?: LoanType; currency?: string }) => {
@@ -98,6 +110,14 @@ export const financeApi = {
     outstanding_balance: number; interest_rate: number; interest_type: string
     monthly_payment: number; maturity_date: string; notes: string
   }>) => api.patch<Loan>(`/finance/loans/${id}`, data),
+
+  getLoanHistory: (id: string) =>
+    api.get<LoanBalanceHistory[]>(`/finance/loans/${id}/history`),
+
+  addLoanHistory: (id: string, data: {
+    as_of_date: string; outstanding_balance: number
+    interest_rate?: number; monthly_payment?: number; notes?: string
+  }) => api.post<LoanBalanceHistory>(`/finance/loans/${id}/history`, data),
 
   getIncomeStatement: (params: { date_from: string; date_to: string; owner_entity_id?: string }) => {
     const qs = '?' + new URLSearchParams(Object.fromEntries(
@@ -154,6 +174,14 @@ export const financeApi = {
     premium_amount: number; premium_amount_ttd: number
     expiry_date: string; renewal_alert_days: number; is_active: boolean; notes: string
   }>) => api.patch<InsurancePolicy>(`/finance/insurance/policies/${id}`, data),
+
+  getPolicyHistory: (id: string) =>
+    api.get<InsurancePolicyHistory[]>(`/finance/insurance/policies/${id}/history`),
+
+  addPolicyHistory: (id: string, data: {
+    as_of_date: string; coverage_amount_ttd: number; premium_amount_ttd: number
+    expiry_date?: string; notes?: string
+  }) => api.post<InsurancePolicyHistory>(`/finance/insurance/policies/${id}/history`, data),
 
   deletePolicy: (id: string) =>
     api.delete<{ deleted: boolean; id: string }>(`/finance/insurance/policies/${id}`),
@@ -272,6 +300,9 @@ export const financeApi = {
 
   getBatchTriggerStatus: () =>
     api.get<{ pending: boolean; triggered_at: string | null }>('/finance/document-jobs/trigger/status'),
+
+  clearBatchTrigger: () =>
+    api.post<{ cleared: boolean }>('/finance/document-jobs/trigger/clear', {}),
 
   getConsolidated: (params: { period_year: number; period_month?: number }) => {
     const qs = '?' + new URLSearchParams(Object.fromEntries(

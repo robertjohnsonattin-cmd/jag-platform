@@ -3,7 +3,7 @@ import type {
   Property, PropertyTenant, PipelineItem, MaintenanceRequest,
   RentPayment, RentReceipt, UtilityBill, VendorInvoice, Lease, Mortgage,
   InsurancePolicy, PropertyTaxRecord, Inspection, ArrearsRecord, LeaseExpiryRecord,
-  FinancialSummary, PropertyDocument, UtilityAccount, Unit,
+  FinancialSummary, PropertyDocument, UtilityAccount, Unit, PropertyValuationHistory,
 } from '../types/properties'
 
 function qs(params?: Record<string, string | number | undefined>): string {
@@ -67,6 +67,12 @@ export const propertiesApi = {
     valuation_date?: string
     notes?: string
   }) => api.patch<Property>(`/properties/${id}`, body),
+
+  getValuationHistory: (id: string) =>
+    api.get<PropertyValuationHistory[]>(`/properties/${id}/valuation-history`),
+
+  addValuationHistory: (id: string, body: { as_of_date: string; valuation_ttd: number; notes?: string }) =>
+    api.post<PropertyValuationHistory>(`/properties/${id}/valuation-history`, body),
 
   createLease: (propertyId: string, body: Record<string, unknown>) =>
     api.post<Lease>(`/properties/${propertyId}/leases`, body),
