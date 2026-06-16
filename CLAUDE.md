@@ -108,6 +108,15 @@ Custom `app.*` GUC parameters revert to `''` (empty string) **not NULL** at sess
 1. Always use `NULLIF(current_setting('app.xxx', true), '')::uuid` in RLS policies — never raw `current_setting(...)::uuid`
 2. Always use the correct RLS wrapper for each database: `withTenantRLS` for `jag_commercial`/`jag_entertainment`/`jag_core`; `withOwnerRLS` for `jag_family`/`jag_properties`
 
+### response.ts dual-mode helpers
+`ok()` and `err()` in `src/lib/response.ts` support **two calling conventions**:
+- Old routes (most of codebase): `ok(res, data, status?)` → sends response directly
+- New tenancy routes: `ok(data)` → returns `{success:true, data}` envelope for `res.json(ok(data))`
+- Old: `err(res, status, code, message)` → sends response
+- New: `err(message, code)` → returns envelope for `res.status(N).json(err('msg','CODE'))`
+
+Detection at runtime: first arg is a `Response` if it has a `.json` function; first arg is a `string` → new-style `err`. Both compile cleanly via TypeScript overloads. When writing new routes, use the **new style** (single-arg `ok` / two-arg `err`) — it is cleaner.
+
 ### node-pg numeric types
 PostgreSQL `numeric` / `decimal` columns arrive in Node.js as **strings**, not numbers. Always wrap with `parseFloat(String(value ?? 0))` before arithmetic — using `+` on two pg numeric values concatenates strings instead of adding numbers.
 
@@ -581,6 +590,7 @@ Never use a translated string as a React list key. Use a stable English/enum key
 | `brianAdmin` | Brian admin portal |
 | `brianPortal` | Brian user portal |
 | `placeholder` | Coming soon pages |
+| `tenancy` | Tenancy lifecycle panels (enquiries, viewings, applications, deposits, rent, handover, maintenance, renewals, WhatsApp) |
 
 ---
 
@@ -611,7 +621,7 @@ Never use a translated string as a React list key. Use a stable English/enum key
 - Scope all DB queries with correct owner/tenant — no cross-DB queries without `postgres_fdw` through JAG Holdings
 - Use Keycloak JWT claims for role — never trust application-layer role claims alone
 - Add `last_modified_at` + `last_modified_by` to all shared master record tables
-- For API changes: `npm run build:prod` FIRST, then SCP `dist/`, then docker rebuild
+- For API changes: `npm run build:prod` FIRST, then SCP `dist/`, then docker rebuild. If new npm packages were added, also run `node scripts/prod-install.js` and re-SCP `prod_modules/` — the Dockerfile copies `prod_modules/node_modules` not the host's `node_modules`
 - For frontend changes: `npm run build` in `jag-web/`, then SCP `dist/` to VM
 - **i18n**: never use `t` as an arrow-function parameter name in any component (shadows `useTranslation` `t`); never use translated strings as React list keys
 - New modules: build in English first, translate as a batch when complete — missing keys degrade gracefully
