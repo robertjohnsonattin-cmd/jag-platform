@@ -1,5 +1,6 @@
 export type ProjectStatus =
   | 'TENDER'
+  | 'AWARDED'
   | 'ACTIVE'
   | 'PRACTICAL_COMPLETION'
   | 'DEFECTS_LIABILITY'
@@ -24,6 +25,7 @@ export interface Project {
   client_company_id: string | null
   client_company_name: string | null
   status: ProjectStatus
+  handover_document_url: string | null
   created_at: string
   updated_at: string
 }
@@ -40,6 +42,10 @@ export interface BoqItem {
   amount_budgeted: string
   amount_actual: string
   quantity_actual: string | null
+  internal_cost_rate: string | null
+  markup_percent: string | null
+  final_bid_rate: string | null
+  work_package_tag: string | null
   created_at: string
 }
 
@@ -114,5 +120,67 @@ export interface SiteDiaryEntry {
   instructions_received: string | null
   issues_noted: string | null
   foreman_id: string
+  created_at: string
+}
+
+export interface ProjectTask {
+  id: string
+  project_id: string
+  task_type: 'MOBILIZATION' | 'POST_MORTEM' | 'GENERAL'
+  title: string
+  description: string | null
+  assigned_to: string | null
+  due_date: string | null
+  status: 'OPEN' | 'IN_PROGRESS' | 'DONE'
+  completed_at: string | null
+  last_modified_at: string
+  created_at: string
+}
+
+export interface PunchListItem {
+  id: string
+  project_id: string
+  description: string
+  location: string | null
+  trade: string | null
+  status: 'IDENTIFIED' | 'RECTIFIED' | 'VERIFIED'
+  identified_by: string
+  identified_date: string
+  rectified_date: string | null
+  verified_by: string | null
+  verified_date: string | null
+  photo_url: string | null
+  last_modified_at: string
+  created_at: string
+}
+
+export interface SiteIncident {
+  id: string
+  project_id: string
+  incident_date: string
+  incident_type: 'NEAR_MISS' | 'MINOR_INJURY' | 'MAJOR_INJURY' | 'PROPERTY_DAMAGE' | 'ENVIRONMENTAL' | 'OTHER'
+  severity: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL'
+  description: string
+  reported_by: string
+  corrective_action: string | null
+  status: 'OPEN' | 'CLOSED'
+  closed_date: string | null
+  photos: string[]
+  last_modified_at: string
+  created_at: string
+}
+
+export interface QualityInspection {
+  id: string
+  project_id: string
+  inspection_date: string
+  inspector_name: string
+  area_inspected: string
+  checklist_result: 'PASS' | 'FAIL' | 'CONDITIONAL'
+  defects_noted: string | null
+  follow_up_required: boolean
+  follow_up_date: string | null
+  photos: string[]
+  last_modified_at: string
   created_at: string
 }

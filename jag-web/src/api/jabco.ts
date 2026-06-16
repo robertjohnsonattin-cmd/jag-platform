@@ -85,6 +85,7 @@ export const jabcoApi = {
     expected_end_date?: string | null
     actual_end_date?: string | null
     site_address?: string | null
+    handover_document_url?: string | null
   }) => api.patch<Project>(`/jabco/projects/${id}`, body),
 
   createBoqItem: (projectId: string, body: {
@@ -155,4 +156,87 @@ export const jabcoApi = {
 
   deleteProject: (id: string) =>
     api.delete<{ deleted: boolean; id: string }>(`/jabco/projects/${id}`),
+
+  // ── Project Tasks ──────────────────────────────────────────────────────────
+
+  getTasks: (projectId: string, params?: { task_type?: string }) =>
+    api.get<{ tasks: import('../types/jabco').ProjectTask[] }>(
+      `/jabco/projects/${projectId}/tasks${qs(params)}`
+    ),
+
+  createTask: (projectId: string, body: {
+    task_type?: 'MOBILIZATION' | 'POST_MORTEM' | 'GENERAL'
+    title: string
+    description?: string
+    assigned_to?: string
+    due_date?: string
+  }) => api.post<import('../types/jabco').ProjectTask>(`/jabco/projects/${projectId}/tasks`, body),
+
+  patchTask: (projectId: string, taskId: string, body: {
+    status?: 'OPEN' | 'IN_PROGRESS' | 'DONE'
+    due_date?: string | null
+    assigned_to?: string | null
+    title?: string
+  }) => api.patch<import('../types/jabco').ProjectTask>(`/jabco/projects/${projectId}/tasks/${taskId}`, body),
+
+  // ── Punch List ─────────────────────────────────────────────────────────────
+
+  getPunchList: (projectId: string, params?: { status?: string }) =>
+    api.get<{ items: import('../types/jabco').PunchListItem[] }>(
+      `/jabco/projects/${projectId}/punch-list${qs(params)}`
+    ),
+
+  createPunchItem: (projectId: string, body: {
+    description: string
+    location?: string
+    trade?: string
+    photo_url?: string
+  }) => api.post<import('../types/jabco').PunchListItem>(`/jabco/projects/${projectId}/punch-list`, body),
+
+  patchPunchItem: (projectId: string, itemId: string, body: {
+    status: 'RECTIFIED' | 'VERIFIED'
+    rectified_date?: string
+    verified_by?: string
+    verified_date?: string
+  }) => api.patch<import('../types/jabco').PunchListItem>(`/jabco/projects/${projectId}/punch-list/${itemId}`, body),
+
+  // ── Site Incidents ─────────────────────────────────────────────────────────
+
+  getIncidents: (projectId: string) =>
+    api.get<{ incidents: import('../types/jabco').SiteIncident[] }>(
+      `/jabco/projects/${projectId}/incidents`
+    ),
+
+  createIncident: (projectId: string, body: {
+    incident_date: string
+    incident_type: 'NEAR_MISS' | 'MINOR_INJURY' | 'MAJOR_INJURY' | 'PROPERTY_DAMAGE' | 'ENVIRONMENTAL' | 'OTHER'
+    severity: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL'
+    description: string
+    corrective_action?: string
+    photos?: string[]
+  }) => api.post<import('../types/jabco').SiteIncident>(`/jabco/projects/${projectId}/incidents`, body),
+
+  closeIncident: (projectId: string, incidentId: string, body: {
+    status: 'CLOSED'
+    closed_date?: string
+    corrective_action?: string
+  }) => api.patch<import('../types/jabco').SiteIncident>(`/jabco/projects/${projectId}/incidents/${incidentId}`, body),
+
+  // ── Quality Inspections ────────────────────────────────────────────────────
+
+  getQualityInspections: (projectId: string) =>
+    api.get<{ inspections: import('../types/jabco').QualityInspection[] }>(
+      `/jabco/projects/${projectId}/quality-inspections`
+    ),
+
+  createQualityInspection: (projectId: string, body: {
+    inspection_date: string
+    inspector_name: string
+    area_inspected: string
+    checklist_result: 'PASS' | 'FAIL' | 'CONDITIONAL'
+    defects_noted?: string
+    follow_up_required?: boolean
+    follow_up_date?: string
+    photos?: string[]
+  }) => api.post<import('../types/jabco').QualityInspection>(`/jabco/projects/${projectId}/quality-inspections`, body),
 }

@@ -6,7 +6,11 @@ import { jabcoSiteDiaryRouter }    from './site-diary';
 import { jabcoRetentionRouter }    from './retention';
 import { jabcoGanttRouter }        from './gantt';
 import { jabcoPaymentCertsRouter, jabcoVOActionRouter } from './payment-certs';
-import { jabcoVendorInvoicesRouter } from './vendor-invoices';
+import { jabcoVendorInvoicesRouter }      from './vendor-invoices';
+import { jabcoProjectTasksRouter }        from './project-tasks';
+import { jabcoPunchListRouter }           from './punch-list';
+import { jabcoSiteIncidentsRouter }       from './site-incidents';
+import { jabcoQualityInspectionsRouter }  from './quality-inspections';
 
 export const jabcoRouter = Router();
 
@@ -25,3 +29,7 @@ jabcoRouter.use('/projects/:projectId/subcontractor-retention', jabcoRetentionRo
 jabcoRouter.use('/projects/:projectId/gantt',                   jabcoGanttRouter);
 jabcoRouter.use('/projects/:projectId/payment-certificates',    jabcoPaymentCertsRouter);
 jabcoRouter.use('/projects/:projectId/vendor-invoices',         jabcoVendorInvoicesRouter);
+jabcoRouter.use('/projects/:projectId/tasks',               jabcoProjectTasksRouter);
+jabcoRouter.use('/projects/:projectId/punch-list',          jabcoPunchListRouter);
+jabcoRouter.use('/projects/:projectId/incidents',           jabcoSiteIncidentsRouter);
+jabcoRouter.use('/projects/:projectId/quality-inspections', jabcoQualityInspectionsRouter);

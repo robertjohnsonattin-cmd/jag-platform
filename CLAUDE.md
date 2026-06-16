@@ -1,7 +1,7 @@
 # JAG Integrated Business Platform — Claude Session Context
 
 **Owner:** Robert Johnson-Attin | Barataria, Trinidad & Tobago
-**Architecture:** v1.9 | **Current Phase:** ALL PHASES COMPLETE — in production | **Updated:** 2026-06-16 (session 11)
+**Architecture:** v1.9 | **Current Phase:** ALL PHASES COMPLETE — in production | **Updated:** 2026-06-16 (session 13)
 
 ---
 
@@ -132,6 +132,14 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 maturity_date: (maturity && DATE_RE.test(maturity)) ? maturity : undefined,
 ```
 Apply to every date field: `purchase_date`, `maturity_date`, `expiry_date`, `as_of_date`, etc.
+
+### Mobile responsive patterns (Tailwind)
+No separate mobile app — the React + Tailwind stack handles all screen sizes. The shell (AppShell.tsx) is already mobile-aware (hamburger menu, slide-over sidebar). Rules for all new components:
+
+- **Grid layouts on main pages**: always add a mobile breakpoint — `grid-cols-1 sm:grid-cols-3` not bare `grid-cols-3`; `grid-cols-2 sm:grid-cols-3 md:grid-cols-5` for 5-column KPI strips
+- **Table wrappers**: use `overflow-x-auto rounded-lg border border-slate-700` not `overflow-hidden` — the horizontal scroll is the correct mobile behaviour; `overflow-hidden` traps wide tables
+- **Master-detail layouts** (list sidebar + detail panel): use mobile toggle pattern — list is `${selected ? 'hidden md:flex' : 'flex'} w-full md:w-64`, detail is `${!selected ? 'hidden md:block' : 'block'} flex-1`. Add a `md:hidden` back button at top of detail pane using `t('common.back')` (`← Back` / `返回` — key exists in both locale files)
+- **Form grids inside modals**: `grid-cols-2` is fine at modal width (~380px) — do not add breakpoints to modal-internal form field pairs
 
 ### Dashboard query limits
 `jag-web/src/pages/Dashboard.tsx` requests properties with `limit: 100` (backend max is 500 per `PropertiesQuerySchema`). Never raise Dashboard limit above 500 without also raising the backend Zod schema.
@@ -534,6 +542,8 @@ Path 2 local extraction — reads PDFs from local hard drive, Ollama extracts, p
 - ~~**Path 2 investment import — Phillip Ajack TTCD statement**~~ — **DONE 2026-06-15 (session 10)**: First live Path 2 import from local hard drive. PDF was FlateDecode-compressed (pdf-parse v1.1.1 added). TTCD programmatic pre-parser written and shipped — 10 TTSE holdings (AHL, AMCL, MASSY, NEL, NFM, PLD, RFHL, SBTT, UCL, WCO) imported to entity Phillip Ajack (00000000-0000-0000-0001-000000000010), total TTD 1,529,126.52. File remained on local desktop.
 - ~~**Full commit + deploy (sessions 8–10)**~~ — **DONE 2026-06-15 (session 10)**: commit `e56037c` — 74 files, 7445 insertions; deploy.sh all 7 steps passed; API + frontend live at jagcorporate.com.
 - ~~**JAG Property Tenancy Module (full lifecycle)**~~ — **DONE 2026-06-16 (session 11)**: Complete tenancy lifecycle Advertising → Enquiry → Viewing → Application → Lease → Handover → Rent Collection → Maintenance → Renewal/Exit. 12 new backend routes (`applications`, `deposits`, `enquiries`, `handover`, `listing`, `maintenance-tickets`, `renewals`, `rent-schedule`, `viewings`, `whatsapp-send`, `internal/whatsapp-webhook`); 10 new frontend panels; `jag-web/src/api/tenancy.ts`; 10 new jag_properties migrations (013–022); 5 VM cron scripts (rent-reminders, viewing-reminders, renewal-notices, sla-monitor, post-viewing-app-link). `google-auth-library` installed for Google Calendar booking slots. `response.ts` extended with dual-mode overloads (`ok(data)` + `ok(res,data,status)` both valid). `rls.ts` extended with Pool+ownerId overload. Deployed — all 7 deploy steps passed.
+- ~~**Mobile responsive UI pass**~~ — **DONE 2026-06-16 (session 12)**: No separate mobile app needed — existing React + Tailwind stack adapted. 16 files changed. Dashboard KPI/net-worth grids now stack on mobile (`sm:`/`lg:` breakpoints). PropertiesPanel master-detail uses mobile stack pattern (list → tap → detail, back button). All data tables across Finance, Ledger, Properties, Expenses now use `overflow-x-auto` for horizontal scroll on mobile. Insurance/NetWorth/Intercompany summary cards stack on mobile. `common.back`/`返回` added to both locale files. Deployed — frontend-only SCP.
+- ~~**JAG Commercial Lifecycle (full pipeline)**~~ — **DONE 2026-06-16 (session 13)**: Full bid lifecycle Lead→Win/Loss→Execution→Closeout per `JAG_COMMERCIAL_LIFECYCLE_BUILD_SPEC.md`. **Migrations** (8 files, 016–023): `pipeline_stage` gains SUBMITTED/NO_GO; `project_status` gains AWARDED; 7 new columns on `crm_sales_pipeline` (pipeline_type, bid_deadline, linked_project_id, etc.); `jabco_bid_log` append-only table (log_type incl. WON); BOQ margin columns; VO `time_extension_days`; `jabco_project_tasks`; punch list / site incidents / quality inspections tables; `handover_document_url` on projects. **Backend**: `routes/crm/pipeline.ts` (8 endpoints incl. Go/No-Go, Submit, Win/Loss, intelligence); `routes/jabco/project-tasks.ts`; `routes/jabco/punch-list.ts` (state-gated IDENTIFIED→RECTIFIED→VERIFIED); `routes/jabco/site-incidents.ts`; `routes/jabco/quality-inspections.ts`; `projects.ts` updated (AWARDED status, closeout guard — blocks CLOSED if open punch items or no handover doc, fires `jabco.project_closed` outbox event); `payment-certs.ts` VO approval now rolls `contract_value` + `expected_end_date` in same transaction. **Frontend**: `types/pipeline.ts` + `api/pipeline.ts` (new); `types/jabco.ts` + `api/jabco.ts` extended; CRM page gains "Tender Pipeline" tab (kanban desktop / filtered list mobile; Go/No-Go modal with background intelligence query; Submit + Win/Loss modals); JABCO project detail gains 5 new tabs — Tasks, Punch List, Incidents, Quality, Closeout; BOQ shows margin columns when status=TENDER/AWARDED. **i18n**: `tender` namespace added to both locale files; `jabco` namespace extended with all new keys. **NOT YET DEPLOYED** — run migrations 016–023 on production first (they touch live enums), then deploy.sh.
 
 ---
 
@@ -591,6 +601,7 @@ Never use a translated string as a React list key. Use a stable English/enum key
 | `brianPortal` | Brian user portal |
 | `placeholder` | Coming soon pages |
 | `tenancy` | Tenancy lifecycle panels (enquiries, viewings, applications, deposits, rent, handover, maintenance, renewals, WhatsApp) |
+| `tender` | JABCO Tender Pipeline tab in CRM page (opportunity stages, Go/No-Go, Win/Loss, bid intelligence) |
 
 ---
 

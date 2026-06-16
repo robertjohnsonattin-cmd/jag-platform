@@ -212,8 +212,8 @@ jabcoVOActionRouter.patch('/:voId', async (req: Request, res: Response, next: Ne
 
     const client = await commercialPool.connect();
     try {
-      const updated = await withTenantRLS(client, req.rlsCtx, (c) =>
-        c.query(
+      const updated = await withTenantRLS(client, req.rlsCtx, async (c) => {
+        const vo = await c.query(
           `UPDATE jabco_variation_orders
            SET    status        = $1,
                   approved_date = CASE WHEN $1 = 'APPROVED' THEN COALESCE($2::date, CURRENT_DATE) ELSE NULL END,
@@ -223,8 +223,26 @@ jabcoVOActionRouter.patch('/:voId', async (req: Request, res: Response, next: Ne
              AND  status = 'PENDING'
            RETURNING *`,
           [action, approved_date ?? null, userId, voId],
-        ).then(r => r.rows[0] ?? null),
-      );
+        ).then(r => r.rows[0] ?? null);
+
+        if (!vo) return null;
+
+        if (action === 'APPROVED') {
+          await c.query(
+            `UPDATE jabco_projects
+             SET contract_value    = contract_value + $1,
+                 expected_end_date = CASE
+                   WHEN $2 > 0 AND expected_end_date IS NOT NULL
+                   THEN expected_end_date + ($2 || ' days')::interval
+                   ELSE expected_end_date
+                 END,
+                 last_modified_at  = now()
+             WHERE id = $3`,
+            [vo.amount, vo.time_extension_days ?? 0, vo.project_id],
+          );
+        }
+        return vo;
+      });
 
       if (!updated) { err(res, 404, 'VO_NOT_FOUND', 'Variation order not found or not in PENDING status.'); return; }
 

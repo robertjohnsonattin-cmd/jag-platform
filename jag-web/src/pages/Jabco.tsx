@@ -7,6 +7,7 @@ import ConfirmDeleteModal from '../components/ui/ConfirmDeleteModal'
 import type {
   Project, BoqItem, VariationOrder, ProgressClaim, PaymentCertificate,
   VendorInvoice, SiteDiaryEntry, ProjectStatus,
+  ProjectTask, PunchListItem, SiteIncident, QualityInspection,
 } from '../types/jabco'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -26,6 +27,7 @@ const fmtDate = (d: string | null) =>
 
 const STATUS_STYLES: Record<ProjectStatus, string> = {
   TENDER:               'bg-yellow-900/50 text-yellow-300 border border-yellow-700',
+  AWARDED:              'bg-cyan-900/50   text-cyan-300   border border-cyan-700',
   ACTIVE:               'bg-green-900/50  text-green-300  border border-green-700',
   PRACTICAL_COMPLETION: 'bg-blue-900/50   text-blue-300   border border-blue-700',
   DEFECTS_LIABILITY:    'bg-orange-900/50 text-orange-300 border border-orange-700',
@@ -36,6 +38,7 @@ const STATUS_STYLES: Record<ProjectStatus, string> = {
 // Module-level fallback labels (used as t() fallback values)
 const STATUS_LABELS_FALLBACK: Record<ProjectStatus, string> = {
   TENDER:               'Tender',
+  AWARDED:              'Awarded',
   ACTIVE:               'Active',
   PRACTICAL_COMPLETION: 'Practical Completion',
   DEFECTS_LIABILITY:    'Defects Liability',
@@ -674,7 +677,7 @@ function ProjectList({
       {/* Filter tabs + add button */}
       <div className="px-3 py-2 flex items-center gap-1 flex-wrap border-b border-slate-700">
         <div className="flex gap-1 flex-wrap flex-1">
-          {(['ALL', 'TENDER', 'ACTIVE', 'PRACTICAL_COMPLETION', 'DEFECTS_LIABILITY', 'CLOSED', 'CANCELLED'] as const).map(s => (
+          {(['ALL', 'TENDER', 'AWARDED', 'ACTIVE', 'PRACTICAL_COMPLETION', 'DEFECTS_LIABILITY', 'CLOSED', 'CANCELLED'] as const).map(s => (
             <button
               key={s}
               onClick={() => setFilter(s)}
@@ -884,6 +887,7 @@ function BoqTab({ project }: { project: Project }) {
     return acc
   }, {})
   const total = items.reduce((sum, i) => sum + Number(i.amount_budgeted), 0)
+  const showMargin = project.status === 'TENDER' || project.status === 'AWARDED'
 
   if (isLoading) return <div className="text-center text-slate-500 text-sm py-8">{t('common.loading', 'Loading…')}</div>
 
@@ -897,7 +901,7 @@ function BoqTab({ project }: { project: Project }) {
       </div>
       {items.length === 0 && <div className="text-center text-slate-500 text-sm py-4">{t('jabco.boqNoItems', 'No BOQ items')}</div>}
       {Object.entries(sections).map(([section, sItems]) => (
-        <div key={section} className="bg-slate-800 rounded-lg overflow-hidden">
+        <div key={section} className="bg-slate-800 rounded-lg overflow-x-auto">
           <div className="px-4 py-2 bg-slate-700/60 text-xs font-semibold text-slate-300 uppercase tracking-wide">
             {section}
           </div>
@@ -909,21 +913,41 @@ function BoqTab({ project }: { project: Project }) {
                 <th className="px-3 py-2 text-right font-medium">{t('jabco.boqColQty', 'Qty')}</th>
                 <th className="px-3 py-2 text-right font-medium">{t('jabco.boqColRate', 'Rate')}</th>
                 <th className="px-3 py-2 text-right font-medium">{t('jabco.boqColTotal', 'Total')}</th>
+                {showMargin && <>
+                  <th className="px-3 py-2 text-right font-medium">{t('jabco.boqColCostRate', 'Cost Rate')}</th>
+                  <th className="px-3 py-2 text-right font-medium">{t('jabco.boqColMarkup', 'Markup %')}</th>
+                  <th className="px-3 py-2 text-right font-medium">{t('jabco.boqColBidRate', 'Bid Rate')}</th>
+                  <th className="px-3 py-2 text-left font-medium">{t('jabco.boqColWpTag', 'Work Package')}</th>
+                </>}
               </tr>
             </thead>
             <tbody>
-              {sItems.map(item => (
-                <tr key={item.id} className="border-b border-slate-700/40 hover:bg-slate-700/20">
-                  <td className="px-4 py-2 text-slate-200">
-                    {item.item_number && <span className="text-slate-500 mr-1">{item.item_number}</span>}
-                    {item.description}
-                  </td>
-                  <td className="px-3 py-2 text-right text-slate-400">{item.unit}</td>
-                  <td className="px-3 py-2 text-right text-slate-300">{fmt.format(Number(item.quantity_budgeted))}</td>
-                  <td className="px-3 py-2 text-right text-slate-300">{fmt.format(Number(item.unit_rate))}</td>
-                  <td className="px-3 py-2 text-right text-slate-100 font-medium">{fmt.format(Number(item.amount_budgeted))}</td>
-                </tr>
-              ))}
+              {sItems.map(item => {
+                const boqItem = item as BoqItem & {
+                  internal_cost_rate?: string | null
+                  markup_percent?: string | null
+                  final_bid_rate?: string | null
+                  work_package_tag?: string | null
+                }
+                return (
+                  <tr key={item.id} className="border-b border-slate-700/40 hover:bg-slate-700/20">
+                    <td className="px-4 py-2 text-slate-200">
+                      {item.item_number && <span className="text-slate-500 mr-1">{item.item_number}</span>}
+                      {item.description}
+                    </td>
+                    <td className="px-3 py-2 text-right text-slate-400">{item.unit}</td>
+                    <td className="px-3 py-2 text-right text-slate-300">{fmt.format(Number(item.quantity_budgeted))}</td>
+                    <td className="px-3 py-2 text-right text-slate-300">{fmt.format(Number(item.unit_rate))}</td>
+                    <td className="px-3 py-2 text-right text-slate-100 font-medium">{fmt.format(Number(item.amount_budgeted))}</td>
+                    {showMargin && <>
+                      <td className="px-3 py-2 text-right text-slate-400">{boqItem.internal_cost_rate != null ? fmt.format(Number(boqItem.internal_cost_rate)) : '—'}</td>
+                      <td className="px-3 py-2 text-right text-slate-400">{boqItem.markup_percent != null ? `${fmt.format(Number(boqItem.markup_percent))}%` : '—'}</td>
+                      <td className="px-3 py-2 text-right text-slate-400">{boqItem.final_bid_rate != null ? fmt.format(Number(boqItem.final_bid_rate)) : '—'}</td>
+                      <td className="px-3 py-2 text-left text-slate-400">{boqItem.work_package_tag ?? '—'}</td>
+                    </>}
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         </div>
@@ -1377,21 +1401,772 @@ function SiteDiaryTab({ project }: { project: Project }) {
   )
 }
 
+// ── Tasks Tab ─────────────────────────────────────────────────────────────────
+
+const TASK_STATUS_CLS: Record<ProjectTask['status'], string> = {
+  OPEN:        'text-slate-400',
+  IN_PROGRESS: 'text-yellow-400',
+  DONE:        'text-green-400',
+}
+
+const TASK_TYPE_ORDER: ProjectTask['task_type'][] = ['MOBILIZATION', 'POST_MORTEM', 'GENERAL']
+
+function TasksTab({ project }: { project: Project }) {
+  const { t } = useTranslation()
+  const qc = useQueryClient()
+  const [showForm, setShowForm] = useState(false)
+  const [form, setForm] = useState({ title: '', task_type: 'GENERAL' as ProjectTask['task_type'], due_date: '' })
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['jabco-tasks', project.id],
+    queryFn: () => jabcoApi.getTasks(project.id),
+  })
+
+  const { mutate: addTask, isPending: adding } = useMutation({
+    mutationFn: () => jabcoApi.createTask(project.id, {
+      title: form.title,
+      task_type: form.task_type,
+      due_date: form.due_date || undefined,
+    }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['jabco-tasks', project.id] })
+      setShowForm(false)
+      setForm({ title: '', task_type: 'GENERAL', due_date: '' })
+    },
+  })
+
+  const { mutate: patchTask } = useMutation({
+    mutationFn: ({ taskId, status }: { taskId: string; status: ProjectTask['status'] }) =>
+      jabcoApi.patchTask(project.id, taskId, { status }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['jabco-tasks', project.id] }) },
+  })
+
+  const tasks = data?.tasks ?? []
+
+  const grouped = TASK_TYPE_ORDER.reduce<Record<string, ProjectTask[]>>((acc, type) => {
+    acc[type] = tasks.filter(task => task.task_type === type)
+    return acc
+  }, {} as Record<string, ProjectTask[]>)
+
+  const nextStatus = (s: ProjectTask['status']): ProjectTask['status'] =>
+    s === 'OPEN' ? 'IN_PROGRESS' : 'DONE'
+
+  if (isLoading) return <div className="text-center text-slate-500 text-sm py-8">{t('common.loading', 'Loading…')}</div>
+
+  return (
+    <div className="space-y-4">
+      <div className="flex justify-end">
+        <button
+          onClick={() => setShowForm(s => !s)}
+          className="px-3 py-1.5 bg-orange-700 hover:bg-orange-600 text-white text-xs rounded-lg transition-colors"
+        >
+          {showForm ? t('common.cancel', 'Cancel') : t('jabco.addTask', '+ Add Task')}
+        </button>
+      </div>
+
+      {showForm && (
+        <div className="bg-slate-800 rounded-lg p-4 space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            <div className="col-span-2">
+              <label className="block text-xs text-slate-400 mb-1">{t('jabco.taskTitle', 'Title *')}</label>
+              <input value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} className={cls} placeholder={t('jabco.taskTitlePlaceholder', 'e.g. Order rebar')} />
+            </div>
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">{t('jabco.taskType', 'Type')}</label>
+              <select value={form.task_type} onChange={e => setForm(f => ({ ...f, task_type: e.target.value as ProjectTask['task_type'] }))} className={cls}>
+                <option value="MOBILIZATION">{t('jabco.taskTypeMobilization', 'Mobilization')}</option>
+                <option value="POST_MORTEM">{t('jabco.taskTypePostMortem', 'Post Mortem')}</option>
+                <option value="GENERAL">{t('jabco.taskTypeGeneral', 'General')}</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">{t('common.dueDate', 'Due Date')}</label>
+              <input type="date" value={form.due_date} onChange={e => setForm(f => ({ ...f, due_date: e.target.value }))} className={cls} />
+            </div>
+          </div>
+          <div className="flex justify-end">
+            <button onClick={() => addTask()} disabled={!form.title || adding}
+              className="px-4 py-2 bg-orange-700 hover:bg-orange-600 disabled:opacity-50 text-white text-sm rounded-lg transition-colors">
+              {adding ? t('common.saving', 'Saving…') : t('jabco.addTask', 'Add Task')}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {tasks.length === 0 && !showForm && (
+        <div className="text-center text-slate-500 text-sm py-8">{t('jabco.noTasks', 'No tasks yet')}</div>
+      )}
+
+      {TASK_TYPE_ORDER.map(type => {
+        const typeTasks = grouped[type]
+        if (typeTasks.length === 0) return null
+        const typeLabel = type === 'MOBILIZATION' ? t('jabco.taskTypeMobilization', 'Mobilization') : type === 'POST_MORTEM' ? t('jabco.taskTypePostMortem', 'Post Mortem') : t('jabco.taskTypeGeneral', 'General')
+        return (
+          <div key={type} className="bg-slate-800 rounded-lg overflow-hidden">
+            <div className="px-4 py-2 bg-slate-700/60 text-xs font-semibold text-slate-300 uppercase tracking-wide">
+              {typeLabel}
+            </div>
+            <div className="divide-y divide-slate-700/40">
+              {typeTasks.map(task => (
+                <div key={task.id} className="flex items-center gap-3 px-4 py-2.5 hover:bg-slate-700/20">
+                  <button
+                    onClick={() => task.status !== 'DONE' && patchTask({ taskId: task.id, status: nextStatus(task.status) })}
+                    className={`w-4 h-4 rounded border shrink-0 flex items-center justify-center transition-colors ${
+                      task.status === 'DONE'
+                        ? 'bg-green-700 border-green-600 text-white'
+                        : task.status === 'IN_PROGRESS'
+                          ? 'bg-yellow-900/50 border-yellow-600 hover:bg-yellow-700'
+                          : 'border-slate-600 hover:border-orange-500'
+                    }`}
+                    title={task.status === 'DONE' ? t('jabco.taskDone', 'Done') : t('jabco.taskAdvance', 'Advance status')}
+                  >
+                    {task.status === 'DONE' && <span className="text-[10px] leading-none">✓</span>}
+                    {task.status === 'IN_PROGRESS' && <span className="text-[10px] leading-none text-yellow-300">◑</span>}
+                  </button>
+                  <span className={`flex-1 text-xs ${TASK_STATUS_CLS[task.status]} ${task.status === 'DONE' ? 'line-through' : ''}`}>
+                    {task.title}
+                  </span>
+                  {task.due_date && (
+                    <span className="text-[10px] text-slate-500 shrink-0">{fmtDate(task.due_date)}</span>
+                  )}
+                  {task.status !== 'DONE' && (
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded border shrink-0 ${TASK_STATUS_CLS[task.status] === 'text-yellow-400' ? 'bg-yellow-900/30 border-yellow-700 text-yellow-400' : 'bg-slate-700/40 border-slate-600 text-slate-500'}`}>
+                      {task.status === 'IN_PROGRESS' ? t('jabco.taskInProgress', 'In Progress') : t('jabco.taskOpen', 'Open')}
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+// ── Punch List Tab ────────────────────────────────────────────────────────────
+
+const PUNCH_STATUS_CLS: Record<PunchListItem['status'], string> = {
+  IDENTIFIED: 'bg-yellow-900/50 text-yellow-300 border border-yellow-700',
+  RECTIFIED:  'bg-blue-900/50   text-blue-300   border border-blue-700',
+  VERIFIED:   'bg-green-900/50  text-green-300  border border-green-700',
+}
+
+function PunchListTab({ project }: { project: Project }) {
+  const { t } = useTranslation()
+  const qc = useQueryClient()
+  const [showAdd, setShowAdd] = useState(false)
+  const [form, setForm] = useState({ description: '', location: '', trade: '' })
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['jabco-punch-list', project.id],
+    queryFn: () => jabcoApi.getPunchList(project.id),
+  })
+
+  const { mutate: addItem, isPending: adding } = useMutation({
+    mutationFn: () => jabcoApi.createPunchItem(project.id, {
+      description: form.description,
+      location: form.location || undefined,
+      trade: form.trade || undefined,
+    }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['jabco-punch-list', project.id] })
+      setShowAdd(false)
+      setForm({ description: '', location: '', trade: '' })
+    },
+  })
+
+  const { mutate: patchItem } = useMutation({
+    mutationFn: ({ itemId, status }: { itemId: string; status: 'RECTIFIED' | 'VERIFIED' }) =>
+      jabcoApi.patchPunchItem(project.id, itemId, {
+        status,
+        ...(status === 'RECTIFIED' ? { rectified_date: new Date().toISOString().slice(0, 10) } : { verified_date: new Date().toISOString().slice(0, 10) }),
+      }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['jabco-punch-list', project.id] }) },
+  })
+
+  const items = data?.items ?? []
+  const identified = items.filter(item => item.status === 'IDENTIFIED').length
+  const rectified  = items.filter(item => item.status === 'RECTIFIED').length
+  const verified   = items.filter(item => item.status === 'VERIFIED').length
+
+  if (isLoading) return <div className="text-center text-slate-500 text-sm py-8">{t('common.loading', 'Loading…')}</div>
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        {items.length > 0 && (
+          <div className="flex gap-3 text-xs">
+            <span className="text-yellow-400">{identified} {t('jabco.punchIdentified', 'open')}</span>
+            <span className="text-blue-400">{rectified} {t('jabco.punchRectified', 'rectified')}</span>
+            <span className="text-green-400">{verified} {t('jabco.punchVerified', 'verified')}</span>
+          </div>
+        )}
+        <button onClick={() => setShowAdd(true)}
+          className="ml-auto px-3 py-1.5 bg-orange-700 hover:bg-orange-600 text-white text-xs rounded-lg transition-colors">
+          {t('jabco.punchAddItem', '+ Add Item')}
+        </button>
+      </div>
+
+      {items.length === 0 && (
+        <div className="text-center text-slate-500 text-sm py-8">{t('jabco.noPunchItems', 'No punch list items')}</div>
+      )}
+
+      {items.length > 0 && (
+        <div className="overflow-x-auto rounded-lg border border-slate-700">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="text-slate-500 border-b border-slate-700 bg-slate-800">
+                <th className="px-4 py-2 text-left font-medium">{t('common.description', 'Description')}</th>
+                <th className="px-3 py-2 text-left font-medium">{t('jabco.punchLocation', 'Location')}</th>
+                <th className="px-3 py-2 text-left font-medium">{t('jabco.punchTrade', 'Trade')}</th>
+                <th className="px-3 py-2 text-center font-medium">{t('common.status', 'Status')}</th>
+                <th className="px-3 py-2 text-center font-medium">{t('common.actions', 'Actions')}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {items.map(item => (
+                <tr key={item.id} className="border-b border-slate-700/40 hover:bg-slate-700/20">
+                  <td className="px-4 py-2 text-slate-200">{item.description}</td>
+                  <td className="px-3 py-2 text-slate-400">{item.location ?? '—'}</td>
+                  <td className="px-3 py-2 text-slate-400">{item.trade ?? '—'}</td>
+                  <td className="px-3 py-2 text-center">
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${PUNCH_STATUS_CLS[item.status]}`}>
+                      {item.status}
+                    </span>
+                  </td>
+                  <td className="px-3 py-2 text-center">
+                    {item.status === 'IDENTIFIED' && (
+                      <button onClick={() => patchItem({ itemId: item.id, status: 'RECTIFIED' })}
+                        className="px-2 py-0.5 bg-blue-900 hover:bg-blue-800 text-blue-300 text-[10px] rounded transition-colors">
+                        {t('jabco.punchRectify', 'Rectify')}
+                      </button>
+                    )}
+                    {item.status === 'RECTIFIED' && (
+                      <button onClick={() => patchItem({ itemId: item.id, status: 'VERIFIED' })}
+                        className="px-2 py-0.5 bg-green-900 hover:bg-green-800 text-green-300 text-[10px] rounded transition-colors">
+                        {t('jabco.punchVerify', 'Verify')}
+                      </button>
+                    )}
+                    {item.status === 'VERIFIED' && (
+                      <span className="text-green-400 text-[10px]">✓</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {showAdd && (
+        <Modal title={t('jabco.punchAddItem', 'Add Punch List Item')} onClose={() => setShowAdd(false)}>
+          <div className="space-y-3">
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">{t('common.description', 'Description *')}</label>
+              <textarea rows={2} value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} className={cls + ' resize-none'} placeholder={t('jabco.punchDescPlaceholder', 'e.g. Cracked render on east wall')} />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">{t('jabco.punchLocation', 'Location')}</label>
+                <input value={form.location} onChange={e => setForm(f => ({ ...f, location: e.target.value }))} className={cls} placeholder={t('jabco.punchLocationPlaceholder', 'e.g. Ground floor, Room 3')} />
+              </div>
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">{t('jabco.punchTrade', 'Trade')}</label>
+                <input value={form.trade} onChange={e => setForm(f => ({ ...f, trade: e.target.value }))} className={cls} placeholder={t('jabco.punchTradePlaceholder', 'e.g. Plastering')} />
+              </div>
+            </div>
+            <div className="flex justify-end pt-2">
+              <button onClick={() => addItem()} disabled={!form.description || adding}
+                className="px-4 py-2 bg-orange-700 hover:bg-orange-600 disabled:opacity-50 text-white text-sm rounded-lg transition-colors">
+                {adding ? t('jabco.adding', 'Adding…') : t('jabco.addItem', 'Add Item')}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+    </div>
+  )
+}
+
+// ── Incidents Tab ─────────────────────────────────────────────────────────────
+
+const INCIDENT_SEVERITY_CLS: Record<SiteIncident['severity'], string> = {
+  LOW:      'bg-slate-700/60  text-slate-400  border border-slate-600',
+  MEDIUM:   'bg-yellow-900/50 text-yellow-300 border border-yellow-700',
+  HIGH:     'bg-orange-900/50 text-orange-300 border border-orange-700',
+  CRITICAL: 'bg-red-900/50    text-red-400    border border-red-700',
+}
+
+function IncidentsTab({ project }: { project: Project }) {
+  const { t } = useTranslation()
+  const qc = useQueryClient()
+  const [showAdd, setShowAdd] = useState(false)
+  const [closingId, setClosingId] = useState<string | null>(null)
+  const [closeForm, setCloseForm] = useState({ corrective_action: '', closed_date: new Date().toISOString().slice(0, 10) })
+  const [addForm, setAddForm] = useState({
+    incident_date: new Date().toISOString().slice(0, 10),
+    incident_type: 'NEAR_MISS' as SiteIncident['incident_type'],
+    severity: 'LOW' as SiteIncident['severity'],
+    description: '',
+    corrective_action: '',
+  })
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['jabco-incidents', project.id],
+    queryFn: () => jabcoApi.getIncidents(project.id),
+  })
+
+  const { mutate: logIncident, isPending: logging } = useMutation({
+    mutationFn: () => jabcoApi.createIncident(project.id, {
+      incident_date: addForm.incident_date,
+      incident_type: addForm.incident_type,
+      severity: addForm.severity,
+      description: addForm.description,
+      corrective_action: addForm.corrective_action || undefined,
+    }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['jabco-incidents', project.id] })
+      setShowAdd(false)
+      setAddForm({ incident_date: new Date().toISOString().slice(0, 10), incident_type: 'NEAR_MISS', severity: 'LOW', description: '', corrective_action: '' })
+    },
+  })
+
+  const { mutate: closeIncident, isPending: closing } = useMutation({
+    mutationFn: (incidentId: string) => jabcoApi.closeIncident(project.id, incidentId, {
+      status: 'CLOSED',
+      closed_date: closeForm.closed_date || undefined,
+      corrective_action: closeForm.corrective_action || undefined,
+    }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['jabco-incidents', project.id] })
+      setClosingId(null)
+      setCloseForm({ corrective_action: '', closed_date: new Date().toISOString().slice(0, 10) })
+    },
+  })
+
+  const incidents = data?.incidents ?? []
+
+  if (isLoading) return <div className="text-center text-slate-500 text-sm py-8">{t('common.loading', 'Loading…')}</div>
+
+  return (
+    <div className="space-y-4">
+      <div className="flex justify-end">
+        <button onClick={() => setShowAdd(true)}
+          className="px-3 py-1.5 bg-orange-700 hover:bg-orange-600 text-white text-xs rounded-lg transition-colors">
+          {t('jabco.logIncident', '+ Log Incident')}
+        </button>
+      </div>
+
+      {incidents.length === 0 && (
+        <div className="text-center text-slate-500 text-sm py-8">{t('jabco.noIncidents', 'No incidents recorded')}</div>
+      )}
+
+      {incidents.length > 0 && (
+        <div className="overflow-x-auto rounded-lg border border-slate-700">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="text-slate-500 border-b border-slate-700 bg-slate-800">
+                <th className="px-3 py-2 text-left font-medium">{t('common.date', 'Date')}</th>
+                <th className="px-3 py-2 text-left font-medium">{t('jabco.incidentType', 'Type')}</th>
+                <th className="px-3 py-2 text-center font-medium">{t('jabco.incidentSeverity', 'Severity')}</th>
+                <th className="px-4 py-2 text-left font-medium">{t('common.description', 'Description')}</th>
+                <th className="px-3 py-2 text-center font-medium">{t('common.status', 'Status')}</th>
+                <th className="px-3 py-2 text-center font-medium">{t('common.actions', 'Actions')}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {incidents.map(inc => (
+                <>
+                  <tr key={inc.id} className="border-b border-slate-700/40 hover:bg-slate-700/20">
+                    <td className="px-3 py-2 text-slate-400 whitespace-nowrap">{fmtDate(inc.incident_date)}</td>
+                    <td className="px-3 py-2 text-slate-300 whitespace-nowrap">{inc.incident_type.replace('_', ' ')}</td>
+                    <td className="px-3 py-2 text-center">
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${INCIDENT_SEVERITY_CLS[inc.severity]}`}>
+                        {inc.severity}
+                      </span>
+                    </td>
+                    <td className="px-4 py-2 text-slate-200">{inc.description}</td>
+                    <td className="px-3 py-2 text-center">
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${inc.status === 'CLOSED' ? 'bg-slate-700/60 text-slate-400 border border-slate-600' : 'bg-red-900/50 text-red-400 border border-red-700'}`}>
+                        {inc.status}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2 text-center">
+                      {inc.status === 'OPEN' && (
+                        <button onClick={() => setClosingId(closingId === inc.id ? null : inc.id)}
+                          className="px-2 py-0.5 bg-slate-700 hover:bg-slate-600 text-slate-300 text-[10px] rounded transition-colors">
+                          {t('jabco.closeIncident', 'Close')}
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                  {closingId === inc.id && (
+                    <tr key={`${inc.id}-close`} className="bg-slate-700/30">
+                      <td colSpan={6} className="px-4 py-3">
+                        <div className="flex gap-3 items-end">
+                          <div className="flex-1">
+                            <label className="block text-[10px] text-slate-400 mb-1">{t('jabco.correctiveAction', 'Corrective Action')}</label>
+                            <textarea rows={2} value={closeForm.corrective_action}
+                              onChange={e => setCloseForm(f => ({ ...f, corrective_action: e.target.value }))}
+                              className={cls + ' resize-none text-[11px]'} />
+                          </div>
+                          <div>
+                            <label className="block text-[10px] text-slate-400 mb-1">{t('jabco.closedDate', 'Closed Date')}</label>
+                            <input type="date" value={closeForm.closed_date}
+                              onChange={e => setCloseForm(f => ({ ...f, closed_date: e.target.value }))}
+                              className={cls + ' text-[11px]'} />
+                          </div>
+                          <button onClick={() => closeIncident(inc.id)} disabled={closing}
+                            className="px-3 py-1.5 bg-slate-600 hover:bg-slate-500 disabled:opacity-50 text-white text-xs rounded transition-colors shrink-0">
+                            {closing ? t('common.saving', 'Saving…') : t('jabco.confirmClose', 'Confirm Close')}
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {showAdd && (
+        <Modal title={t('jabco.logIncident', 'Log Incident')} onClose={() => setShowAdd(false)}>
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">{t('jabco.incidentDate', 'Date *')}</label>
+                <input type="date" value={addForm.incident_date} onChange={e => setAddForm(f => ({ ...f, incident_date: e.target.value }))} className={cls} />
+              </div>
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">{t('jabco.incidentSeverity', 'Severity *')}</label>
+                <select value={addForm.severity} onChange={e => setAddForm(f => ({ ...f, severity: e.target.value as SiteIncident['severity'] }))} className={cls}>
+                  <option value="LOW">{t('jabco.severityLow', 'Low')}</option>
+                  <option value="MEDIUM">{t('jabco.severityMedium', 'Medium')}</option>
+                  <option value="HIGH">{t('jabco.severityHigh', 'High')}</option>
+                  <option value="CRITICAL">{t('jabco.severityCritical', 'Critical')}</option>
+                </select>
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">{t('jabco.incidentType', 'Type *')}</label>
+              <select value={addForm.incident_type} onChange={e => setAddForm(f => ({ ...f, incident_type: e.target.value as SiteIncident['incident_type'] }))} className={cls}>
+                <option value="NEAR_MISS">{t('jabco.incidentNearMiss', 'Near Miss')}</option>
+                <option value="MINOR_INJURY">{t('jabco.incidentMinorInjury', 'Minor Injury')}</option>
+                <option value="MAJOR_INJURY">{t('jabco.incidentMajorInjury', 'Major Injury')}</option>
+                <option value="PROPERTY_DAMAGE">{t('jabco.incidentPropertyDamage', 'Property Damage')}</option>
+                <option value="ENVIRONMENTAL">{t('jabco.incidentEnvironmental', 'Environmental')}</option>
+                <option value="OTHER">{t('jabco.incidentOther', 'Other')}</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">{t('common.description', 'Description *')}</label>
+              <textarea rows={3} value={addForm.description} onChange={e => setAddForm(f => ({ ...f, description: e.target.value }))} className={cls + ' resize-none'} />
+            </div>
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">{t('jabco.correctiveAction', 'Corrective Action')}</label>
+              <textarea rows={2} value={addForm.corrective_action} onChange={e => setAddForm(f => ({ ...f, corrective_action: e.target.value }))} className={cls + ' resize-none'} />
+            </div>
+            <div className="flex justify-end pt-2">
+              <button onClick={() => logIncident()} disabled={!addForm.description || !addForm.incident_date || logging}
+                className="px-4 py-2 bg-orange-700 hover:bg-orange-600 disabled:opacity-50 text-white text-sm rounded-lg transition-colors">
+                {logging ? t('jabco.logging', 'Logging…') : t('jabco.logIncident', 'Log Incident')}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+    </div>
+  )
+}
+
+// ── Quality Tab ───────────────────────────────────────────────────────────────
+
+const QUALITY_RESULT_CLS: Record<QualityInspection['checklist_result'], string> = {
+  PASS:        'bg-green-900/50  text-green-300  border border-green-700',
+  FAIL:        'bg-red-900/50    text-red-400    border border-red-700',
+  CONDITIONAL: 'bg-yellow-900/50 text-yellow-300 border border-yellow-700',
+}
+
+function QualityTab({ project }: { project: Project }) {
+  const { t } = useTranslation()
+  const qc = useQueryClient()
+  const [showAdd, setShowAdd] = useState(false)
+  const [form, setForm] = useState({
+    inspection_date: new Date().toISOString().slice(0, 10),
+    inspector_name: '',
+    area_inspected: '',
+    checklist_result: 'PASS' as QualityInspection['checklist_result'],
+    defects_noted: '',
+    follow_up_required: false,
+    follow_up_date: '',
+  })
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['jabco-quality', project.id],
+    queryFn: () => jabcoApi.getQualityInspections(project.id),
+  })
+
+  const { mutate: addInspection, isPending: adding } = useMutation({
+    mutationFn: () => jabcoApi.createQualityInspection(project.id, {
+      inspection_date: form.inspection_date,
+      inspector_name: form.inspector_name,
+      area_inspected: form.area_inspected,
+      checklist_result: form.checklist_result,
+      defects_noted: form.defects_noted || undefined,
+      follow_up_required: form.follow_up_required,
+      follow_up_date: form.follow_up_date || undefined,
+    }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['jabco-quality', project.id] })
+      setShowAdd(false)
+      setForm({ inspection_date: new Date().toISOString().slice(0, 10), inspector_name: '', area_inspected: '', checklist_result: 'PASS', defects_noted: '', follow_up_required: false, follow_up_date: '' })
+    },
+  })
+
+  const inspections = data?.inspections ?? []
+
+  if (isLoading) return <div className="text-center text-slate-500 text-sm py-8">{t('common.loading', 'Loading…')}</div>
+
+  return (
+    <div className="space-y-4">
+      <div className="flex justify-end">
+        <button onClick={() => setShowAdd(true)}
+          className="px-3 py-1.5 bg-orange-700 hover:bg-orange-600 text-white text-xs rounded-lg transition-colors">
+          {t('jabco.addInspection', '+ Add Inspection')}
+        </button>
+      </div>
+
+      {inspections.length === 0 && (
+        <div className="text-center text-slate-500 text-sm py-8">{t('jabco.noInspections', 'No quality inspections yet')}</div>
+      )}
+
+      {inspections.length > 0 && (
+        <div className="overflow-x-auto rounded-lg border border-slate-700">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="text-slate-500 border-b border-slate-700 bg-slate-800">
+                <th className="px-3 py-2 text-left font-medium">{t('common.date', 'Date')}</th>
+                <th className="px-3 py-2 text-left font-medium">{t('jabco.qualityInspector', 'Inspector')}</th>
+                <th className="px-3 py-2 text-left font-medium">{t('jabco.qualityArea', 'Area')}</th>
+                <th className="px-3 py-2 text-center font-medium">{t('jabco.qualityResult', 'Result')}</th>
+                <th className="px-3 py-2 text-center font-medium">{t('jabco.qualityFollowUp', 'Follow-up')}</th>
+                <th className="px-4 py-2 text-left font-medium">{t('jabco.qualityDefects', 'Defects / Notes')}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {inspections.map(qi => (
+                <tr key={qi.id} className="border-b border-slate-700/40 hover:bg-slate-700/20">
+                  <td className="px-3 py-2 text-slate-400 whitespace-nowrap">{fmtDate(qi.inspection_date)}</td>
+                  <td className="px-3 py-2 text-slate-300">{qi.inspector_name}</td>
+                  <td className="px-3 py-2 text-slate-300">{qi.area_inspected}</td>
+                  <td className="px-3 py-2 text-center">
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${QUALITY_RESULT_CLS[qi.checklist_result]}`}>
+                      {qi.checklist_result}
+                    </span>
+                  </td>
+                  <td className="px-3 py-2 text-center">
+                    {qi.follow_up_required
+                      ? <span className="text-yellow-400 text-[10px]">{qi.follow_up_date ? fmtDate(qi.follow_up_date) : t('jabco.followUpRequired', 'Required')}</span>
+                      : <span className="text-slate-600 text-[10px]">—</span>
+                    }
+                  </td>
+                  <td className="px-4 py-2 text-slate-400">{qi.defects_noted ?? '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {showAdd && (
+        <Modal title={t('jabco.addInspection', 'Add Quality Inspection')} onClose={() => setShowAdd(false)}>
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">{t('jabco.inspectionDate', 'Date *')}</label>
+                <input type="date" value={form.inspection_date} onChange={e => setForm(f => ({ ...f, inspection_date: e.target.value }))} className={cls} />
+              </div>
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">{t('jabco.qualityResult', 'Result *')}</label>
+                <select value={form.checklist_result} onChange={e => setForm(f => ({ ...f, checklist_result: e.target.value as QualityInspection['checklist_result'] }))} className={cls}>
+                  <option value="PASS">{t('jabco.resultPass', 'Pass')}</option>
+                  <option value="FAIL">{t('jabco.resultFail', 'Fail')}</option>
+                  <option value="CONDITIONAL">{t('jabco.resultConditional', 'Conditional')}</option>
+                </select>
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">{t('jabco.qualityInspector', 'Inspector Name *')}</label>
+              <input value={form.inspector_name} onChange={e => setForm(f => ({ ...f, inspector_name: e.target.value }))} className={cls} placeholder={t('jabco.inspectorPlaceholder', 'e.g. R. Johnson-Attin')} />
+            </div>
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">{t('jabco.qualityArea', 'Area Inspected *')}</label>
+              <input value={form.area_inspected} onChange={e => setForm(f => ({ ...f, area_inspected: e.target.value }))} className={cls} placeholder={t('jabco.areaPlaceholder', 'e.g. Foundation, Block A')} />
+            </div>
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">{t('jabco.qualityDefects', 'Defects Noted')}</label>
+              <textarea rows={2} value={form.defects_noted} onChange={e => setForm(f => ({ ...f, defects_noted: e.target.value }))} className={cls + ' resize-none'} />
+            </div>
+            <div className="flex items-center gap-3">
+              <input type="checkbox" id="follow_up_req" checked={form.follow_up_required}
+                onChange={e => setForm(f => ({ ...f, follow_up_required: e.target.checked }))} className="rounded" />
+              <label htmlFor="follow_up_req" className="text-xs text-slate-300">{t('jabco.followUpRequired', 'Follow-up Required')}</label>
+              {form.follow_up_required && (
+                <input type="date" value={form.follow_up_date} onChange={e => setForm(f => ({ ...f, follow_up_date: e.target.value }))}
+                  className="bg-slate-700 border border-slate-600 rounded px-2 py-1 text-xs text-slate-100 focus:outline-none focus:border-orange-500" />
+              )}
+            </div>
+            <div className="flex justify-end pt-2">
+              <button onClick={() => addInspection()} disabled={!form.inspection_date || !form.inspector_name || !form.area_inspected || adding}
+                className="px-4 py-2 bg-orange-700 hover:bg-orange-600 disabled:opacity-50 text-white text-sm rounded-lg transition-colors">
+                {adding ? t('jabco.adding', 'Adding…') : t('jabco.addInspection', 'Add Inspection')}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+    </div>
+  )
+}
+
+// ── Closeout Tab ──────────────────────────────────────────────────────────────
+
+function CloseoutTab({ project }: { project: Project }) {
+  const { t } = useTranslation()
+  const qc = useQueryClient()
+  const [handoverUrl, setHandoverUrl] = useState(project.handover_document_url ?? '')
+  const [editingUrl, setEditingUrl] = useState(false)
+
+  const { data: punchData } = useQuery({
+    queryKey: ['jabco-punch-list', project.id],
+    queryFn: () => jabcoApi.getPunchList(project.id),
+  })
+
+  const { mutate: patchProject, isPending: patching } = useMutation({
+    mutationFn: (body: Parameters<typeof jabcoApi.patchProject>[1]) =>
+      jabcoApi.patchProject(project.id, body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['jabco-projects'] })
+      qc.invalidateQueries({ queryKey: ['jabco-project', project.id] })
+      setEditingUrl(false)
+    },
+  })
+
+  const items = punchData?.items ?? []
+  const openCount = items.filter(item => item.status === 'IDENTIFIED' || item.status === 'RECTIFIED').length
+  const allVerified = items.length > 0 && openCount === 0
+  const hasHandover = !!project.handover_document_url
+  const canClose = allVerified && hasHandover
+  const alreadyClosed = project.status === 'CLOSED' || project.status === 'CANCELLED'
+
+  return (
+    <div className="space-y-4">
+      {/* Punch List Status */}
+      <div className="bg-slate-800 rounded-lg p-4">
+        <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-3">{t('jabco.tabs.punchList', 'Punch List')}</h3>
+        {items.length === 0 ? (
+          <p className="text-xs text-slate-500">{t('jabco.noPunchItems', 'No punch list items')}</p>
+        ) : allVerified ? (
+          <p className="text-xs text-green-400">✓ {t('jabco.allVerified', 'All items verified')}</p>
+        ) : (
+          <p className="text-xs text-yellow-400">
+            {t('jabco.openPunchItems', '{{count}} item(s) still open (not yet verified)', { count: openCount })}
+          </p>
+        )}
+      </div>
+
+      {/* Handover Document */}
+      <div className="bg-slate-800 rounded-lg p-4">
+        <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-3">{t('jabco.handoverDoc', 'Handover Document')}</h3>
+        {project.handover_document_url && !editingUrl ? (
+          <div className="flex items-center gap-3">
+            <a href={project.handover_document_url} target="_blank" rel="noopener noreferrer"
+              className="text-xs text-orange-400 hover:text-orange-300 underline truncate flex-1">
+              {project.handover_document_url}
+            </a>
+            <button onClick={() => { setHandoverUrl(project.handover_document_url ?? ''); setEditingUrl(true) }}
+              className="text-xs text-slate-500 hover:text-slate-300 shrink-0 underline">
+              {t('jabco.change', 'Change')}
+            </button>
+          </div>
+        ) : (
+          <div className="flex gap-2 items-center">
+            <input value={handoverUrl} onChange={e => setHandoverUrl(e.target.value)}
+              className={cls + ' flex-1'}
+              placeholder={t('jabco.handoverUrlPlaceholder', 'https://… or MinIO URL')} />
+            <button
+              onClick={() => patchProject({ handover_document_url: handoverUrl || null })}
+              disabled={patching}
+              className="px-3 py-1.5 bg-orange-700 hover:bg-orange-600 disabled:opacity-50 text-white text-xs rounded transition-colors shrink-0">
+              {patching ? t('common.saving', 'Saving…') : t('common.save', 'Save')}
+            </button>
+            {editingUrl && (
+              <button onClick={() => setEditingUrl(false)} className="text-xs text-slate-400 hover:text-slate-200 shrink-0">
+                {t('common.cancel', 'Cancel')}
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Close Project */}
+      {!alreadyClosed && (
+        <div className="bg-slate-800 rounded-lg p-4">
+          <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-3">{t('jabco.closeProject', 'Close Project')}</h3>
+          {!canClose && (
+            <p className="text-xs text-slate-500 mb-3">
+              {!allVerified && !hasHandover
+                ? t('jabco.closeBlockedBoth', 'All punch-list items must be verified and a handover document must be uploaded before closing.')
+                : !allVerified
+                  ? t('jabco.closeBlockedPunch', 'All punch-list items must be verified before closing.')
+                  : t('jabco.closeBlockedHandover', 'A handover document must be uploaded before closing.')
+              }
+            </p>
+          )}
+          <button
+            onClick={() => patchProject({ status: 'CLOSED' })}
+            disabled={!canClose || patching}
+            title={!canClose ? t('jabco.closeBlockedBoth', 'All punch-list items must be verified and a handover document must be uploaded before closing.') : undefined}
+            className="px-4 py-2 bg-slate-600 hover:bg-slate-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm rounded-lg transition-colors">
+            {patching ? t('jabco.closing', 'Closing…') : t('jabco.closeProjectBtn', 'Close Project')}
+          </button>
+        </div>
+      )}
+
+      {alreadyClosed && (
+        <div className="bg-slate-800 rounded-lg p-4">
+          <p className="text-xs text-slate-400">
+            {t('jabco.projectAlreadyClosed', 'Project status: {{status}}', { status: project.status })}
+          </p>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── Detail Panel ──────────────────────────────────────────────────────────────
 
-type DetailTab = 'overview' | 'boq' | 'vos' | 'certs' | 'invoices' | 'diary'
+type DetailTab = 'overview' | 'boq' | 'vos' | 'certs' | 'invoices' | 'diary' | 'tasks' | 'punch-list' | 'incidents' | 'quality' | 'closeout'
 
 function DetailPanel({ project, onClose }: { project: Project; onClose: () => void }) {
   const { t } = useTranslation()
   const [tab, setTab] = useState<DetailTab>('overview')
 
   const tabs: { id: DetailTab; label: string }[] = [
-    { id: 'overview',  label: t('jabco.tabs.overview', 'Overview') },
-    { id: 'boq',       label: t('jabco.tabs.boq', 'BOQ') },
-    { id: 'vos',       label: t('jabco.tabs.vos', 'Variations & Claims') },
-    { id: 'certs',     label: t('jabco.tabs.certs', 'Payment Certs') },
-    { id: 'invoices',  label: t('jabco.tabs.invoices', 'Vendor Invoices') },
-    { id: 'diary',     label: t('jabco.tabs.diary', 'Site Diary') },
+    { id: 'overview',   label: t('jabco.tabs.overview', 'Overview') },
+    { id: 'boq',        label: t('jabco.tabs.boq', 'BOQ') },
+    { id: 'vos',        label: t('jabco.tabs.vos', 'Variations & Claims') },
+    { id: 'certs',      label: t('jabco.tabs.certs', 'Payment Certs') },
+    { id: 'invoices',   label: t('jabco.tabs.invoices', 'Vendor Invoices') },
+    { id: 'diary',      label: t('jabco.tabs.diary', 'Site Diary') },
+    { id: 'tasks',      label: t('jabco.tabs.tasks', 'Tasks') },
+    { id: 'punch-list', label: t('jabco.tabs.punchList', 'Punch List') },
+    { id: 'incidents',  label: t('jabco.tabs.incidents', 'Incidents') },
+    { id: 'quality',    label: t('jabco.tabs.quality', 'Quality') },
+    { id: 'closeout',   label: t('jabco.tabs.closeout', 'Closeout') },
   ]
 
   return (
@@ -1430,12 +2205,17 @@ function DetailPanel({ project, onClose }: { project: Project; onClose: () => vo
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto p-4">
-        {tab === 'overview'  && <OverviewTab        project={project} />}
-        {tab === 'boq'       && <BoqTab             project={project} />}
-        {tab === 'vos'       && <VOTab              project={project} />}
-        {tab === 'certs'     && <PaymentCertsTab    project={project} />}
-        {tab === 'invoices'  && <VendorInvoicesTab  project={project} />}
-        {tab === 'diary'     && <SiteDiaryTab       project={project} />}
+        {tab === 'overview'   && <OverviewTab        project={project} />}
+        {tab === 'boq'        && <BoqTab             project={project} />}
+        {tab === 'vos'        && <VOTab              project={project} />}
+        {tab === 'certs'      && <PaymentCertsTab    project={project} />}
+        {tab === 'invoices'   && <VendorInvoicesTab  project={project} />}
+        {tab === 'diary'      && <SiteDiaryTab       project={project} />}
+        {tab === 'tasks'      && <TasksTab           project={project} />}
+        {tab === 'punch-list' && <PunchListTab       project={project} />}
+        {tab === 'incidents'  && <IncidentsTab       project={project} />}
+        {tab === 'quality'    && <QualityTab         project={project} />}
+        {tab === 'closeout'   && <CloseoutTab        project={project} />}
       </div>
     </div>
   )

@@ -32,6 +32,7 @@
     "submit": "Submit",
     "confirm": "Confirm",
     "refresh": "Refresh",
+    "back": "Back",
     "optional": "optional",
     "noData": "No data found.",
     "payee": "Payee",
@@ -446,7 +447,8 @@
       "PRACTICAL_COMPLETION": "Practical Completion",
       "DEFECTS_LIABILITY": "Defects Liability",
       "CLOSED": "Closed",
-      "CANCELLED": "Cancelled"
+      "CANCELLED": "Cancelled",
+      "AWARDED": "Awarded"
     },
     "tabs": {
       "overview": "Overview",
@@ -454,7 +456,110 @@
       "vos": "Variations & Claims",
       "certs": "Payment Certs",
       "invoices": "Vendor Invoices",
-      "diary": "Site Diary"
+      "diary": "Site Diary",
+      "tasks": "Tasks",
+      "punchList": "Punch List",
+      "incidents": "Incidents",
+      "quality": "Quality",
+      "closeout": "Closeout"
+    },
+    "tasks": {
+      "title": "Project Tasks",
+      "addTask": "Add Task",
+      "noTasks": "No tasks yet.",
+      "titleLabel": "Task Title",
+      "typeLabel": "Type",
+      "dueDateLabel": "Due Date",
+      "types": {
+        "MOBILIZATION": "Mobilization",
+        "POST_MORTEM": "Post-Mortem",
+        "GENERAL": "General"
+      },
+      "statuses": {
+        "OPEN": "Open",
+        "IN_PROGRESS": "In Progress",
+        "DONE": "Done"
+      }
+    },
+    "punch": {
+      "title": "Punch List",
+      "addItem": "Add Item",
+      "noItems": "No punch list items.",
+      "descriptionLabel": "Description",
+      "locationLabel": "Location",
+      "tradeLabel": "Trade",
+      "rectify": "Rectify",
+      "verify": "Verify",
+      "statuses": {
+        "IDENTIFIED": "Identified",
+        "RECTIFIED": "Rectified",
+        "VERIFIED": "Verified"
+      }
+    },
+    "incidents": {
+      "title": "Site Incidents",
+      "addIncident": "Log Incident",
+      "noIncidents": "No incidents logged.",
+      "dateLabel": "Incident Date",
+      "typeLabel": "Type",
+      "severityLabel": "Severity",
+      "descriptionLabel": "Description",
+      "correctiveLabel": "Corrective Action",
+      "close": "Close Incident",
+      "closedDateLabel": "Closed Date",
+      "types": {
+        "NEAR_MISS": "Near Miss",
+        "MINOR_INJURY": "Minor Injury",
+        "MAJOR_INJURY": "Major Injury",
+        "PROPERTY_DAMAGE": "Property Damage",
+        "ENVIRONMENTAL": "Environmental",
+        "OTHER": "Other"
+      },
+      "severities": {
+        "LOW": "Low",
+        "MEDIUM": "Medium",
+        "HIGH": "High",
+        "CRITICAL": "Critical"
+      },
+      "statuses": {
+        "OPEN": "Open",
+        "CLOSED": "Closed"
+      }
+    },
+    "quality": {
+      "title": "Quality Inspections",
+      "addInspection": "Add Inspection",
+      "noInspections": "No inspections logged.",
+      "dateLabel": "Inspection Date",
+      "inspectorLabel": "Inspector",
+      "areaLabel": "Area Inspected",
+      "resultLabel": "Result",
+      "defectsLabel": "Defects Noted",
+      "followUpLabel": "Follow-up Required",
+      "followUpDateLabel": "Follow-up Date",
+      "results": {
+        "PASS": "Pass",
+        "FAIL": "Fail",
+        "CONDITIONAL": "Conditional"
+      }
+    },
+    "closeout": {
+      "title": "Project Closeout",
+      "punchListStatus": "Punch List Status",
+      "allVerified": "All items verified",
+      "itemsRemaining": "{{n}} items remaining",
+      "handoverDoc": "Handover Document URL",
+      "uploadHandover": "Upload / Set URL",
+      "closeProject": "Close Project",
+      "closeProjectConfirm": "Close this project? This cannot be undone.",
+      "noHandoverDoc": "Handover document required before closing.",
+      "requirements": "Both conditions must be met before this project can be closed."
+    },
+    "boq": {
+      "internalCostRate": "Internal Cost Rate",
+      "markupPct": "Markup %",
+      "finalBidRate": "Final Bid Rate",
+      "workPackage": "Work Package"
     },
     "newProject": "New Project",
     "projectCode": "Project Code *",
@@ -1151,6 +1256,7 @@
       "OTHER": "Other"
     },
     "idNumber": "ID Number",
+    "phone2": "Phone 2",
     "emergencyContact": "Emergency Contact",
     "emergencyPhone": "Emergency Phone",
     "saveChanges": "Save Changes",
@@ -1266,7 +1372,8 @@
     "added": "Added",
     "role": "Role",
     "colName": "Name",
-    "colCompany": "Company"
+    "colCompany": "Company",
+    "tabTender": "Tender Pipeline"
   },
   "entertainment": {
     "title": "Entertainment",
@@ -2224,5 +2331,68 @@
     "deductions": "Deductions TTD",
     "refundAmount": "Refund Amount TTD",
     "outcome": "Outcome"
+  },
+  "tender": {
+    "title": "Tender Pipeline",
+    "subtitle": "JABCO bid tracking",
+    "newOpportunity": "New Opportunity",
+    "noOpportunities": "No opportunities found.",
+    "stageFilter": "All Stages",
+    "mobileStageLabel": "Filter by stage",
+    "goNoGoTitle": "Go / No-Go Decision",
+    "submitTitle": "Submit Proposal",
+    "decideTitle": "Win / Loss Decision",
+    "goDecision": "Go",
+    "noGoDecision": "No-Go",
+    "wonDecision": "Won",
+    "lostDecision": "Lost",
+    "reasonCategory": "Reason Category",
+    "reasonText": "Reason / Notes",
+    "projectCode": "Project Code",
+    "clientType": "Client Type",
+    "bidDeadline": "Bid Deadline",
+    "estimatedValue": "Estimated Value",
+    "proposalUrl": "Proposal Document URL",
+    "submittedAt": "Submitted At",
+    "competitorName": "Competitor Name",
+    "winningPrice": "Their Total Price",
+    "ourPrice": "Our Total Price",
+    "techScore": "Technical Score",
+    "finScore": "Financial Score",
+    "packageVariances": "Rate Variances by Package",
+    "addVariance": "+ Add Row",
+    "workPackage": "Work Package",
+    "ourRate": "Our Rate",
+    "marketRate": "Market Rate",
+    "pastHistory": "Past History with this Client",
+    "addOpportunityTitle": "New Opportunity",
+    "opportunityTitle": "Opportunity Title",
+    "notes": "Notes",
+    "assignedTo": "Assigned To",
+    "reasonCategories": {
+      "RESOURCE_CONSTRAINTS": "Resource Constraints",
+      "HIGH_RISK": "High Risk",
+      "LOW_MARGIN": "Low Margin",
+      "STRATEGIC_MISFIT": "Strategic Misfit",
+      "CLIENT_RELATIONSHIP": "Client Relationship",
+      "SCHEDULE_CONFLICT": "Schedule Conflict",
+      "OTHER": "Other"
+    },
+    "stages": {
+      "LEAD": "Lead",
+      "QUALIFIED": "Qualified",
+      "PROPOSAL": "Proposal",
+      "SUBMITTED": "Submitted",
+      "NEGOTIATION": "Negotiation",
+      "WON": "Won",
+      "LOST": "Lost",
+      "NO_GO": "No-Go"
+    },
+    "intelligence": {
+      "wins": "Wins",
+      "losses": "Losses",
+      "rateWarnings": "Rate Warnings",
+      "noHistory": "No bid history with this client yet."
+    }
   }
 }

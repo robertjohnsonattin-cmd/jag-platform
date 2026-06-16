@@ -23,7 +23,7 @@ const UUIDParam    = z.object({ id: z.string().uuid() });
 const ProjectParam = z.object({ projectId: z.string().uuid() });
 
 const ProjectsQuerySchema = z.object({
-  status: z.enum(['TENDER','ACTIVE','PRACTICAL_COMPLETION','DEFECTS_LIABILITY','CLOSED','CANCELLED']).optional(),
+  status: z.enum(['TENDER','AWARDED','ACTIVE','PRACTICAL_COMPLETION','DEFECTS_LIABILITY','CLOSED','CANCELLED']).optional(),
   page:   z.coerce.number().int().min(1).default(1),
   limit:  z.coerce.number().int().min(1).max(100).default(20),
 }).strict();
@@ -46,12 +46,13 @@ const CreateProjectSchema = z.object({
 }).strict();
 
 const PatchProjectSchema = z.object({
-  client_company_id:  z.string().uuid().nullable().optional(),
-  status:             z.enum(['TENDER','ACTIVE','PRACTICAL_COMPLETION','DEFECTS_LIABILITY','CLOSED','CANCELLED']).optional(),
-  name:               z.string().min(1).max(200).optional(),
-  expected_end_date:  z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
-  actual_end_date:    z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
-  site_address:       z.string().max(500).nullable().optional(),
+  client_company_id:      z.string().uuid().nullable().optional(),
+  status:                 z.enum(['TENDER','AWARDED','ACTIVE','PRACTICAL_COMPLETION','DEFECTS_LIABILITY','CLOSED','CANCELLED']).optional(),
+  name:                   z.string().min(1).max(200).optional(),
+  expected_end_date:      z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+  actual_end_date:        z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+  site_address:           z.string().max(500).nullable().optional(),
+  handover_document_url:  z.string().nullable().optional(),
 }).strict().refine(d => Object.keys(d).length > 0, { message: 'At least one field required.' });
 
 const AddBoqItemSchema = z.object({
@@ -283,15 +284,34 @@ jabcoProjectsRouter.patch('/:id', async (req: Request, res: Response, next: Next
     const client = await commercialPool.connect();
     try {
       const updated = await withTenantRLS(client, req.rlsCtx, async (c) => {
+        // ── Closeout guard: block CLOSED unless punch list is clear and handover doc exists ──
+        if (b.status === 'CLOSED') {
+          const openPunch = await c.query<{ n: number }>(
+            `SELECT COUNT(*)::int AS n FROM jabco_punch_list_items WHERE project_id = $1 AND status != 'VERIFIED'`,
+            [id],
+          );
+          if (openPunch.rows[0].n > 0) {
+            throw Object.assign(new Error(`${openPunch.rows[0].n} punch-list item(s) not yet VERIFIED.`), { status: 409, code: 'PUNCH_LIST_INCOMPLETE' });
+          }
+          const projRow = await c.query<{ handover_document_url: string | null }>(
+            `SELECT handover_document_url FROM jabco_projects WHERE id = $1`, [id],
+          );
+          const incomingUrl = b.handover_document_url;
+          if (!projRow.rows[0]?.handover_document_url && !incomingUrl) {
+            throw Object.assign(new Error('Handover document must be uploaded before closeout.'), { status: 409, code: 'HANDOVER_DOC_MISSING' });
+          }
+        }
+
         const params: unknown[] = [];
         const push = (v: unknown) => { params.push(v); return `$${params.length}`; };
         const sets: string[] = ['last_modified_at = now()', `last_modified_by = ${push(userId)}`];
-        if (b.client_company_id !== undefined) sets.push(`client_company_id = ${push(b.client_company_id)}`);
-        if (b.status            !== undefined) sets.push(`status = ${push(b.status)}`);
-        if (b.name              !== undefined) sets.push(`name = ${push(b.name)}`);
-        if (b.expected_end_date !== undefined) sets.push(`expected_end_date = ${push(b.expected_end_date)}`);
-        if (b.actual_end_date   !== undefined) sets.push(`actual_end_date = ${push(b.actual_end_date)}`);
-        if (b.site_address      !== undefined) sets.push(`site_address = ${push(b.site_address)}`);
+        if (b.client_company_id     !== undefined) sets.push(`client_company_id = ${push(b.client_company_id)}`);
+        if (b.status                !== undefined) sets.push(`status = ${push(b.status)}`);
+        if (b.name                  !== undefined) sets.push(`name = ${push(b.name)}`);
+        if (b.expected_end_date     !== undefined) sets.push(`expected_end_date = ${push(b.expected_end_date)}`);
+        if (b.actual_end_date       !== undefined) sets.push(`actual_end_date = ${push(b.actual_end_date)}`);
+        if (b.site_address          !== undefined) sets.push(`site_address = ${push(b.site_address)}`);
+        if (b.handover_document_url !== undefined) sets.push(`handover_document_url = ${push(b.handover_document_url)}`);
         params.push(id);
 
         const row = await c.query(
@@ -300,6 +320,17 @@ jabcoProjectsRouter.patch('/:id', async (req: Request, res: Response, next: Next
         ).then(r => r.rows[0] ?? null);
 
         if (!row) throw Object.assign(new Error('PROJECT_NOT_FOUND'), { httpStatus: 404 });
+
+        // ── Emit pending_events on CLOSED transition (non-blocking) ──
+        if (b.status === 'CLOSED') {
+          try {
+            await c.query(
+              `INSERT INTO pending_events (aggregate_type, aggregate_id, event_type, payload)
+               VALUES ('jabco_project', $1, 'jabco.project_closed', jsonb_build_object('project_id', $1))`,
+              [id],
+            );
+          } catch { /* table may not exist yet; non-blocking */ }
+        }
 
         return c.query(
           `SELECT p.*, co.name AS client_company_name
@@ -313,8 +344,10 @@ jabcoProjectsRouter.patch('/:id', async (req: Request, res: Response, next: Next
       await auditLog(tenantId, userId, 'JabcoProject', 'UPDATE', id, b);
       ok(res, updated);
     } finally { client.release(); }
-  } catch (e) {
-    if ((e as { httpStatus?: number }).httpStatus === 404) { err(res, 404, 'PROJECT_NOT_FOUND', 'Project not found.'); return; }
+  } catch (e: unknown) {
+    const ex = e as { httpStatus?: number; status?: number; code?: string; message: string };
+    if (ex.httpStatus === 404 || ex.status === 404) { err(res, 404, 'PROJECT_NOT_FOUND', 'Project not found.'); return; }
+    if (ex.status === 409) { err(res, 409, ex.code ?? 'CONFLICT', ex.message); return; }
     next(e);
   }
 });

@@ -32,6 +32,7 @@
     "submit": "提交",
     "confirm": "确认",
     "refresh": "刷新",
+    "back": "返回",
     "optional": "可选",
     "noData": "未找到数据。",
     "payee": "收款方",
@@ -446,7 +447,8 @@
       "PRACTICAL_COMPLETION": "实质竣工",
       "DEFECTS_LIABILITY": "缺陷责任期",
       "CLOSED": "已关闭",
-      "CANCELLED": "已取消"
+      "CANCELLED": "已取消",
+      "AWARDED": "已授标"
     },
     "tabs": {
       "overview": "概览",
@@ -454,7 +456,110 @@
       "vos": "变更单及索赔",
       "certs": "付款证书",
       "invoices": "供应商发票",
-      "diary": "现场日志"
+      "diary": "现场日志",
+      "tasks": "任务",
+      "punchList": "整改清单",
+      "incidents": "事故",
+      "quality": "质量",
+      "closeout": "收尾"
+    },
+    "tasks": {
+      "title": "项目任务",
+      "addTask": "添加任务",
+      "noTasks": "暂无任务。",
+      "titleLabel": "任务标题",
+      "typeLabel": "类型",
+      "dueDateLabel": "截止日期",
+      "types": {
+        "MOBILIZATION": "动员",
+        "POST_MORTEM": "事后回顾",
+        "GENERAL": "一般"
+      },
+      "statuses": {
+        "OPEN": "待处理",
+        "IN_PROGRESS": "进行中",
+        "DONE": "完成"
+      }
+    },
+    "punch": {
+      "title": "整改清单",
+      "addItem": "添加项",
+      "noItems": "暂无整改项。",
+      "descriptionLabel": "描述",
+      "locationLabel": "位置",
+      "tradeLabel": "工种",
+      "rectify": "标记已整改",
+      "verify": "验证",
+      "statuses": {
+        "IDENTIFIED": "已识别",
+        "RECTIFIED": "已整改",
+        "VERIFIED": "已验证"
+      }
+    },
+    "incidents": {
+      "title": "现场事故",
+      "addIncident": "记录事故",
+      "noIncidents": "暂无事故记录。",
+      "dateLabel": "事故日期",
+      "typeLabel": "类型",
+      "severityLabel": "严重程度",
+      "descriptionLabel": "描述",
+      "correctiveLabel": "纠正措施",
+      "close": "关闭事故",
+      "closedDateLabel": "关闭日期",
+      "types": {
+        "NEAR_MISS": "险兆",
+        "MINOR_INJURY": "轻伤",
+        "MAJOR_INJURY": "重伤",
+        "PROPERTY_DAMAGE": "财产损坏",
+        "ENVIRONMENTAL": "环境",
+        "OTHER": "其他"
+      },
+      "severities": {
+        "LOW": "低",
+        "MEDIUM": "中",
+        "HIGH": "高",
+        "CRITICAL": "严重"
+      },
+      "statuses": {
+        "OPEN": "待处理",
+        "CLOSED": "已关闭"
+      }
+    },
+    "quality": {
+      "title": "质量检查",
+      "addInspection": "添加检查",
+      "noInspections": "暂无检查记录。",
+      "dateLabel": "检查日期",
+      "inspectorLabel": "检查员",
+      "areaLabel": "检查区域",
+      "resultLabel": "结果",
+      "defectsLabel": "发现缺陷",
+      "followUpLabel": "需要跟进",
+      "followUpDateLabel": "跟进日期",
+      "results": {
+        "PASS": "通过",
+        "FAIL": "不通过",
+        "CONDITIONAL": "有条件通过"
+      }
+    },
+    "closeout": {
+      "title": "项目收尾",
+      "punchListStatus": "整改清单状态",
+      "allVerified": "所有项已验证",
+      "itemsRemaining": "还有 {{n}} 项待处理",
+      "handoverDoc": "移交文件网址",
+      "uploadHandover": "上传/设置网址",
+      "closeProject": "关闭项目",
+      "closeProjectConfirm": "关闭此项目？此操作不可撤销。",
+      "noHandoverDoc": "关闭前需上传移交文件。",
+      "requirements": "满足以上两个条件后才能关闭项目。"
+    },
+    "boq": {
+      "internalCostRate": "内部成本费率",
+      "markupPct": "加价百分比",
+      "finalBidRate": "最终投标费率",
+      "workPackage": "工作包"
     },
     "newProject": "新建项目",
     "projectCode": "项目编号 *",
@@ -1151,6 +1256,7 @@
       "OTHER": "其他"
     },
     "idNumber": "证件号码",
+    "phone2": "电话 2",
     "emergencyContact": "紧急联系人",
     "emergencyPhone": "紧急联系电话",
     "saveChanges": "保存更改",
@@ -1234,6 +1340,7 @@
     },
     "tabCompanies": "公司",
     "tabContacts": "全部联系人",
+    "tabTender": "投标管道",
     "logInteractionTitle": "记录互动",
     "contactLabel": "联系人",
     "typeLabel": "类型",
@@ -2224,5 +2331,68 @@
     "deductions": "扣款（TTD）",
     "refundAmount": "退款金额（TTD）",
     "outcome": "结果"
+  },
+  "tender": {
+    "title": "投标管道",
+    "subtitle": "JABCO 招标跟踪",
+    "newOpportunity": "新机会",
+    "noOpportunities": "未找到机会。",
+    "stageFilter": "所有阶段",
+    "mobileStageLabel": "按阶段筛选",
+    "goNoGoTitle": "去/不去决策",
+    "submitTitle": "提交方案",
+    "decideTitle": "胜负决策",
+    "goDecision": "参与",
+    "noGoDecision": "放弃",
+    "wonDecision": "中标",
+    "lostDecision": "落标",
+    "reasonCategory": "原因类别",
+    "reasonText": "原因/备注",
+    "projectCode": "项目编号",
+    "clientType": "客户类型",
+    "bidDeadline": "投标截止日期",
+    "estimatedValue": "估计价值",
+    "proposalUrl": "方案文档网址",
+    "submittedAt": "提交时间",
+    "competitorName": "竞争对手",
+    "winningPrice": "对方总价",
+    "ourPrice": "我方总价",
+    "techScore": "技术评分",
+    "finScore": "财务评分",
+    "packageVariances": "分项费率差异",
+    "addVariance": "+ 添加行",
+    "workPackage": "工作包",
+    "ourRate": "我方费率",
+    "marketRate": "市场费率",
+    "pastHistory": "该客户过往记录",
+    "addOpportunityTitle": "新机会",
+    "opportunityTitle": "机会标题",
+    "notes": "备注",
+    "assignedTo": "负责人",
+    "reasonCategories": {
+      "RESOURCE_CONSTRAINTS": "资源限制",
+      "HIGH_RISK": "高风险",
+      "LOW_MARGIN": "低利润",
+      "STRATEGIC_MISFIT": "战略不符",
+      "CLIENT_RELATIONSHIP": "客户关系",
+      "SCHEDULE_CONFLICT": "进度冲突",
+      "OTHER": "其他"
+    },
+    "stages": {
+      "LEAD": "线索",
+      "QUALIFIED": "合格",
+      "PROPOSAL": "方案",
+      "SUBMITTED": "已提交",
+      "NEGOTIATION": "谈判",
+      "WON": "中标",
+      "LOST": "落标",
+      "NO_GO": "放弃"
+    },
+    "intelligence": {
+      "wins": "中标次数",
+      "losses": "落标次数",
+      "rateWarnings": "费率警告",
+      "noHistory": "该客户暂无投标记录。"
+    }
   }
 }
