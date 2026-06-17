@@ -432,6 +432,14 @@ All financial documents (loan statements, investment portfolios, insurance polic
 | `013_jabco_crm_client_fk.sql` | FK from jabco tables to crm_contacts for client linkage |
 | `014_crm_contact_phone2.sql` | Adds phone2 VARCHAR(50) to crm_contacts |
 | `015_vehicles_sim_number.sql` | Adds sim_number column to ims_vehicles |
+| `016_pipeline_project_status_enums.sql` | pipeline_stage ADD VALUE SUBMITTED/NO_GO; project_status ADD VALUE AWARDED |
+| `017_pipeline_tender_fields.sql` | 7 new columns on crm_sales_pipeline (pipeline_type, bid_deadline, source_url, proposal_document_url, submitted_at, linked_project_id) |
+| `018_bid_intelligence_log.sql` | jabco_bid_log append-only table; log_type: NO_GO/LOST_BID/RATE_VARIANCE/POST_MORTEM/WON; idempotency_key UNIQUE; RLS |
+| `019_boq_margin_columns.sql` | internal_cost_rate, markup_percent, final_bid_rate, work_package_tag on jabco_boq_items |
+| `020_vo_time_extension.sql` | time_extension_days INTEGER on jabco_variation_orders |
+| `021_project_tasks.sql` | jabco_project_tasks (MOBILIZATION/POST_MORTEM/GENERAL; OPEN/IN_PROGRESS/DONE); RLS |
+| `022_punch_incidents_quality.sql` | jabco_punch_list_items (IDENTIFIED→RECTIFIED→VERIFIED), jabco_site_incidents, jabco_quality_inspections; all RLS |
+| `023_project_closeout_fields.sql` | handover_document_url TEXT on jabco_projects |
 
 ### Phase 7 Migrations (jag_family)
 
