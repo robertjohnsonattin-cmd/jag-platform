@@ -4,6 +4,10 @@ apply plugin: "com.facebook.react"
 
 def projectRoot = rootDir.getAbsoluteFile().getParentFile().getAbsolutePath()
 
+def signingPropsFile = rootDir.toPath().resolve("signing.properties").toFile()
+def signingProps = new Properties()
+if (signingPropsFile.exists()) { signingPropsFile.withInputStream { signingProps.load(it) } }
+
 /**
  * This is the configuration block to customize your React Native Android app.
  * By default you don't need to apply any configuration, just uncomment the lines you need.
@@ -102,15 +106,19 @@ android {
             keyAlias 'androiddebugkey'
             keyPassword 'android'
         }
+        release {
+            storeFile file(signingProps['MYAPP_UPLOAD_STORE_FILE'] ?: 'jag-mobile.keystore')
+            storePassword signingProps['MYAPP_UPLOAD_STORE_PASSWORD'] ?: ''
+            keyAlias signingProps['MYAPP_UPLOAD_KEY_ALIAS'] ?: 'jag-mobile'
+            keyPassword signingProps['MYAPP_UPLOAD_KEY_PASSWORD'] ?: ''
+        }
     }
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
         }
         release {
-            // Caution! In production, you need to generate your own keystore file.
-            // see https://reactnative.dev/docs/signed-apk-android.
-            signingConfig signingConfigs.debug
+            signingConfig signingConfigs.release
             shrinkResources (findProperty('android.enableShrinkResourcesInReleaseBuilds')?.toBoolean() ?: false)
             minifyEnabled enableProguardInReleaseBuilds
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"

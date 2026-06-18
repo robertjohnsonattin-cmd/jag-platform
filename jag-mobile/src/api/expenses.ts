@@ -48,6 +48,11 @@ export interface CreateExpenseBody {
 // ── API calls ─────────────────────────────────────────────────────────────────
 
 export const expensesApi = {
+  list: (params?: { limit?: number }) => {
+    const q = new URLSearchParams({ limit: String(params?.limit ?? 50) })
+    return api.get<Expense[]>(`/finance/expenses?${q.toString()}`)
+  },
+
   create: (body: CreateExpenseBody) =>
     api.post<Expense>('/finance/expenses', body),
 

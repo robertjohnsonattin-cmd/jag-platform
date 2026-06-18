@@ -56,6 +56,7 @@ export default function ExpenseForm() {
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('CASH')
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null)
   const [description, setDescription]    = useState('')
+  const [payee, setPayee]               = useState('')
   const [note, setNote]                   = useState('')
   const [expenseDate, setExpenseDate]     = useState(today)
   const [receiptUri, setReceiptUri]       = useState<string | null>(null)
@@ -149,6 +150,7 @@ export default function ExpenseForm() {
         owner_entity_id: entityId,
         expense_date:    expenseDate,
         description:     description.trim(),
+        payee_name:      payee.trim() || undefined,
         amount:          numAmount,
         currency,
         amount_ttd:      toTTD(numAmount, currency),
@@ -174,6 +176,7 @@ export default function ExpenseForm() {
         onPress: () => {
           setAmount('')
           setDescription('')
+          setPayee('')
           setNote('')
           setReceiptUri(null)
           setSelectedCardId(null)
@@ -313,9 +316,14 @@ export default function ExpenseForm() {
 
         <View style={styles.header}>
           <Text style={styles.title}>New Expense</Text>
-          <TouchableOpacity onPress={handleLogout}>
-            <Text style={styles.logoutText}>Sign out</Text>
-          </TouchableOpacity>
+          <View style={{ flexDirection: 'row', gap: 16, alignItems: 'center' }}>
+            <TouchableOpacity onPress={() => router.push('/expenses')}>
+              <Text style={styles.logoutText}>History</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={handleLogout}>
+              <Text style={styles.logoutText}>Sign out</Text>
+            </TouchableOpacity>
+          </View>
         </View>
 
         {/* Amount + Currency */}
@@ -347,6 +355,17 @@ export default function ExpenseForm() {
           value={description}
           onChangeText={setDescription}
           placeholder="What was this expense for?"
+          placeholderTextColor="#475569"
+          returnKeyType="next"
+        />
+
+        {/* Payee */}
+        <Text style={styles.label}>Payee (optional)</Text>
+        <TextInput
+          style={styles.input}
+          value={payee}
+          onChangeText={setPayee}
+          placeholder="Who was paid?"
           placeholderTextColor="#475569"
           returnKeyType="next"
         />
