@@ -1,7 +1,7 @@
 # JAG Integrated Business Platform — Claude Session Context
 
 **Owner:** Robert Johnson-Attin | Barataria, Trinidad & Tobago
-**Architecture:** v1.9 | **Current Phase:** ALL PHASES COMPLETE — in production | **Updated:** 2026-06-17 (session 15)
+**Architecture:** v1.9 | **Current Phase:** ALL PHASES COMPLETE — in production | **Updated:** 2026-06-17 (session 16)
 
 ---
 
@@ -580,6 +580,7 @@ Path 2 local extraction — reads PDFs from local hard drive, Ollama extracts, p
 - ~~**InvestmentsPanel FX display bug**~~ — **DONE 2026-06-17 (session 15)**: `AddModal` and `UpdateValueModal` both now accept `rateMap` prop and work in native-currency space — entered values multiplied by rate on save, TTD values divided by rate for display. Portfolio total and unrealized gain now sum `current_value_ttd` directly (no rate multiplication). Removed unused `toTTD` helper.
 - ~~**Dashboard investments double-conversion**~~ — **DONE 2026-06-17 (session 15)**: `Dashboard.tsx` line 104 was multiplying `current_value_ttd` (already TTD) by `rateMap[currency]` again. Fixed to `investments.reduce((s, i) => s + parseFloat(i.current_value_ttd ?? '0'), 0)`. Inflated USD holdings ~6.77x — dashboard showed ~$34.6M for investments; correct value is now shown.
 - ~~**IMS valuation double-counting fixed assets**~~ — **DONE 2026-06-17 (session 15)**: `routes/ims/items.ts` summary query counted `is_asset = true` items in both `total_stock_value` AND `total_asset_value`. Fixed: `total_stock_value` now filters `AND is_asset IS NOT TRUE`; `total_asset_value` now uses `SUM(qty * unit_value)` (was `SUM(unit_value)` — omitted quantity). API rebuilt and deployed.
+- ~~**CRM contact detail fields + entity cross-linking**~~ — **DONE 2026-06-17 (session 16)**: Contacts now store address (line1/line2/city/state/postal), birthday, notes, land/cell phone labels. `GET /crm/contacts/:id` returns full contact + last 20 interactions. `PATCH /crm/companies/:id` + EditCompanyModal for editing company address. PREQUALIFICATION stage added to pipeline kanban; company dropdown prefetch fix (staleTime:60s on `crm-companies-picker`); `contactCount` pluralization fixed (`Number()` cast). CRM contact detail panel (ContactPanel) with call/WhatsApp/email action links; contacts list rewritten as master-detail layout. New `CrmContactPicker` component (`jag-web/src/components/crm/CrmContactPicker.tsx`) — search-as-you-type with linked contact display (📞💬📱✉️). `CrmContactBadge` for inline read-only card display. `crm_contact_id` (cross-DB soft ref, nullable UUID, no FK) wired into: `prop_contractors` (migration 024 jag_properties), `ent_members` (migration 006 jag_entertainment), `db_clients` (migration 027 jag_commercial). All 7 migrations for this + prior session applied to VM. Commit `7d72654`.
 
 ---
 
