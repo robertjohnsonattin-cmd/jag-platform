@@ -86,6 +86,7 @@ const CreateContractorSchema = z.object({
   email:            z.string().email().optional(),
   rate_description: z.string().optional(),
   notes:            z.string().optional(),
+  crm_contact_id:   z.string().uuid().nullable().optional(),
 }).strict();
 
 const PatchContractorSchema = z.object({
@@ -97,6 +98,7 @@ const PatchContractorSchema = z.object({
   rate_description: z.string().nullable().optional(),
   is_active:        z.boolean().optional(),
   notes:            z.string().nullable().optional(),
+  crm_contact_id:   z.string().uuid().nullable().optional(),
 }).strict();
 
 // ── Batch: SLA breach detector ────────────────────────────────────────────────
@@ -398,10 +400,10 @@ contractorsRouter.post('/', async (req: Request, res: Response, next: NextFuncti
 
     const row = await withOwnerRLS(propertiesPool, ownerId, async client => {
       const { rows } = await client.query(
-        `INSERT INTO prop_contractors (owner_id, name, trade, phone, whatsapp, email, rate_description, notes)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
+        `INSERT INTO prop_contractors (owner_id, name, trade, phone, whatsapp, email, rate_description, notes, crm_contact_id)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
         [ownerId, body.name, body.trade, body.phone ?? null, body.whatsapp ?? null,
-         body.email ?? null, body.rate_description ?? null, body.notes ?? null],
+         body.email ?? null, body.rate_description ?? null, body.notes ?? null, body.crm_contact_id ?? null],
       );
       return rows[0];
     });

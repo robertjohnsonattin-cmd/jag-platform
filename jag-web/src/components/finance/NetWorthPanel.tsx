@@ -31,7 +31,7 @@ export default function NetWorthPanel() {
   return (
     <div>
       {consolidated && (
-        <div className="grid grid-cols-3 gap-4 mb-6">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
           <SummaryCard label={t('finance.netWorth.summaryNetWorth')} value={fmtTTD(consolidated.net_worth_ttd)} color="blue" />
           <SummaryCard label={t('finance.netWorth.summaryAssets')} value={fmtTTD(consolidated.total_assets_ttd)} color="green" />
           <SummaryCard label={t('finance.netWorth.summaryLiabilities')} value={fmtTTD(consolidated.total_liabilities_ttd)} color="red" />
@@ -39,7 +39,7 @@ export default function NetWorthPanel() {
       )}
 
       {entities.length > 0 && (
-        <div className="rounded-lg overflow-hidden border border-slate-700 mb-6">
+        <div className="overflow-x-auto rounded-lg border border-slate-700 mb-6">
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-slate-700/50 text-slate-400 text-xs uppercase tracking-wide">

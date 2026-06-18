@@ -82,7 +82,7 @@ export default function TrialBalance() {
                   <h3 className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-2">
                     {t(`trialBalance.types.${type}`)}
                   </h3>
-                  <div className="rounded-lg overflow-hidden border border-slate-700">
+                  <div className="overflow-x-auto rounded-lg border border-slate-700">
                     <table className="w-full text-sm">
                       <thead>
                         <tr className="bg-slate-700/50 text-slate-400 text-xs uppercase tracking-wide">

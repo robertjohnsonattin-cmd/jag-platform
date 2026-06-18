@@ -85,6 +85,7 @@ export interface Member {
   phone: string | null
   credit_balance: number
   status: MemberStatus
+  crm_contact_id: string | null
   created_at: string
   updated_at: string
 }

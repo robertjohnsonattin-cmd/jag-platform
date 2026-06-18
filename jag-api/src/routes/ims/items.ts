@@ -610,8 +610,8 @@ imsItemsRouter.get('/valuation', async (req: Request, res: Response, next: NextF
             `SELECT COUNT(*)::int                                                                             AS total_items,
                     COUNT(*) FILTER (WHERE reorder_point IS NOT NULL AND quantity_on_hand <= reorder_point)::int AS low_stock_count,
                     COUNT(*) FILTER (WHERE quantity_on_hand = 0)::int                                        AS out_of_stock_count,
-                    COALESCE(SUM(quantity_on_hand * unit_value) FILTER (WHERE unit_value IS NOT NULL), 0)    AS total_stock_value,
-                    COALESCE(SUM(unit_value)      FILTER (WHERE is_asset = true AND unit_value IS NOT NULL), 0) AS total_asset_value
+                    COALESCE(SUM(quantity_on_hand * unit_value) FILTER (WHERE unit_value IS NOT NULL AND is_asset IS NOT TRUE), 0) AS total_stock_value,
+                    COALESCE(SUM(quantity_on_hand * unit_value) FILTER (WHERE is_asset = true AND unit_value IS NOT NULL), 0)     AS total_asset_value
              FROM   ims_items WHERE is_active = true`,
           ).then(r => r.rows[0]),
         ]),

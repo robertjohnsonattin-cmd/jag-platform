@@ -25,6 +25,7 @@ const CreateClientSchema = z.object({
   address:         z.string().max(1000).optional(),
   pricing_tier_id: z.string().uuid().optional(),
   notes:           z.string().max(1000).optional(),
+  crm_contact_id:  z.string().uuid().nullable().optional(),
 }).strict();
 
 const UpdateClientSchema = z.object({
@@ -37,6 +38,7 @@ const UpdateClientSchema = z.object({
   pricing_tier_id: z.string().uuid().optional(),
   notes:           z.string().max(1000).optional(),
   is_active:       z.boolean().optional(),
+  crm_contact_id:  z.string().uuid().nullable().optional(),
 }).strict();
 
 // ── GET /dragonbridge/clients ─────────────────────────────────────────────────
@@ -59,7 +61,7 @@ dbClientsRouter.get('/', async (req: Request, res: Response, next: NextFunction)
           `SELECT c.id, c.client_type, c.name, c.company_name, c.contact_name,
                   c.contact_email, c.contact_phone, c.is_active,
                   c.pricing_tier_id, t.name AS pricing_tier_name,
-                  t.default_margin_pct, c.created_at
+                  t.default_margin_pct, c.crm_contact_id, c.created_at
            FROM db_clients c
            LEFT JOIN db_pricing_tiers t ON t.id = c.pricing_tier_id
            ${where}
@@ -96,13 +98,13 @@ dbClientsRouter.post('/', async (req: Request, res: Response, next: NextFunction
         return c.query(
           `INSERT INTO db_clients
              (tenant_id, client_type, name, company_name, contact_name, contact_email,
-              contact_phone, address, pricing_tier_id, notes, last_modified_by)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+              contact_phone, address, pricing_tier_id, notes, crm_contact_id, last_modified_by)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
            RETURNING id, client_type, name, company_name, contact_name,
-                     contact_email, contact_phone, pricing_tier_id, is_active, created_at`,
+                     contact_email, contact_phone, pricing_tier_id, is_active, crm_contact_id, created_at`,
           [tenantId, d.client_type, d.name, d.company_name ?? null,
            d.contact_name ?? null, d.contact_email ?? null, d.contact_phone ?? null,
-           d.address ?? null, d.pricing_tier_id ?? null, d.notes ?? null, userId],
+           d.address ?? null, d.pricing_tier_id ?? null, d.notes ?? null, d.crm_contact_id ?? null, userId],
         ).then((r) => r.rows[0]);
       });
       logger.info({ entity: 'DRAGONBRIDGE', action: 'CLIENT_CREATED', client_id: row.id, user_id: userId, tenant_id: tenantId });
@@ -150,6 +152,7 @@ dbClientsRouter.patch('/:id', async (req: Request, res: Response, next: NextFunc
         if (updates.pricing_tier_id !== undefined) sets.push(`pricing_tier_id = ${push(updates.pricing_tier_id)}`);
         if (updates.notes           !== undefined) sets.push(`notes = ${push(updates.notes)}`);
         if (updates.is_active       !== undefined) sets.push(`is_active = ${push(updates.is_active)}`);
+        if (updates.crm_contact_id  !== undefined) sets.push(`crm_contact_id = ${push(updates.crm_contact_id)}`);
         sets.push(`updated_at = now()`);
         sets.push(`last_modified_at = now()`);
         sets.push(`last_modified_by = ${push(userId)}`);

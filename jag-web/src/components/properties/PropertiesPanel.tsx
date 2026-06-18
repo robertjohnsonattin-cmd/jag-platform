@@ -2293,7 +2293,7 @@ function ValuationHistoryModal({ id, name, onClose }: { id: string; name: string
           <p className="text-slate-400 text-sm">No history yet. History records automatically each time you update the valuation.</p>
         )}
         {history.length > 0 && (
-          <div className="rounded-lg overflow-hidden border border-slate-700">
+          <div className="overflow-x-auto rounded-lg border border-slate-700">
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-slate-700/50 text-slate-400 text-xs uppercase tracking-wide">
@@ -2603,7 +2603,7 @@ function PropertyDetail({ property, onDeleted }: { property: Property; onDeleted
               </button>
             </div>
             {payments.length === 0 ? <Empty /> : (
-              <div className="rounded-lg overflow-hidden border border-slate-700">
+              <div className="overflow-x-auto rounded-lg border border-slate-700">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="bg-slate-700/50 text-slate-400 text-xs uppercase tracking-wide">
@@ -2744,7 +2744,7 @@ function PropertyDetail({ property, onDeleted }: { property: Property; onDeleted
                 </button>
               </div>
               {utilities.length === 0 ? <Empty /> : (
-                <div className="rounded-lg overflow-hidden border border-slate-700">
+                <div className="overflow-x-auto rounded-lg border border-slate-700">
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="bg-slate-700/50 text-slate-400 text-xs uppercase tracking-wide">
@@ -2785,7 +2785,7 @@ function PropertyDetail({ property, onDeleted }: { property: Property; onDeleted
               </button>
             </div>
             {invoices.length === 0 ? <Empty /> : (
-              <div className="rounded-lg overflow-hidden border border-slate-700">
+              <div className="overflow-x-auto rounded-lg border border-slate-700">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="bg-slate-700/50 text-slate-400 text-xs uppercase tracking-wide">
@@ -3233,9 +3233,9 @@ export default function PropertiesPanel() {
   const selected = properties.find(p => p.id === selectedId) ?? null
 
   return (
-    <div className="flex gap-4 h-full min-h-0">
-      {/* Property list */}
-      <div className="w-64 shrink-0 flex flex-col gap-2">
+    <div className="flex gap-4 min-h-0">
+      {/* Property list — full width on mobile when no property selected, w-64 sidebar on md+ */}
+      <div className={`${selected ? 'hidden md:flex' : 'flex'} w-full md:w-64 shrink-0 flex-col gap-2`}>
         <button
           onClick={() => setShowAdd(true)}
           className="w-full py-1.5 text-sm rounded bg-blue-600 hover:bg-blue-500 text-white transition-colors"
@@ -3265,8 +3265,16 @@ export default function PropertiesPanel() {
         )}
       </div>
 
-      {/* Detail panel */}
-      <div className="flex-1 min-w-0">
+      {/* Detail panel — full width on mobile, flex-1 on md+ */}
+      <div className={`${!selected ? 'hidden md:block' : 'block'} flex-1 min-w-0`}>
+        {selected && (
+          <button
+            className="md:hidden mb-3 flex items-center gap-1 text-sm text-blue-400 hover:text-blue-300 transition-colors"
+            onClick={() => setSelectedId(null)}
+          >
+            ← {t('common.back')}
+          </button>
+        )}
         {selected
           ? <PropertyDetail property={selected} onDeleted={() => {
               setSelectedId(null)

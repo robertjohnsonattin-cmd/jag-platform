@@ -1,7 +1,7 @@
 # JAG Integrated Business Platform — Claude Session Context
 
 **Owner:** Robert Johnson-Attin | Barataria, Trinidad & Tobago
-**Architecture:** v1.9 | **Current Phase:** ALL PHASES COMPLETE — in production | **Updated:** 2026-06-16 (session 13)
+**Architecture:** v1.9 | **Current Phase:** ALL PHASES COMPLETE — in production | **Updated:** 2026-06-17 (session 15)
 
 ---
 
@@ -119,6 +119,23 @@ Detection at runtime: first arg is a `Response` if it has a `.json` function; fi
 
 ### node-pg numeric types
 PostgreSQL `numeric` / `decimal` columns arrive in Node.js as **strings**, not numbers. Always wrap with `parseFloat(String(value ?? 0))` before arithmetic — using `+` on two pg numeric values concatenates strings instead of adding numbers.
+
+### Investment FX conversion rule — CRITICAL
+`fin_investments.current_value_ttd` is **always stored in TTD** — never in native currency.
+
+- **DB → display (native):** `nativeValue = ttdValue / rateMap[currency]` (divide)
+- **Form entry → DB (save):** `ttd = enteredNativeValue * rateMap[currency]` (multiply)
+- **Aggregating totals:** sum `parseFloat(current_value_ttd)` directly — **never** multiply by rateMap again
+- `rateMap['TTD'] = 1` so TTD-denominated holdings always pass through unchanged
+
+Violations cause silent inflation: a $5M TTD investment stored correctly in the DB would display/total as ~$33.8M when mistakenly multiplied by the USD rate (6.77).
+
+### IMS valuation — stock vs fixed assets
+`GET /ims/valuation` returns two separate sums. The correct SQL (in `routes/ims/items.ts`):
+- `total_stock_value` = `SUM(qty * unit_value) WHERE is_asset IS NOT TRUE` — consumable inventory only
+- `total_asset_value` = `SUM(qty * unit_value) WHERE is_asset = true` — fixed assets only
+
+Never let items appear in both sums. The previous bug counted `is_asset = true` items in both totals (fixed 2026-06-17).
 
 ### React date inputs — PG DATE/TIMESTAMP values
 PostgreSQL `DATE`/`TIMESTAMP` columns may arrive from the API as ISO datetime strings (`'2025-12-31T00:00:00.000Z'`). A browser `<input type="date">` cannot display ISO datetime format — it shows empty placeholder but still submits the full string, failing Zod's `^\d{4}-\d{2}-\d{2}$` regex.
@@ -500,6 +517,13 @@ Path 2 local extraction — reads PDFs from local hard drive, Ollama extracts, p
 - Auth: Keycloak ROPC (password grant) — token cached per run with 30s early-expiry buffer
 - **PDF extraction:** uses `pdf-parse` v1.1.1 — handles FlateDecode-compressed PDFs (e.g. Microsoft Reporting Services output). The old latin1 byte-scan is replaced; raw binary PDFs now decode correctly.
 - **TTCD pre-parser (investment type only):** if the PDF matches the Trinidad & Tobago Central Depository (TTCD/TTSE) statement layout (`Closing Balance:` + `Net Movement:` markers), the script bypasses Ollama entirely and parses all holdings programmatically — 100% accuracy, ~2 seconds. Known TTSE tickers hardcoded in `TTSE_TICKERS` array for clean name splitting (add new tickers there when encountered).
+- **IBKR pre-parser (investment type only, added 2026-06-16, session 14):** if the input file is a CSV export of an Interactive Brokers **Activity Flex Query → Open Positions (Summary)**, the script bypasses Ollama entirely via `parseIbkrPositions()`. Header matching is normalized (case/space/punctuation-insensitive) to tolerate IBKR's varying column-name conventions.
+  - **Required Flex Query field selection** (Performance & Reports → Flex Queries → Create Activity Flex Query → Open Positions, Summary level, output format CSV): Account ID, Symbol, Description, Asset Class, Currency, Quantity, Mark Price, Position Value, Cost Basis Price, Cost Basis Money, Unrealized P/L, Report Date.
+  - **Asset class mapping** (`IBKR_ASSET_CLASS_MAP`): `STK→EQUITY`, `ETF→ETF`, `FUND→MUTUAL_FUND`, `BOND→BOND`, `CASH→CASH_EQUIVALENT`. Any other class (`OPT`, `FUT`, `FOP`, `WAR`, `CFD`, etc.) is skipped with a console warning — derivatives aren't tracked in `fin_investments`.
+  - **Short/closed positions** (`quantity <= 0`) are skipped with a warning.
+  - **FX conversion:** IBKR's `FXRateToBase` converts to the account's own base currency, not TTD, so it's ignored. The script instead calls `GET /finance/fx-rates/:currency/latest` per holding currency and converts `PositionValue`/`FifoPnlUnrealized` into `current_value_ttd`/`unrealised_gain_ttd`. If no TTD rate is on file for that currency, those two fields are left blank — sync first via `POST /finance/fx-rates/sync` or add a manual rate, then backfill via the Investments Update modal.
+  - **Not idempotent across reruns:** like the TTCD path this is a plain `INSERT` via `/finance/investments/import` (`idempotency_key` is accepted by the Zod schema but not enforced against the table) — rerunning the same export creates duplicate rows. Use for point-in-time backfill, not a recurring sync. For ongoing valuation updates on holdings already imported, use the Investments panel Update modal (auto-logs to `fin_investment_valuations`).
+  - Usage: `node dist/extract.js --type investment --file "C:/path/IBKR_OpenPositions.csv" --entity <uuid> [--dry-run]`
 - **Ollama settings:** `num_ctx: 16384` (prevents truncation on longer prompts), timeout 600 s, 2-attempt retry, robust JSON extractor (brace-depth scanner handles prose before/after JSON).
 - **Running KC_PASSWORD at runtime (don't store in file):** `$env:KC_PASSWORD = "xxx"; node dist/extract.js ...`
 
@@ -552,6 +576,10 @@ Path 2 local extraction — reads PDFs from local hard drive, Ollama extracts, p
 - ~~**JAG Property Tenancy Module (full lifecycle)**~~ — **DONE 2026-06-16 (session 11)**: Complete tenancy lifecycle Advertising → Enquiry → Viewing → Application → Lease → Handover → Rent Collection → Maintenance → Renewal/Exit. 12 new backend routes (`applications`, `deposits`, `enquiries`, `handover`, `listing`, `maintenance-tickets`, `renewals`, `rent-schedule`, `viewings`, `whatsapp-send`, `internal/whatsapp-webhook`); 10 new frontend panels; `jag-web/src/api/tenancy.ts`; 10 new jag_properties migrations (013–022); 5 VM cron scripts (rent-reminders, viewing-reminders, renewal-notices, sla-monitor, post-viewing-app-link). `google-auth-library` installed for Google Calendar booking slots. `response.ts` extended with dual-mode overloads (`ok(data)` + `ok(res,data,status)` both valid). `rls.ts` extended with Pool+ownerId overload. Deployed — all 7 deploy steps passed.
 - ~~**Mobile responsive UI pass**~~ — **DONE 2026-06-16 (session 12)**: No separate mobile app needed — existing React + Tailwind stack adapted. 16 files changed. Dashboard KPI/net-worth grids now stack on mobile (`sm:`/`lg:` breakpoints). PropertiesPanel master-detail uses mobile stack pattern (list → tap → detail, back button). All data tables across Finance, Ledger, Properties, Expenses now use `overflow-x-auto` for horizontal scroll on mobile. Insurance/NetWorth/Intercompany summary cards stack on mobile. `common.back`/`返回` added to both locale files. Deployed — frontend-only SCP.
 - ~~**JAG Commercial Lifecycle (full pipeline)**~~ — **DONE 2026-06-16 (session 13)**: Full bid lifecycle Lead→Win/Loss→Execution→Closeout per `JAG_COMMERCIAL_LIFECYCLE_BUILD_SPEC.md`. **Migrations** (8 files, 016–023): `pipeline_stage` gains SUBMITTED/NO_GO; `project_status` gains AWARDED; 7 new columns on `crm_sales_pipeline` (pipeline_type, bid_deadline, linked_project_id, etc.); `jabco_bid_log` append-only table (log_type incl. WON); BOQ margin columns; VO `time_extension_days`; `jabco_project_tasks`; punch list / site incidents / quality inspections tables; `handover_document_url` on projects. **Backend**: `routes/crm/pipeline.ts` (8 endpoints incl. Go/No-Go, Submit, Win/Loss, intelligence); `routes/jabco/project-tasks.ts`; `routes/jabco/punch-list.ts` (state-gated IDENTIFIED→RECTIFIED→VERIFIED); `routes/jabco/site-incidents.ts`; `routes/jabco/quality-inspections.ts`; `projects.ts` updated (AWARDED status, closeout guard — blocks CLOSED if open punch items or no handover doc, fires `jabco.project_closed` outbox event); `payment-certs.ts` VO approval now rolls `contract_value` + `expected_end_date` in same transaction. **Frontend**: `types/pipeline.ts` + `api/pipeline.ts` (new); `types/jabco.ts` + `api/jabco.ts` extended; CRM page gains "Tender Pipeline" tab (kanban desktop / filtered list mobile; Go/No-Go modal with background intelligence query; Submit + Win/Loss modals); JABCO project detail gains 5 new tabs — Tasks, Punch List, Incidents, Quality, Closeout; BOQ shows margin columns when status=TENDER/AWARDED. **i18n**: `tender` namespace added to both locale files; `jabco` namespace extended with all new keys. Deployed — migrations 016–023 applied to `jag_commercial` on VM; API rebuilt (`docker compose build api`); frontend SCP'd; `api.jagcorporate.com/health/ready` ✓. Commit `60be2f3`.
+- ~~**IBKR investment import (3 accounts)**~~ — **DONE 2026-06-17 (session 15)**: Imported positions from 3 Interactive Brokers accounts: U21242678 (Phillip Ajack, entity 010), U2428207 (Personal — Robert, entity 008), U4022018 (Personal — Robert, entity 008). `parseIbkrForexBalances()` added to `scripts/doc-import/src/extract.ts` for Forex Balances CSV section (USD-base accounts have no foreign cash to parse). Phillip's first-batch duplicates (6 rows, wrong TTD values) deleted via SQL; second batch at 04:52:30 kept. USD Cash positions entered manually as CASH_EQUIVALENT. 3 USD Cash DB entries corrected via SQL (`current_value_ttd` had been stored in USD; fixed by multiplying by 6.774869 rate). `jag-web/src/api/finance.ts` `createInvestment` param renamed `cost_basis_ttd` → `average_cost_per_unit` to match Zod schema.
+- ~~**InvestmentsPanel FX display bug**~~ — **DONE 2026-06-17 (session 15)**: `AddModal` and `UpdateValueModal` both now accept `rateMap` prop and work in native-currency space — entered values multiplied by rate on save, TTD values divided by rate for display. Portfolio total and unrealized gain now sum `current_value_ttd` directly (no rate multiplication). Removed unused `toTTD` helper.
+- ~~**Dashboard investments double-conversion**~~ — **DONE 2026-06-17 (session 15)**: `Dashboard.tsx` line 104 was multiplying `current_value_ttd` (already TTD) by `rateMap[currency]` again. Fixed to `investments.reduce((s, i) => s + parseFloat(i.current_value_ttd ?? '0'), 0)`. Inflated USD holdings ~6.77x — dashboard showed ~$34.6M for investments; correct value is now shown.
+- ~~**IMS valuation double-counting fixed assets**~~ — **DONE 2026-06-17 (session 15)**: `routes/ims/items.ts` summary query counted `is_asset = true` items in both `total_stock_value` AND `total_asset_value`. Fixed: `total_stock_value` now filters `AND is_asset IS NOT TRUE`; `total_asset_value` now uses `SUM(qty * unit_value)` (was `SUM(unit_value)` — omitted quantity). API rebuilt and deployed.
 
 ---
 

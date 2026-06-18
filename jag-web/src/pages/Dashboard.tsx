@@ -101,7 +101,7 @@ export default function Dashboard() {
   const totalImsAssets     = parseFloat(String(imsValuation?.summary.total_asset_value ?? 0))
   const totalImsStock      = parseFloat(String(imsValuation?.summary.total_stock_value ?? 0))
   const totalImsValue      = totalImsAssets + totalImsStock
-  const totalInvestments   = investments.reduce((s, i) => s + parseFloat(i.current_value_ttd) * (rateMap[i.currency ?? 'TTD'] ?? 1), 0)
+  const totalInvestments   = investments.reduce((s, i) => s + parseFloat(i.current_value_ttd ?? '0'), 0)
   const liveTotalAssets    = totalLiquid + totalPropertyValue + totalImsValue + totalInvestments
 
   const arrearsCount    = arrears.length
@@ -119,7 +119,7 @@ export default function Dashboard() {
       </div>
 
       {/* Operational KPI strip */}
-      <div className="grid grid-cols-5 gap-3 mb-6">
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3 mb-6">
         <OpsCard
           label={t('dashboard.rentArrears')}
           value={arrearsCount}
@@ -159,7 +159,7 @@ export default function Dashboard() {
 
       {/* Net worth headline */}
       {consolidated ? (
-        <div className="grid grid-cols-3 gap-4 mb-8">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
           <StatCard
             label={t('dashboard.consolidatedNetWorth')}
             value={fmtTTD(consolidated.net_worth_ttd)}
@@ -183,13 +183,13 @@ export default function Dashboard() {
           />
         </div>
       ) : (
-        <div className="grid grid-cols-3 gap-4 mb-8">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
           {[0,1,2].map(i => <div key={i} className="h-24 bg-slate-800 rounded-lg animate-pulse" />)}
         </div>
       )}
 
-      <div className="grid grid-cols-3 gap-6">
-        <div className="col-span-2 space-y-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="lg:col-span-2 space-y-6">
           <Section title={t('dashboard.assetComposition')}>
             <div className="divide-y divide-slate-700">
               <AssetRow

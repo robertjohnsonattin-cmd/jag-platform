@@ -174,7 +174,7 @@ export default function AccountsPanel() {
               <h3 className="text-sm font-semibold text-slate-300 uppercase tracking-wide">{entityName(entityId)}</h3>
               <span className="text-sm text-slate-400">{fmtTTD(total)} {t('finance.accounts.total')}</span>
             </div>
-            <div className="rounded-lg overflow-hidden border border-slate-700">
+            <div className="overflow-x-auto rounded-lg border border-slate-700">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-slate-700/50 text-slate-400 text-xs uppercase tracking-wide">

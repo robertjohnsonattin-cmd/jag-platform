@@ -1,4 +1,4 @@
-export type PipelineStage = 'LEAD' | 'QUALIFIED' | 'PROPOSAL' | 'SUBMITTED' | 'NEGOTIATION' | 'WON' | 'LOST' | 'NO_GO'
+export type PipelineStage = 'PREQUALIFICATION' | 'LEAD' | 'QUALIFIED' | 'PROPOSAL' | 'SUBMITTED' | 'NEGOTIATION' | 'WON' | 'LOST' | 'NO_GO'
 export type PipelineType  = 'JABCO_TENDER' | 'DRAGONBRIDGE_DEAL'
 
 export interface PipelineOpportunity {

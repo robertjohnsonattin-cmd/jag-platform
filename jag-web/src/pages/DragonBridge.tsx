@@ -6,6 +6,7 @@ import type {
   QuoteSummary, QuoteItem, OrderSummary,
   ShipmentSummary, Reconciliation, JagRole, QuoteStatus, OrderStatus, ShipmentStatus,
 } from '../types/dragonbridge'
+import CrmContactPicker, { CrmContactBadge } from '../components/crm/CrmContactPicker'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -326,7 +327,7 @@ function AddClientModal({ onClose }: { onClose: () => void }) {
   const { data: tiers = [] } = useQuery({ queryKey: ['db-pricing-tiers'], queryFn: dbApi.getPricingTiers })
   const [form, setForm] = useState({
     client_type: 'B2B' as 'B2B' | 'B2C', name: '', company_name: '', contact_name: '',
-    contact_email: '', contact_phone: '', pricing_tier_id: '',
+    contact_email: '', contact_phone: '', pricing_tier_id: '', crm_contact_id: null as string | null,
   })
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
     setForm(f => ({ ...f, [k]: e.target.value }))
@@ -339,6 +340,7 @@ function AddClientModal({ onClose }: { onClose: () => void }) {
       contact_email: form.contact_email || undefined,
       contact_phone: form.contact_phone || undefined,
       pricing_tier_id: form.pricing_tier_id || undefined,
+      crm_contact_id: form.crm_contact_id || undefined,
     }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['db-clients'] }); onClose() },
   })
@@ -376,6 +378,10 @@ function AddClientModal({ onClose }: { onClose: () => void }) {
           <div>
             <label className="block text-xs text-slate-400 mb-1">{t('db.email')}</label>
             <input type="email" value={form.contact_email} onChange={set('contact_email')} className={cls} />
+          </div>
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">{t('crm.linkedContact', 'CRM Contact')}</label>
+            <CrmContactPicker value={form.crm_contact_id} onChange={id => setForm(f => ({ ...f, crm_contact_id: id }))} />
           </div>
           {tiers.length > 0 && (
             <div>
@@ -444,6 +450,7 @@ function ClientsTab() {
                   <td className="px-4 py-3 text-slate-400 text-xs">
                     {c.contact_name && <p>{c.contact_name}</p>}
                     {c.contact_email && <p>{c.contact_email}</p>}
+                    {c.crm_contact_id && <CrmContactBadge contactId={c.crm_contact_id} />}
                   </td>
                   <td className="px-4 py-3 text-slate-400 text-xs">
                     {c.pricing_tier_name ? `${c.pricing_tier_name} (${c.default_margin_pct}%)` : '—'}

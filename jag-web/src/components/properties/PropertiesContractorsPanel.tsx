@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { tenancyApi } from '../../api/tenancy'
+import CrmContactPicker, { CrmContactBadge } from '../crm/CrmContactPicker'
 
 const cls = 'w-full bg-slate-700 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500'
 const TRADES = ['PLUMBING','ELECTRICAL','STRUCTURAL','PEST_CONTROL','APPLIANCE','PAINTING','GENERAL','OTHER'] as const
@@ -11,7 +12,7 @@ export default function PropertiesContractorsPanel() {
   const qc = useQueryClient()
   const [showAdd, setShowAdd] = useState(false)
   const [editing, setEditing] = useState<Record<string, unknown> | null>(null)
-  const [form, setForm] = useState({ name: '', trade: 'GENERAL', phone: '', whatsapp: '', email: '', rate_description: '', notes: '' })
+  const [form, setForm] = useState({ name: '', trade: 'GENERAL', phone: '', whatsapp: '', email: '', rate_description: '', notes: '', crm_contact_id: null as string | null })
 
   const { data: contractors = [] } = useQuery({ queryKey: ['contractors'], queryFn: () => tenancyApi.getContractors() })
 
@@ -32,7 +33,7 @@ export default function PropertiesContractorsPanel() {
   return (
     <div>
       <div className="flex justify-end mb-4">
-        <button onClick={() => { setForm({ name: '', trade: 'GENERAL', phone: '', whatsapp: '', email: '', rate_description: '', notes: '' }); setShowAdd(true) }}
+        <button onClick={() => { setForm({ name: '', trade: 'GENERAL', phone: '', whatsapp: '', email: '', rate_description: '', notes: '', crm_contact_id: null }); setShowAdd(true) }}
           className="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded">
           + {t('tenancy.addContractor', 'Add Contractor')}
         </button>
@@ -49,6 +50,7 @@ export default function PropertiesContractorsPanel() {
                 <p className="text-xs text-slate-400 mt-1">{String(c['phone'] ?? '')} {c['whatsapp'] ? `· WA: ${String(c['whatsapp'])}` : ''}</p>
                 {Boolean(c['email']) && <p className="text-xs text-slate-500">{String(c['email'])}</p>}
                 {Boolean(c['rate_description']) && <p className="text-xs text-slate-500 mt-1">{String(c['rate_description'])}</p>}
+                {Boolean(c['crm_contact_id']) && <CrmContactBadge contactId={String(c['crm_contact_id'])} />}
               </div>
               <div className="flex flex-col gap-1 items-end">
                 <span className={`text-xs px-1.5 py-0.5 rounded ${c['is_active'] ? 'bg-green-900/50 text-green-400' : 'bg-slate-700 text-slate-500'}`}>
@@ -86,6 +88,12 @@ export default function PropertiesContractorsPanel() {
                   <label htmlFor="is_active" className="text-sm text-slate-300">{t('tenancy.active','Active')}</label>
                 </div>
               )}
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">{t('crm.linkedContact','CRM Contact')}</label>
+                {editing
+                  ? <CrmContactPicker value={editing['crm_contact_id'] as string | null} onChange={id => setEditing(ed => ed ? { ...ed, crm_contact_id: id } : ed)} />
+                  : <CrmContactPicker value={form.crm_contact_id} onChange={id => setForm(f => ({ ...f, crm_contact_id: id }))} />}
+              </div>
             </div>
             <div className="flex gap-2 justify-end mt-4">
               <button onClick={() => { setShowAdd(false); setEditing(null) }} className="px-4 py-2 text-sm text-slate-400 hover:text-slate-200">{t('common.cancel','Cancel')}</button>

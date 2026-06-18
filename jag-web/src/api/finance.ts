@@ -69,7 +69,7 @@ export const financeApi = {
 
   createInvestment: (data: {
     owner_entity_id: string; investment_type: InvestmentType; asset_name: string
-    current_value_ttd: number; currency?: string; cost_basis_ttd?: number
+    current_value_ttd: number; currency?: string; average_cost_per_unit?: number
     unrealised_gain_ttd?: number; institution_name?: string; ticker_symbol?: string
     quantity?: number; maturity_date?: string; notes?: string
   }) => api.post<Investment>('/finance/investments', data),

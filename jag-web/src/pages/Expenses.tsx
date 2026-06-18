@@ -488,7 +488,7 @@ export default function Expenses() {
           )}
 
           {expenses.length > 0 && (
-            <div className="rounded-lg overflow-hidden border border-slate-700">
+            <div className="overflow-x-auto rounded-lg border border-slate-700">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-slate-700/50 text-slate-400 text-xs uppercase tracking-wide">

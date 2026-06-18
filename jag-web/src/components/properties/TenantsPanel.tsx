@@ -14,7 +14,7 @@ function AddTenantModal({ onClose, onCreated }: { onClose: () => void; onCreated
   const { t } = useTranslation()
   const [form, setForm] = useState({
     first_name: '', last_name: '', company_name: '', is_company: false,
-    phone: '', email: '',
+    phone: '', phone2: '', email: '',
     identification_type: '', identification_number: '',
     emergency_contact_name: '', emergency_contact_phone: '',
     notes: '',
@@ -31,6 +31,7 @@ function AddTenantModal({ onClose, onCreated }: { onClose: () => void; onCreated
       company_name: form.company_name || undefined,
       is_company: form.is_company,
       phone: form.phone || undefined,
+      phone2: form.phone2 || undefined,
       email: form.email || undefined,
       identification_type: form.identification_type || undefined,
       identification_number: form.identification_number || undefined,
@@ -73,9 +74,16 @@ function AddTenantModal({ onClose, onCreated }: { onClose: () => void; onCreated
               <input value={form.phone} onChange={set('phone')} className={cls} placeholder="+1-868-..." />
             </div>
             <div className="flex-1">
+              <label className="block text-xs text-slate-400 mb-1">{t('tenants.phone2')}</label>
+              <input value={form.phone2} onChange={set('phone2')} className={cls} placeholder="+1-868-..." />
+            </div>
+          </div>
+          <div className="flex gap-3">
+            <div className="flex-1">
               <label className="block text-xs text-slate-400 mb-1">{t('tenants.email')}</label>
               <input type="email" value={form.email} onChange={set('email')} className={cls} />
             </div>
+            <div className="flex-1" />
           </div>
           <div className="flex gap-3">
             <div className="flex-1">
@@ -129,6 +137,7 @@ function EditTenantModal({ tenant, onClose, onSaved }: { tenant: PropertyTenant;
     company_name: tenant.company_name ?? '',
     is_company: tenant.is_company,
     phone: tenant.phone ?? '',
+    phone2: tenant.phone2 ?? '',
     email: tenant.email ?? '',
     identification_type: (tenant as unknown as Record<string, string>).identification_type ?? '',
     identification_number: (tenant as unknown as Record<string, string>).identification_number ?? '',
@@ -148,6 +157,7 @@ function EditTenantModal({ tenant, onClose, onSaved }: { tenant: PropertyTenant;
       company_name: form.company_name || null,
       is_company: form.is_company,
       phone: form.phone || null,
+      phone2: form.phone2 || null,
       email: form.email || null,
       identification_type: form.identification_type || null,
       identification_number: form.identification_number || null,
@@ -190,9 +200,16 @@ function EditTenantModal({ tenant, onClose, onSaved }: { tenant: PropertyTenant;
               <input value={form.phone} onChange={set('phone')} className={cls} placeholder="+1-868-..." />
             </div>
             <div className="flex-1">
+              <label className="block text-xs text-slate-400 mb-1">{t('tenants.phone2')}</label>
+              <input value={form.phone2} onChange={set('phone2')} className={cls} placeholder="+1-868-..." />
+            </div>
+          </div>
+          <div className="flex gap-3">
+            <div className="flex-1">
               <label className="block text-xs text-slate-400 mb-1">{t('tenants.email')}</label>
               <input type="email" value={form.email} onChange={set('email')} className={cls} />
             </div>
+            <div className="flex-1" />
           </div>
           <div className="flex gap-3">
             <div className="flex-1">
@@ -282,7 +299,7 @@ export default function TenantsPanel() {
       {!isLoading && tenants.length === 0 && <p className="text-slate-500 text-sm">{t('tenants.noTenants')}</p>}
 
       {tenants.length > 0 && (
-        <div className="rounded-lg overflow-hidden border border-slate-700">
+        <div className="overflow-x-auto rounded-lg border border-slate-700">
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-slate-700/50 text-slate-400 text-xs uppercase tracking-wide">

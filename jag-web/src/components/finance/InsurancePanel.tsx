@@ -243,7 +243,7 @@ function PolicyDetail({ policy, onClose }: { policy: InsurancePolicy; onClose: (
             </div>
             <button onClick={onClose} className="text-slate-500 hover:text-white text-sm px-2">✕</button>
           </div>
-          <div className="grid grid-cols-3 gap-3 mt-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-4">
             <div>
               <p className="text-xs text-slate-400">{t('insurance.colCoverage')}</p>
               <p className="text-sm font-mono font-medium text-white">{fmtTTD(policy.coverage_amount_ttd)}</p>
@@ -514,7 +514,7 @@ function PolicyHistoryModal({ id, name, onClose }: { id: string; name: string; o
           <p className="text-slate-400 text-sm">No history yet. History records automatically each time you update the policy.</p>
         )}
         {history.length > 0 && (
-          <div className="rounded-lg overflow-hidden border border-slate-700">
+          <div className="overflow-x-auto rounded-lg border border-slate-700">
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-slate-700/50 text-slate-400 text-xs uppercase tracking-wide">
@@ -574,7 +574,7 @@ export default function InsurancePanel() {
   return (
     <div>
       {/* Summary cards */}
-      <div className="grid grid-cols-3 gap-4 mb-6">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
         <div className="bg-slate-800 rounded-lg p-4 border-l-4 border-blue-500">
           <p className="text-xs text-slate-400 uppercase tracking-wide mb-1">{t('insurance.activePolicies')}</p>
           <p className="text-2xl font-semibold text-white">{activePolicies.length}</p>
@@ -628,7 +628,7 @@ export default function InsurancePanel() {
       {!isLoading && policies.length === 0 && <p className="text-slate-500 text-sm">{t('insurance.noPolicies')}</p>}
 
       {policies.length > 0 && (
-        <div className="rounded-lg overflow-hidden border border-slate-700">
+        <div className="overflow-x-auto rounded-lg border border-slate-700">
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-slate-700/50 text-slate-400 text-xs uppercase tracking-wide">

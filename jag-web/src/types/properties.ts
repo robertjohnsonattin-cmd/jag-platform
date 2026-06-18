@@ -124,6 +124,7 @@ export interface PropertyTenant {
   company_name: string | null
   is_company: boolean
   phone: string | null
+  phone2: string | null
   email: string | null
   last_modified_at: string
   created_at: string

@@ -21,7 +21,7 @@ export const pipelineRouter = Router();
 const UUIDParam = z.object({ id: z.string().uuid() });
 
 const PipelineQuerySchema = z.object({
-  stage: z.enum(['LEAD','QUALIFIED','PROPOSAL','SUBMITTED','NEGOTIATION','WON','LOST','NO_GO']).optional(),
+  stage: z.enum(['PREQUALIFICATION','LEAD','QUALIFIED','PROPOSAL','SUBMITTED','NEGOTIATION','WON','LOST','NO_GO']).optional(),
   pipeline_type: z.enum(['JABCO_TENDER','DRAGONBRIDGE_DEAL']).optional(),
   assigned_to: z.string().uuid().optional(),
   page: z.coerce.number().int().min(1).default(1),
@@ -358,7 +358,7 @@ pipelineRouter.post('/', async (req: Request, res: Response, next: NextFunction)
              (tenant_id, title, stage, pipeline_type, company_id, contact_id,
               estimated_value, bid_deadline, source_url, assigned_to,
               notes, idempotency_key)
-           VALUES ($1,$2,'LEAD',$3,$4,$5,$6,$7,$8,$9,$10,$11)
+           VALUES ($1,$2,'PREQUALIFICATION',$3,$4,$5,$6,$7,$8,$9,$10,$11)
            RETURNING *`,
           [
             tenantId, body.title, body.pipeline_type,

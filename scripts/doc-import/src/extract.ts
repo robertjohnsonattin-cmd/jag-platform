@@ -13,12 +13,20 @@
  *   bank-statement   → Finance → Transactions (pending review)
  *   loan             → Finance → Loans
  *   investment       → Finance → Investments (supports multi-holding statements)
+ *                        — TTCD/TTSE depository PDF statements and Interactive Brokers
+ *                          "Open Positions" Activity Flex Query CSV exports are parsed
+ *                          programmatically (no Ollama) for 100% accuracy. Anything else
+ *                          falls back to Ollama text extraction.
  *   insurance        → Finance → Insurance
  *
  * Options:
- *   --entity <uuid>  owner_entity_id (defaults to DEFAULT_OWNER_ENTITY_ID in .env)
- *   --account <uuid> account_id for bank-statement and loan types
- *   --dry-run        parse and print without posting to API
+ *   --entity <uuid>       owner_entity_id (defaults to DEFAULT_OWNER_ENTITY_ID in .env)
+ *   --account <uuid>      account_id for bank-statement and loan types
+ *   --ibkr-account <id>   filter an IBKR Flex CSV down to one IBKR account (e.g. U4022018)
+ *                            before import — use when a single Flex Query export covers
+ *                            multiple sub-accounts that belong to different owner entities.
+ *                            Re-run once per sub-account with matching --entity.
+ *   --dry-run             parse and print without posting to API
  *
  * Config: .env.doc-import in this directory (same level as dist/)
  */
@@ -71,22 +79,23 @@ const CONFIG = {
 
 type DocType = 'bank-statement' | 'loan' | 'investment' | 'insurance';
 
-function parseArgs(): { type: DocType; file: string; entity: string; account?: string; dryRun: boolean } {
+function parseArgs(): { type: DocType; file: string; entity: string; account?: string; ibkrAccount?: string; dryRun: boolean } {
   const args = process.argv.slice(2);
   const get = (flag: string) => {
     const i = args.indexOf(flag);
     return i !== -1 ? args[i + 1] : undefined;
   };
 
-  const type    = get('--type') as DocType | undefined;
-  const file    = get('--file');
-  const entity  = get('--entity') ?? CONFIG.defaultEntityId;
-  const account = get('--account');
-  const dryRun  = args.includes('--dry-run');
+  const type        = get('--type') as DocType | undefined;
+  const file         = get('--file');
+  const entity       = get('--entity') ?? CONFIG.defaultEntityId;
+  const account      = get('--account');
+  const ibkrAccount  = get('--ibkr-account');
+  const dryRun       = args.includes('--dry-run');
 
   const valid: DocType[] = ['bank-statement', 'loan', 'investment', 'insurance'];
   if (!type || !valid.includes(type)) {
-    console.error(`Usage: node dist/extract.js --type <${valid.join('|')}> --file <path> [--entity <uuid>] [--account <uuid>] [--dry-run]`);
+    console.error(`Usage: node dist/extract.js --type <${valid.join('|')}> --file <path> [--entity <uuid>] [--account <uuid>] [--ibkr-account <id>] [--dry-run]`);
     process.exit(1);
   }
   if (!file) {
@@ -98,7 +107,7 @@ function parseArgs(): { type: DocType; file: string; entity: string; account?: s
     process.exit(1);
   }
 
-  return { type, file, entity, account, dryRun };
+  return { type, file, entity, account, ibkrAccount, dryRun };
 }
 
 // ── Text extraction ───────────────────────────────────────────────────────────
@@ -244,6 +253,222 @@ function parseTtcd(text: string): TtcdStatement | null {
   return { institution, asOfDate, holdings };
 }
 
+// ── Interactive Brokers Open Positions Flex Query pre-parser ─────────────────
+// Parses the CSV export of an Activity Flex Query scoped to the "Open Positions"
+// section (Summary level). Field selection expected (UI labels — exact CSV header
+// text varies by IBKR account/version, so matching is normalized and tolerant):
+//   Account ID, Symbol, Description, Asset Class, Currency, FX Rate To Base,
+//   Quantity, Mark Price, Position Value, Cost Basis Price, Cost Basis Money,
+//   Unrealized P/L, Report Date
+//
+// Returns null if the text doesn't look like an IBKR Flex CSV.
+
+interface IbkrHolding {
+  accountId: string | null;
+  symbol: string;
+  description: string;
+  assetClass: string;
+  currency: string;
+  quantity: number;
+  markPrice: number | null;
+  positionValue: number | null;
+  costBasisPrice: number | null;
+  costBasisMoney: number | null;
+  unrealizedPnl: number | null;
+  reportDate: string | null;
+}
+
+interface IbkrStatement {
+  holdings: IbkrHolding[];
+}
+
+interface IbkrCashBalance {
+  accountId:  string | null;
+  fxCurrency: string;
+  quantity:   number;
+  value:      number | null;
+  reportDate: string | null;
+}
+
+interface IbkrForexStatement {
+  balances: IbkrCashBalance[];
+}
+
+// Minimal RFC4180-ish CSV line splitter — handles quoted fields containing commas.
+function splitCsvLine(line: string): string[] {
+  const out: string[] = [];
+  let cur = '';
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (line[i + 1] === '"') { cur += '"'; i++; }
+        else inQuotes = false;
+      } else cur += ch;
+    } else {
+      if (ch === '"') inQuotes = true;
+      else if (ch === ',') { out.push(cur); cur = ''; }
+      else cur += ch;
+    }
+  }
+  out.push(cur);
+  return out;
+}
+
+const normalizeHeader = (h: string): string => h.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+// Each logical field maps to a set of normalized header aliases (covers both the
+// UI label and the internal Flex field name, which differ across IBKR versions).
+const IBKR_FIELD_ALIASES: Record<string, string[]> = {
+  accountId:      ['accountid', 'clientaccountid', 'acctid'],
+  symbol:         ['symbol'],
+  description:    ['description'],
+  assetClass:     ['assetclass'],
+  currency:       ['currency'],
+  quantity:       ['quantity', 'position'],
+  markPrice:      ['markprice'],
+  positionValue:  ['positionvalue'],
+  costBasisPrice: ['costbasisprice'],
+  costBasisMoney: ['costbasismoney'],
+  unrealizedPnl:  ['fifopnlunrealized', 'unrealizedpl', 'unrealizedp_l'],
+  reportDate:     ['reportdate'],
+};
+
+const IBKR_FOREX_FIELD_ALIASES: Record<string, string[]> = {
+  accountId:  ['accountid', 'clientaccountid', 'acctid'],
+  fxCurrency: ['fxcurrency'],
+  quantity:   ['quantity'],
+  value:      ['value'],
+  reportDate: ['reportdate'],
+};
+
+function parseIbkrForexBalances(text: string): IbkrForexStatement | null {
+  const lines = text.split(/\r?\n/).filter(l => l.trim().length > 0);
+
+  // Find a header row that has 'fxcurrency' and 'quantity' but NOT 'symbol' or 'markprice'
+  // (to avoid confusing with the Open Positions header).
+  let headerIdx = -1;
+  let headerCols: string[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const cols = splitCsvLine(lines[i]).map(normalizeHeader);
+    if (cols.includes('fxcurrency') && cols.includes('quantity') && !cols.includes('symbol') && !cols.includes('markprice')) {
+      headerIdx = i;
+      headerCols = cols;
+      break;
+    }
+  }
+  if (headerIdx === -1) return null;
+
+  const colIndex: Record<string, number> = {};
+  for (const [field, aliases] of Object.entries(IBKR_FOREX_FIELD_ALIASES)) {
+    const idx = headerCols.findIndex(c => aliases.includes(c));
+    if (idx !== -1) colIndex[field] = idx;
+  }
+  if (colIndex.fxCurrency === undefined || colIndex.quantity === undefined) return null;
+
+  const parseNum = (s: string | undefined): number | null => {
+    if (s === undefined || s.trim() === '') return null;
+    const n = parseFloat(s.replace(/,/g, ''));
+    return isNaN(n) ? null : n;
+  };
+
+  const balances: IbkrCashBalance[] = [];
+  for (let i = headerIdx + 1; i < lines.length; i++) {
+    const cols      = splitCsvLine(lines[i]);
+    const fxCurrency = colIndex.fxCurrency !== undefined ? (cols[colIndex.fxCurrency] ?? '').trim().toUpperCase() : '';
+    // Skip totals, summaries, and blank currency fields
+    if (!fxCurrency || /^(total|base_summary)$/i.test(fxCurrency)) continue;
+    // Stop if we hit another section's header (non-numeric quantity)
+    const quantity  = parseNum(colIndex.quantity !== undefined ? cols[colIndex.quantity] : undefined);
+    if (quantity === null || quantity === 0) continue;
+
+    balances.push({
+      accountId:  colIndex.accountId  !== undefined ? (cols[colIndex.accountId]  ?? '').trim() || null : null,
+      fxCurrency,
+      quantity,
+      value:      colIndex.value      !== undefined ? parseNum(cols[colIndex.value])       : null,
+      reportDate: colIndex.reportDate !== undefined ? (cols[colIndex.reportDate]  ?? '').trim() || null : null,
+    });
+  }
+
+  if (balances.length === 0) return null;
+  return { balances };
+}
+
+function parseIbkrPositions(text: string): IbkrStatement | null {
+  const lines = text.split(/\r?\n/).filter(l => l.trim().length > 0);
+  if (lines.length < 2) return null;
+
+  // Find the header row: the first line whose normalized fields contain both
+  // "symbol" and ("quantity" or "position") and "markprice".
+  let headerIdx = -1;
+  let headerCols: string[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const cols = splitCsvLine(lines[i]).map(normalizeHeader);
+    if (cols.includes('symbol') && (cols.includes('quantity') || cols.includes('position')) && cols.includes('markprice')) {
+      headerIdx = i;
+      headerCols = cols;
+      break;
+    }
+  }
+  if (headerIdx === -1) return null;
+
+  // Build column index lookup per logical field.
+  const colIndex: Record<string, number> = {};
+  for (const [field, aliases] of Object.entries(IBKR_FIELD_ALIASES)) {
+    const idx = headerCols.findIndex(c => aliases.includes(c));
+    if (idx !== -1) colIndex[field] = idx;
+  }
+  if (colIndex.symbol === undefined || colIndex.quantity === undefined) return null;
+
+  const parseNum = (s: string | undefined): number | null => {
+    if (s === undefined || s.trim() === '') return null;
+    const n = parseFloat(s.replace(/,/g, ''));
+    return isNaN(n) ? null : n;
+  };
+
+  const holdings: IbkrHolding[] = [];
+  for (let i = headerIdx + 1; i < lines.length; i++) {
+    const cols = splitCsvLine(lines[i]);
+    // Skip Flex "Total"/summary rows and rows that don't have a usable symbol.
+    const symbol = colIndex.symbol !== undefined ? (cols[colIndex.symbol] ?? '').trim() : '';
+    if (!symbol || /^total/i.test(symbol)) continue;
+
+    const quantity = parseNum(colIndex.quantity !== undefined ? cols[colIndex.quantity] : undefined);
+    if (quantity === null) continue;
+
+    holdings.push({
+      accountId:      colIndex.accountId      !== undefined ? (cols[colIndex.accountId] ?? '').trim() || null : null,
+      symbol,
+      description:    colIndex.description    !== undefined ? (cols[colIndex.description] ?? '').trim() || symbol : symbol,
+      assetClass:     colIndex.assetClass      !== undefined ? (cols[colIndex.assetClass] ?? '').trim().toUpperCase() : 'STK',
+      currency:       colIndex.currency        !== undefined ? (cols[colIndex.currency] ?? '').trim().toUpperCase() || 'USD' : 'USD',
+      quantity,
+      markPrice:      colIndex.markPrice       !== undefined ? parseNum(cols[colIndex.markPrice])      : null,
+      positionValue:  colIndex.positionValue   !== undefined ? parseNum(cols[colIndex.positionValue])  : null,
+      costBasisPrice: colIndex.costBasisPrice  !== undefined ? parseNum(cols[colIndex.costBasisPrice]) : null,
+      costBasisMoney: colIndex.costBasisMoney  !== undefined ? parseNum(cols[colIndex.costBasisMoney]) : null,
+      unrealizedPnl:  colIndex.unrealizedPnl   !== undefined ? parseNum(cols[colIndex.unrealizedPnl])  : null,
+      reportDate:     colIndex.reportDate      !== undefined ? (cols[colIndex.reportDate] ?? '').trim() || null : null,
+    });
+  }
+
+  if (holdings.length === 0) return null;
+  return { holdings };
+}
+
+// Maps IBKR's AssetClass code to a fin_investments investment_type. Derivative/
+// complex instrument classes (options, futures, warrants, etc.) are intentionally
+// left unmapped — those rows are skipped on import rather than mis-tagged.
+const IBKR_ASSET_CLASS_MAP: Record<string, string> = {
+  STK:  'EQUITY',
+  ETF:  'ETF',
+  FUND: 'MUTUAL_FUND',
+  BOND: 'BOND',
+  CASH: 'CASH_EQUIVALENT',
+};
+
 // ── Keycloak auth (Resource Owner Password Credentials) ──────────────────────
 
 let cachedToken: { access_token: string; expires_at: number } | null = null;
@@ -301,6 +526,31 @@ async function apiPost(endpoint: string, body: unknown): Promise<unknown> {
     throw new Error(`API ${endpoint} failed (${res.status}): ${data.error ?? JSON.stringify(data)}`);
   }
   return data.data;
+}
+
+async function apiGet(endpoint: string): Promise<{ ok: boolean; data?: unknown; status: number }> {
+  const token = await getToken();
+  const url   = `${CONFIG.apiUrl}/api/v1${endpoint}`;
+
+  const res = await fetch(url, {
+    method:  'GET',
+    headers: { 'Authorization': `Bearer ${token}` },
+  });
+  const data = await res.json() as { success: boolean; data?: unknown; error?: string };
+  return { ok: res.ok && data.success, data: data.data, status: res.status };
+}
+
+// Looks up the latest TTD rate for a 3-letter currency via /finance/fx-rates/:currency/latest.
+// Returns 1 for TTD itself, or null if no rate is on file (caller should warn and skip conversion).
+const fxRateCache = new Map<string, number | null>();
+async function getLatestTtdRate(currency: string): Promise<number | null> {
+  if (currency === 'TTD') return 1;
+  if (fxRateCache.has(currency)) return fxRateCache.get(currency)!;
+  const resp = await apiGet(`/finance/fx-rates/${currency}/latest`);
+  const rate = resp.ok ? Number((resp.data as { rate_to_ttd?: unknown } | undefined)?.rate_to_ttd ?? NaN) : NaN;
+  const result = !isNaN(rate) && rate > 0 ? rate : null;
+  fxRateCache.set(currency, result);
+  return result;
 }
 
 // ── Ollama prompts ────────────────────────────────────────────────────────────
@@ -503,9 +753,107 @@ async function handleLoan(extracted: unknown, args: ReturnType<typeof parseArgs>
   console.log(`  ✓ Loan created:`, (result as Record<string, unknown>)['id']);
 }
 
-async function handleInvestment(extracted: unknown, args: ReturnType<typeof parseArgs>, ttcd?: TtcdStatement): Promise<void> {
+async function handleInvestment(
+  extracted: unknown,
+  args: ReturnType<typeof parseArgs>,
+  ttcd?: TtcdStatement,
+  ibkr?: IbkrStatement,
+  ibkrForex?: IbkrForexStatement,
+): Promise<void> {
   let d: { institution_name?: string; as_of_date?: string; holdings?: Record<string, unknown>[] };
   let holdings: Record<string, unknown>[];
+
+  if (ibkr) {
+    const ts = Date.now();
+    const items: Record<string, unknown>[] = [];
+    let skipped = 0;
+
+    for (let i = 0; i < ibkr.holdings.length; i++) {
+      const h = ibkr.holdings[i];
+      const investmentType = IBKR_ASSET_CLASS_MAP[h.assetClass];
+      if (!investmentType) {
+        console.warn(`  ⚠  Skipping ${h.symbol} — unmapped asset class "${h.assetClass}" (likely a derivative; not tracked in fin_investments)`);
+        skipped++; continue;
+      }
+      if (h.quantity <= 0) {
+        console.warn(`  ⚠  Skipping ${h.symbol} — non-positive quantity (${h.quantity}; short or closed position)`);
+        skipped++; continue;
+      }
+
+      const rate = await getLatestTtdRate(h.currency);
+      if (rate === null) {
+        console.warn(`  ⚠  No FX rate on file for ${h.currency} — current_value_ttd/unrealised_gain_ttd will be left blank for ${h.symbol}. Run POST /finance/fx-rates/sync or add a manual rate, then fix up via the Update modal.`);
+      }
+
+      const accountTag = h.accountId ? ` (${h.accountId})` : '';
+      items.push({
+        owner_entity_id:       args.entity,
+        account_id:            args.account,
+        investment_type:       investmentType,
+        asset_name:            h.description.slice(0, 200),
+        ticker_symbol:         h.symbol.slice(0, 20),
+        units_held:            h.quantity,
+        average_cost_per_unit: h.costBasisPrice && h.costBasisPrice > 0 ? h.costBasisPrice : undefined,
+        current_price:         h.markPrice && h.markPrice > 0 ? h.markPrice : undefined,
+        currency:              h.currency,
+        current_value_ttd:     rate !== null && h.positionValue !== null ? Math.round(h.positionValue * rate * 100) / 100 : undefined,
+        unrealised_gain_ttd:   rate !== null && h.unrealizedPnl !== null ? Math.round(h.unrealizedPnl * rate * 100) / 100 : undefined,
+        institution_name:      `Interactive Brokers${accountTag}`,
+        notes:                 h.reportDate ? `Imported from IBKR Open Positions Flex Query (Report Date: ${h.reportDate})` : 'Imported from IBKR Open Positions Flex Query',
+        idempotency_key:       `local-import:investment:ibkr:${h.symbol}:${i}:${ts}`,
+      });
+    }
+
+    // Append cash balances from Forex Balances section (if present in the same CSV)
+    if (ibkrForex) {
+      const filteredBalances = args.ibkrAccount
+        ? ibkrForex.balances.filter(b => b.accountId === args.ibkrAccount)
+        : ibkrForex.balances;
+
+      for (let i = 0; i < filteredBalances.length; i++) {
+        const b    = filteredBalances[i];
+        const rate = await getLatestTtdRate(b.fxCurrency);
+        if (rate === null) {
+          console.warn(`  ⚠  No FX rate for ${b.fxCurrency} — current_value_ttd will be blank for cash balance. Sync FX rates and update via Investments panel.`);
+        }
+        const accountTag = b.accountId ? ` (${b.accountId})` : '';
+        items.push({
+          owner_entity_id:   args.entity,
+          account_id:        args.account,
+          investment_type:   'CASH_EQUIVALENT',
+          asset_name:        `${b.fxCurrency} Cash`,
+          ticker_symbol:     b.fxCurrency,
+          units_held:        b.quantity,
+          current_price:     1,
+          currency:          b.fxCurrency,
+          current_value_ttd: rate !== null && b.value !== null ? Math.round(b.value * rate * 100) / 100
+                           : rate !== null ? Math.round(b.quantity * rate * 100) / 100
+                           : undefined,
+          institution_name:  `Interactive Brokers${accountTag}`,
+          notes:             b.reportDate ? `Cash balance from IBKR Forex Balances (Report Date: ${b.reportDate})` : 'Cash balance from IBKR Forex Balances',
+          idempotency_key:   `local-import:investment:ibkr:cash:${b.fxCurrency}:${i}:${ts}`,
+        });
+      }
+      if (filteredBalances.length > 0) {
+        console.log(`  + ${filteredBalances.length} cash balance(s) from Forex Balances section`);
+      }
+    }
+
+    if (items.length === 0) {
+      console.error('  No importable holdings after filtering. Check warnings above.');
+      process.exit(1);
+    }
+
+    console.log(`  ${items.length} holding(s) to import, ${skipped} skipped`);
+    items.forEach((item, i) =>
+      console.log(`    [${i + 1}] ${item.ticker_symbol} — ${item.asset_name} | ${item.units_held} units, ${item.currency} ${item.current_price ?? '?'} → TTD ${item.current_value_ttd ?? '(no FX rate)'}`));
+
+    if (args.dryRun) { console.log('\nDRY RUN — skipping API post.'); return; }
+
+    const result = await apiPost('/finance/investments/import', { items }) as unknown[];
+    console.log(`  ✓ ${result.length} investment record(s) created`);
+    return;
+  }
 
   if (ttcd) {
     // TTCD path — names already clean, skip stripTicker / parseNum, build items directly
@@ -627,7 +975,8 @@ async function main(): Promise<void> {
   console.log(`Type:    ${args.type}`);
   console.log(`File:    ${args.file}`);
   console.log(`Entity:  ${args.entity}`);
-  if (args.account) console.log(`Account: ${args.account}`);
+  if (args.account)     console.log(`Account: ${args.account}`);
+  if (args.ibkrAccount) console.log(`IBKR Acct Filter: ${args.ibkrAccount}`);
   if (args.dryRun)  console.log(`Mode:    DRY RUN`);
   console.log(`========================================\n`);
 
@@ -646,8 +995,11 @@ async function main(): Promise<void> {
     throw new Error('unreachable');
   }
 
-  // For investment PDFs try the TTCD programmatic pre-parser first (100% reliable)
+  // For investment statements, try the programmatic pre-parsers first (100% reliable,
+  // no Ollama): TTCD/TTSE depository PDF layout, then Interactive Brokers Flex CSV.
   let ttcdResult: TtcdStatement | null = null;
+  let ibkrResult: IbkrStatement | null = null;
+  let ibkrForexResult: IbkrForexStatement | null = null;
   if (args.type === 'investment') {
     ttcdResult = parseTtcd(text);
     if (ttcdResult) {
@@ -656,11 +1008,41 @@ async function main(): Promise<void> {
       console.log(`  As-of date:  ${ttcdResult.asOfDate ?? '(not found)'}`);
       ttcdResult.holdings.forEach((h, i) =>
         console.log(`    [${i + 1}] ${h.ticker} — ${h.name} | ${h.units.toLocaleString()} units @ TTD ${h.price ?? '?'} = TTD ${h.value.toLocaleString('en', { minimumFractionDigits: 2 })}`));
+    } else {
+      ibkrResult = parseIbkrPositions(text);
+      if (ibkrResult) {
+        console.log(`\n  Interactive Brokers Flex CSV detected — ${ibkrResult.holdings.length} open position(s) parsed programmatically`);
+
+        if (args.ibkrAccount) {
+          const allAccountIds = [...new Set(ibkrResult.holdings.map(h => h.accountId).filter((a): a is string => !!a))];
+          const filtered = ibkrResult.holdings.filter(h => h.accountId === args.ibkrAccount);
+          if (filtered.length === 0) {
+            console.error(`  No holdings found for IBKR account "${args.ibkrAccount}". Accounts present in this file: ${allAccountIds.join(', ') || '(none — AccountID column missing from export)'}`);
+            process.exit(1);
+          }
+          console.log(`  Filtered to IBKR account ${args.ibkrAccount}: ${filtered.length} of ${ibkrResult.holdings.length} holding(s) (other accounts in file: ${allAccountIds.filter(a => a !== args.ibkrAccount).join(', ') || 'none'})`);
+          ibkrResult = { holdings: filtered };
+        }
+
+        ibkrResult.holdings.forEach((h, i) =>
+          console.log(`    [${i + 1}] ${h.symbol} — ${h.description} | ${h.quantity.toLocaleString()} units @ ${h.currency} ${h.markPrice ?? '?'} (asset class ${h.assetClass})`));
+
+        // Also try to parse a Forex Balances section in the same CSV
+        ibkrForexResult = parseIbkrForexBalances(text);
+        if (ibkrForexResult) {
+          const cashRows = args.ibkrAccount
+            ? ibkrForexResult.balances.filter(b => b.accountId === args.ibkrAccount)
+            : ibkrForexResult.balances;
+          console.log(`\n  Forex Balances section detected — ${cashRows.length} cash balance(s):`);
+          cashRows.forEach(b =>
+            console.log(`    ${b.fxCurrency}  ${b.quantity.toLocaleString('en', { minimumFractionDigits: 2 })}${b.value !== null ? `  (base value: ${b.value.toLocaleString('en', { minimumFractionDigits: 2 })})` : ''}`));
+        }
+      }
     }
   }
 
   let extracted: unknown = null;
-  if (!ttcdResult) {
+  if (!ttcdResult && !ibkrResult) {
     extracted = await callOllama(args.type, text);
     console.log(`\nOllama response:`);
     console.log(JSON.stringify(extracted, null, 2));
@@ -673,10 +1055,10 @@ async function main(): Promise<void> {
 
   console.log('\nPosting to JAG API …');
   switch (args.type) {
-    case 'bank-statement': await handleBankStatement(extracted, args);                        break;
-    case 'loan':           await handleLoan(extracted, args);                                 break;
-    case 'investment':     await handleInvestment(extracted, args, ttcdResult ?? undefined);  break;
-    case 'insurance':      await handleInsurance(extracted, args);                            break;
+    case 'bank-statement': await handleBankStatement(extracted, args);                                          break;
+    case 'loan':           await handleLoan(extracted, args);                                                   break;
+    case 'investment':     await handleInvestment(extracted, args, ttcdResult ?? undefined, ibkrResult ?? undefined, ibkrForexResult ?? undefined); break;
+    case 'insurance':      await handleInsurance(extracted, args);                                              break;
   }
 
   console.log('\n✓ Done. File remains on local hard drive.');

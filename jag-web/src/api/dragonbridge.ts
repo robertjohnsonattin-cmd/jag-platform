@@ -74,7 +74,7 @@ export const dbApi = {
   createClient: (data: {
     client_type: 'B2B' | 'B2C'; name: string; company_name?: string;
     contact_name?: string; contact_email?: string; contact_phone?: string;
-    address?: string; pricing_tier_id?: string; notes?: string;
+    address?: string; pricing_tier_id?: string; notes?: string; crm_contact_id?: string | null;
   }): Promise<DBClient> =>
     client.post('/dragonbridge/clients', data),
 

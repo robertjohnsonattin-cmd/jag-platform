@@ -138,6 +138,20 @@ function LogInteractionModal({
 
 // ── Add Company Modal ─────────────────────────────────────────────────────────
 
+const COMPANY_FIELDS = (t: (k: string) => string) => [
+  { label: t('crm.companyNameStar'), key: 'name'          as const, placeholder: 'Acme Ltd' },
+  { label: t('crm.industry'),        key: 'industry'      as const, placeholder: 'Construction' },
+  { label: t('crm.countryCode'),     key: 'country'       as const, placeholder: 'TT' },
+  { label: t('crm.phone'),           key: 'phone'         as const, placeholder: '+1 868 000 0000' },
+  { label: t('crm.email'),           key: 'email'         as const, placeholder: 'info@acme.com' },
+  { label: t('crm.website'),         key: 'website'       as const, placeholder: 'https://acme.com' },
+  { label: t('crm.addressLine1'),    key: 'address_line1' as const, placeholder: '12 Main Street' },
+  { label: t('crm.addressLine2'),    key: 'address_line2' as const, placeholder: 'Suite 4' },
+  { label: t('crm.city'),            key: 'city'          as const, placeholder: 'Port of Spain' },
+  { label: t('crm.stateProvince'),   key: 'state_province' as const, placeholder: 'St George' },
+  { label: t('crm.postalCode'),      key: 'postal_code'   as const, placeholder: '' },
+]
+
 function AddCompanyModal({ onClose }: { onClose: () => void }) {
   const { t } = useTranslation()
   const qc = useQueryClient()
@@ -148,37 +162,20 @@ function AddCompanyModal({ onClose }: { onClose: () => void }) {
     setForm(f => ({ ...f, [k]: e.target.value }))
 
   const mutation = useMutation({
-    mutationFn: () => crmApi.createCompany({
-      ...form,
-      industry: form.industry || undefined,
-      phone: form.phone || undefined,
-      email: form.email || undefined,
-      website: form.website || undefined,
-      notes: form.notes || undefined,
-    }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['crm-companies'] })
-      onClose()
-    },
+    mutationFn: () => crmApi.createCompany({ ...form }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['crm-companies'] }); onClose() },
     onError: (e: Error) => setError(e.message),
   })
 
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
-      <div className="bg-slate-800 border border-slate-700 rounded-lg w-full max-w-md shadow-xl">
-        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-700">
+      <div className="bg-slate-800 border border-slate-700 rounded-lg w-full max-w-md shadow-xl max-h-[90vh] flex flex-col">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-700 shrink-0">
           <h2 className="text-white font-semibold">{t('crm.addCompany')}</h2>
           <button onClick={onClose} className="text-slate-400 hover:text-white text-xl leading-none">&times;</button>
         </div>
-        <div className="px-5 py-4 space-y-3">
-          {[
-            { label: t('crm.companyNameStar'), key: 'name' as const, placeholder: 'Acme Ltd' },
-            { label: t('crm.industry'), key: 'industry' as const, placeholder: 'Construction' },
-            { label: t('crm.countryCode'), key: 'country' as const, placeholder: 'TT' },
-            { label: t('crm.phone'), key: 'phone' as const, placeholder: '+1 868 000 0000' },
-            { label: t('crm.email'), key: 'email' as const, placeholder: 'info@acme.com' },
-            { label: t('crm.website'), key: 'website' as const, placeholder: 'https://acme.com' },
-          ].map(({ label, key, placeholder }) => (
+        <div className="px-5 py-4 space-y-3 overflow-y-auto">
+          {COMPANY_FIELDS(t).map(({ label, key, placeholder }) => (
             <div key={key}>
               <label className="block text-slate-400 text-xs mb-1">{label}</label>
               <input
@@ -192,17 +189,87 @@ function AddCompanyModal({ onClose }: { onClose: () => void }) {
           ))}
           {error && <p className="text-red-400 text-sm">{error}</p>}
         </div>
-        <div className="flex justify-end gap-3 px-5 py-4 border-t border-slate-700">
-          <button onClick={onClose} className="px-4 py-2 rounded text-sm text-slate-300 hover:text-white transition-colors">
-            {t('common.cancel')}
-          </button>
+        <div className="flex justify-end gap-3 px-5 py-4 border-t border-slate-700 shrink-0">
+          <button onClick={onClose} className="px-4 py-2 rounded text-sm text-slate-300 hover:text-white transition-colors">{t('common.cancel')}</button>
           <button
             onClick={() => mutation.mutate()}
             disabled={mutation.isPending || !form.name.trim()}
             className="px-4 py-2 rounded text-sm bg-orange-600 hover:bg-orange-500 text-white disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-          >
-            {mutation.isPending ? t('common.saving') : t('crm.addCompany')}
-          </button>
+          >{mutation.isPending ? t('common.saving') : t('crm.addCompany')}</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function EditCompanyModal({ company, onClose }: { company: Company; onClose: () => void }) {
+  const { t } = useTranslation()
+  const qc = useQueryClient()
+  const [form, setForm] = useState<CreateCompanyPayload>({
+    name:          company.name,
+    industry:      company.industry ?? '',
+    country:       company.country,
+    phone:         company.phone ?? '',
+    email:         company.email ?? '',
+    website:       company.website ?? '',
+    address_line1: company.address_line1 ?? '',
+    address_line2: company.address_line2 ?? '',
+    city:          company.city ?? '',
+    state_province:company.state_province ?? '',
+    postal_code:   company.postal_code ?? '',
+  })
+  const [error, setError] = useState<string | null>(null)
+
+  const set = (k: keyof CreateCompanyPayload) => (e: React.ChangeEvent<HTMLInputElement>) =>
+    setForm(f => ({ ...f, [k]: e.target.value }))
+
+  const mutation = useMutation({
+    mutationFn: () => crmApi.updateCompany(company.id, {
+      name:          form.name.trim(),
+      industry:      form.industry?.trim() || null,
+      country:       form.country || 'TT',
+      phone:         form.phone?.trim() || null,
+      email:         form.email?.trim() || null,
+      website:       form.website?.trim() || null,
+      address_line1: form.address_line1?.trim() || null,
+      address_line2: form.address_line2?.trim() || null,
+      city:          form.city?.trim() || null,
+      state_province:form.state_province?.trim() || null,
+      postal_code:   form.postal_code?.trim() || null,
+    }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['crm-companies'] }); onClose() },
+    onError: (e: Error) => setError(e.message),
+  })
+
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+      <div className="bg-slate-800 border border-slate-700 rounded-lg w-full max-w-md shadow-xl max-h-[90vh] flex flex-col">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-700 shrink-0">
+          <h2 className="text-white font-semibold">{t('crm.editCompany', 'Edit Company')}</h2>
+          <button onClick={onClose} className="text-slate-400 hover:text-white text-xl leading-none">&times;</button>
+        </div>
+        <div className="px-5 py-4 space-y-3 overflow-y-auto">
+          {COMPANY_FIELDS(t).map(({ label, key, placeholder }) => (
+            <div key={key}>
+              <label className="block text-slate-400 text-xs mb-1">{label}</label>
+              <input
+                type="text"
+                value={(form[key] as string) ?? ''}
+                onChange={set(key)}
+                placeholder={placeholder}
+                className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-white text-sm"
+              />
+            </div>
+          ))}
+          {error && <p className="text-red-400 text-sm">{error}</p>}
+        </div>
+        <div className="flex justify-end gap-3 px-5 py-4 border-t border-slate-700 shrink-0">
+          <button onClick={onClose} className="px-4 py-2 rounded text-sm text-slate-300 hover:text-white transition-colors">{t('common.cancel')}</button>
+          <button
+            onClick={() => mutation.mutate()}
+            disabled={mutation.isPending || !form.name.trim()}
+            className="px-4 py-2 rounded text-sm bg-orange-600 hover:bg-orange-500 text-white disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >{mutation.isPending ? t('common.saving') : t('common.save')}</button>
         </div>
       </div>
     </div>
@@ -214,18 +281,25 @@ function AddCompanyModal({ onClose }: { onClose: () => void }) {
 function CompanyPanel({
   company,
   onClose,
+  onEdited,
 }: {
   company: Company
   onClose: () => void
+  onEdited?: (updated: Company) => void
 }) {
   const { t } = useTranslation()
+  const qc = useQueryClient()
   const [logContact, setLogContact] = useState<Contact | null>(null)
+  const [editingContact, setEditingContact] = useState<Contact | null>(null)
+  const [addingContact, setAddingContact] = useState(false)
+  const [editingCompany, setEditingCompany] = useState(false)
   const [contactSearch, setContactSearch] = useState('')
   const [contactPage, setContactPage] = useState(1)
 
   const { data, isLoading } = useQuery({
     queryKey: ['crm-contacts', company.id, contactSearch, contactPage],
     queryFn: () => crmApi.getContacts({ company_id: company.id, search: contactSearch || undefined, page: contactPage, limit: 20 }),
+    staleTime: 0,
   })
 
   const contacts = data?.contacts ?? []
@@ -240,41 +314,61 @@ function CompanyPanel({
             <h2 className="text-white font-semibold truncate">{company.name}</h2>
             <p className="text-slate-400 text-sm mt-0.5">
               {company.industry ?? t('crm.noIndustry')} · {company.country}
-              {company.contact_count > 0 && ` · ${t('crm.contactCount', { count: company.contact_count })}`}
+              {Number(company.contact_count) > 0 && ` · ${t('crm.contactCount', { count: Number(company.contact_count) })}`}
             </p>
           </div>
-          <button onClick={onClose} className="text-slate-400 hover:text-white text-xl leading-none shrink-0">&times;</button>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={() => setEditingCompany(true)}
+              className="px-2.5 py-1 rounded text-xs bg-slate-700 hover:bg-slate-600 text-slate-300 hover:text-white transition-colors"
+            >{t('common.edit')}</button>
+            <button onClick={onClose} className="text-slate-400 hover:text-white text-xl leading-none">&times;</button>
+          </div>
         </div>
 
         {/* Company info */}
         <div className="px-5 py-3 border-b border-slate-700 space-y-1.5">
           {company.email && (
             <div className="flex items-center gap-2 text-sm">
-              <span className="text-slate-500 w-16 shrink-0">{t('crm.email')}</span>
+              <span className="text-slate-500 w-20 shrink-0">{t('crm.email')}</span>
               <a href={`mailto:${company.email}`} className="text-orange-400 hover:text-orange-300 truncate">{company.email}</a>
             </div>
           )}
           {company.phone && (
             <div className="flex items-center gap-2 text-sm">
-              <span className="text-slate-500 w-16 shrink-0">{t('crm.phone')}</span>
+              <span className="text-slate-500 w-20 shrink-0">{t('crm.phone')}</span>
               <span className="text-slate-300">{company.phone}</span>
             </div>
           )}
           {company.website && (
             <div className="flex items-center gap-2 text-sm">
-              <span className="text-slate-500 w-16 shrink-0">{t('crm.website')}</span>
+              <span className="text-slate-500 w-20 shrink-0">{t('crm.website')}</span>
               <span className="text-slate-300 truncate">{company.website}</span>
             </div>
           )}
+          {(company.address_line1 || company.city) && (
+            <div className="flex items-start gap-2 text-sm">
+              <span className="text-slate-500 w-20 shrink-0">{t('crm.addressLine1', 'Address')}</span>
+              <span className="text-slate-300 text-xs leading-relaxed">
+                {[company.address_line1, company.address_line2, company.city, company.state_province, company.postal_code].filter(Boolean).join(', ')}
+              </span>
+            </div>
+          )}
           <div className="flex items-center gap-2 text-sm">
-            <span className="text-slate-500 w-16 shrink-0">{t('crm.added')}</span>
+            <span className="text-slate-500 w-20 shrink-0">{t('crm.added')}</span>
             <span className="text-slate-400">{fmtDate(company.created_at)}</span>
           </div>
         </div>
 
         {/* Contacts */}
         <div className="px-5 py-3 border-b border-slate-700">
-          <p className="text-slate-400 text-xs font-medium uppercase tracking-wide mb-2">{t('crm.contactsSection')}</p>
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-slate-400 text-xs font-medium uppercase tracking-wide">{t('crm.contactsSection')}</p>
+            <button
+              onClick={() => setAddingContact(true)}
+              className="px-2 py-1 rounded text-xs bg-orange-600 hover:bg-orange-500 text-white"
+            >+ {t('crm.addContact', 'Add Contact')}</button>
+          </div>
           <input
             type="text"
             placeholder={t('crm.searchContacts')}
@@ -299,12 +393,16 @@ function CompanyPanel({
                 {c.email && <p className="text-slate-500 text-xs">{c.email}</p>}
                 {c.phone && <p className="text-slate-500 text-xs">{c.phone}</p>}
               </div>
-              <button
-                onClick={() => setLogContact(c)}
-                className="shrink-0 px-2.5 py-1 rounded text-xs bg-slate-700 hover:bg-slate-600 text-slate-300 hover:text-white transition-colors"
-              >
-                {t('crm.logShort')}
-              </button>
+              <div className="flex gap-1 shrink-0">
+                <button
+                  onClick={() => setEditingContact(c)}
+                  className="px-2.5 py-1 rounded text-xs bg-slate-700 hover:bg-slate-600 text-slate-300 hover:text-white transition-colors"
+                >{t('common.edit')}</button>
+                <button
+                  onClick={() => setLogContact(c)}
+                  className="px-2.5 py-1 rounded text-xs bg-slate-700 hover:bg-slate-600 text-slate-300 hover:text-white transition-colors"
+                >{t('crm.logShort')}</button>
+              </div>
             </div>
           ))}
         </div>
@@ -322,6 +420,22 @@ function CompanyPanel({
 
       {logContact && (
         <LogInteractionModal contact={logContact} onClose={() => setLogContact(null)} />
+      )}
+      {editingContact && (
+        <EditContactModal contact={editingContact} onClose={() => setEditingContact(null)} />
+      )}
+      {addingContact && (
+        <AddContactModal defaultCompanyId={company.id} onClose={() => setAddingContact(false)} />
+      )}
+      {editingCompany && (
+        <EditCompanyModal
+          company={company}
+          onClose={() => {
+            setEditingCompany(false)
+            qc.invalidateQueries({ queryKey: ['crm-companies'] })
+            onEdited?.(company)
+          }}
+        />
       )}
     </>
   )
@@ -383,7 +497,7 @@ function CompaniesTab() {
                     <p className="text-slate-400 text-xs mt-0.5">{co.industry ?? '—'} · {co.country}</p>
                   </div>
                   <span className="shrink-0 text-xs text-slate-500 mt-0.5">
-                    {t('crm.contactCount', { count: co.contact_count })}
+                    {t('crm.contactCount', { count: Number(co.contact_count) })}
                   </span>
                 </div>
                 {(co.email || co.phone) && (
@@ -432,103 +546,547 @@ function CompaniesTab() {
   )
 }
 
+// ── Contact form helpers ──────────────────────────────────────────────────────
+
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
+const waPhone = (p: string) => p.replace(/\D/g, '')
+
+// ── Add Contact Modal ─────────────────────────────────────────────────────────
+
+function AddContactModal({ defaultCompanyId, onClose }: { defaultCompanyId?: string; onClose: () => void }) {
+  const { t } = useTranslation()
+  const qc = useQueryClient()
+  const [form, setForm] = useState({
+    first_name: '', last_name: '', email: '', phone: '', phone2: '', role: '',
+    company_id: defaultCompanyId ?? '',
+    address_line1: '', address_line2: '', city: '', state_province: '', postal_code: '',
+    birthday: '', notes: '',
+  })
+  const [error, setError] = useState<string | null>(null)
+
+  const { data: companiesData } = useQuery({
+    queryKey: ['crm-companies-picker'],
+    queryFn: () => crmApi.getCompanies({ limit: 200 }),
+  })
+  const companies = companiesData?.companies ?? []
+  const sf = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => setForm(f => ({ ...f, [k]: e.target.value }))
+
+  const mutation = useMutation({
+    mutationFn: () => crmApi.createContact({
+      first_name:    form.first_name.trim(),
+      last_name:     form.last_name.trim(),
+      email:         form.email.trim() || undefined,
+      phone:         form.phone.trim() || undefined,
+      phone2:        form.phone2.trim() || undefined,
+      role:          form.role.trim() || undefined,
+      company_id:    form.company_id || undefined,
+      notes:         form.notes.trim() || undefined,
+      address_line1: form.address_line1.trim() || undefined,
+      address_line2: form.address_line2.trim() || undefined,
+      city:          form.city.trim() || undefined,
+      state_province:form.state_province.trim() || undefined,
+      postal_code:   form.postal_code.trim() || undefined,
+      birthday:      (form.birthday && DATE_RE.test(form.birthday)) ? form.birthday : undefined,
+    }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['crm-contacts'] })
+      if (defaultCompanyId) void qc.invalidateQueries({ queryKey: ['crm-companies'] })
+      onClose()
+    },
+    onError: (e: Error) => setError(e.message),
+  })
+
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+      <div className="bg-slate-800 border border-slate-700 rounded-lg w-full max-w-lg shadow-xl max-h-[90vh] flex flex-col">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-700 shrink-0">
+          <h2 className="text-white font-semibold">{t('crm.addContact')}</h2>
+          <button onClick={onClose} className="text-slate-400 hover:text-white text-xl leading-none">&times;</button>
+        </div>
+        <div className="px-5 py-4 space-y-3 overflow-y-auto">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-slate-400 text-xs mb-1">{t('crm.firstName')} *</label>
+              <input value={form.first_name} onChange={sf('first_name')} className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-white text-sm" />
+            </div>
+            <div>
+              <label className="block text-slate-400 text-xs mb-1">{t('crm.lastName')} *</label>
+              <input value={form.last_name} onChange={sf('last_name')} className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-white text-sm" />
+            </div>
+          </div>
+          <div>
+            <label className="block text-slate-400 text-xs mb-1">{t('crm.tabCompanies')}</label>
+            <select value={form.company_id} onChange={sf('company_id')} className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-white text-sm">
+              <option value="">— {t('crm.noCompany')} —</option>
+              {companies.map(co => <option key={co.id} value={co.id}>{co.name}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-slate-400 text-xs mb-1">{t('crm.role')}</label>
+            <input value={form.role} onChange={sf('role')} placeholder="Project Manager" className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-white text-sm" />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-slate-400 text-xs mb-1">{t('crm.landPhone')}</label>
+              <input value={form.phone} onChange={sf('phone')} placeholder="+1 868 000 0000" className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-white text-sm" />
+            </div>
+            <div>
+              <label className="block text-slate-400 text-xs mb-1">{t('crm.cellPhone')}</label>
+              <input value={form.phone2} onChange={sf('phone2')} placeholder="+1 868 000 0000" className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-white text-sm" />
+            </div>
+          </div>
+          <div>
+            <label className="block text-slate-400 text-xs mb-1">{t('crm.email')}</label>
+            <input type="email" value={form.email} onChange={sf('email')} placeholder="name@example.com" className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-white text-sm" />
+          </div>
+          <div>
+            <label className="block text-slate-400 text-xs mb-1">{t('crm.addressLine1')}</label>
+            <input value={form.address_line1} onChange={sf('address_line1')} placeholder="12 Main Street" className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-white text-sm" />
+          </div>
+          <div>
+            <label className="block text-slate-400 text-xs mb-1">{t('crm.addressLine2')}</label>
+            <input value={form.address_line2} onChange={sf('address_line2')} placeholder="Apt 3" className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-white text-sm" />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-slate-400 text-xs mb-1">{t('crm.city')}</label>
+              <input value={form.city} onChange={sf('city')} placeholder="Port of Spain" className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-white text-sm" />
+            </div>
+            <div>
+              <label className="block text-slate-400 text-xs mb-1">{t('crm.stateProvince')}</label>
+              <input value={form.state_province} onChange={sf('state_province')} placeholder="St George" className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-white text-sm" />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-slate-400 text-xs mb-1">{t('crm.postalCode')}</label>
+              <input value={form.postal_code} onChange={sf('postal_code')} className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-white text-sm" />
+            </div>
+            <div>
+              <label className="block text-slate-400 text-xs mb-1">{t('crm.birthday')}</label>
+              <input type="date" value={form.birthday} onChange={sf('birthday')} className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-white text-sm" />
+            </div>
+          </div>
+          <div>
+            <label className="block text-slate-400 text-xs mb-1">{t('crm.notes')}</label>
+            <textarea value={form.notes} onChange={sf('notes')} rows={2} className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-white text-sm resize-none" />
+          </div>
+          {error && <p className="text-red-400 text-xs">{error}</p>}
+        </div>
+        <div className="flex justify-end gap-2 px-5 py-3 border-t border-slate-700 shrink-0">
+          <button onClick={onClose} className="px-4 py-2 rounded text-sm text-slate-300 hover:text-white">{t('common.cancel')}</button>
+          <button
+            onClick={() => mutation.mutate()}
+            disabled={mutation.isPending || !form.first_name.trim() || !form.last_name.trim()}
+            className="px-4 py-2 rounded text-sm bg-orange-600 hover:bg-orange-500 text-white disabled:opacity-50"
+          >{mutation.isPending ? t('common.saving') : t('crm.addContact')}</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Edit Contact Modal ────────────────────────────────────────────────────────
+
+function EditContactModal({ contact, onClose }: { contact: Contact; onClose: () => void }) {
+  const { t } = useTranslation()
+  const qc = useQueryClient()
+  const [form, setForm] = useState({
+    first_name:    contact.first_name,
+    last_name:     contact.last_name,
+    email:         contact.email ?? '',
+    phone:         contact.phone ?? '',
+    phone2:        contact.phone2 ?? '',
+    role:          contact.role ?? '',
+    company_id:    contact.company_id ?? '',
+    notes:         contact.notes ?? '',
+    address_line1: contact.address_line1 ?? '',
+    address_line2: contact.address_line2 ?? '',
+    city:          contact.city ?? '',
+    state_province:contact.state_province ?? '',
+    postal_code:   contact.postal_code ?? '',
+    birthday:      contact.birthday ? contact.birthday.slice(0, 10) : '',
+  })
+  const [error, setError] = useState<string | null>(null)
+
+  const { data: companiesData } = useQuery({
+    queryKey: ['crm-companies-picker'],
+    queryFn: () => crmApi.getCompanies({ limit: 200 }),
+  })
+  const companies = companiesData?.companies ?? []
+  const sf = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => setForm(f => ({ ...f, [k]: e.target.value }))
+
+  const mutation = useMutation({
+    mutationFn: () => crmApi.updateContact(contact.id, {
+      first_name:    form.first_name.trim(),
+      last_name:     form.last_name.trim(),
+      email:         form.email.trim() || null,
+      phone:         form.phone.trim() || null,
+      phone2:        form.phone2.trim() || null,
+      role:          form.role.trim() || null,
+      company_id:    form.company_id || null,
+      notes:         form.notes.trim() || null,
+      address_line1: form.address_line1.trim() || null,
+      address_line2: form.address_line2.trim() || null,
+      city:          form.city.trim() || null,
+      state_province:form.state_province.trim() || null,
+      postal_code:   form.postal_code.trim() || null,
+      birthday:      (form.birthday && DATE_RE.test(form.birthday)) ? form.birthday : null,
+    }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['crm-contacts'] })
+      void qc.invalidateQueries({ queryKey: ['crm-companies'] })
+      onClose()
+    },
+    onError: (e: Error) => setError(e.message),
+  })
+
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+      <div className="bg-slate-800 border border-slate-700 rounded-lg w-full max-w-lg shadow-xl max-h-[90vh] flex flex-col">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-700 shrink-0">
+          <h2 className="text-white font-semibold">{t('crm.editContact')}</h2>
+          <button onClick={onClose} className="text-slate-400 hover:text-white text-xl leading-none">&times;</button>
+        </div>
+        <div className="px-5 py-4 space-y-3 overflow-y-auto">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-slate-400 text-xs mb-1">{t('crm.firstName')} *</label>
+              <input value={form.first_name} onChange={sf('first_name')} className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-white text-sm" />
+            </div>
+            <div>
+              <label className="block text-slate-400 text-xs mb-1">{t('crm.lastName')} *</label>
+              <input value={form.last_name} onChange={sf('last_name')} className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-white text-sm" />
+            </div>
+          </div>
+          <div>
+            <label className="block text-slate-400 text-xs mb-1">{t('crm.tabCompanies')}</label>
+            <select value={form.company_id} onChange={sf('company_id')} className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-white text-sm">
+              <option value="">— {t('crm.noCompany')} —</option>
+              {companies.map(co => <option key={co.id} value={co.id}>{co.name}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-slate-400 text-xs mb-1">{t('crm.role')}</label>
+            <input value={form.role} onChange={sf('role')} className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-white text-sm" />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-slate-400 text-xs mb-1">{t('crm.landPhone')}</label>
+              <input value={form.phone} onChange={sf('phone')} placeholder="+1 868 000 0000" className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-white text-sm" />
+            </div>
+            <div>
+              <label className="block text-slate-400 text-xs mb-1">{t('crm.cellPhone')}</label>
+              <input value={form.phone2} onChange={sf('phone2')} placeholder="+1 868 000 0000" className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-white text-sm" />
+            </div>
+          </div>
+          <div>
+            <label className="block text-slate-400 text-xs mb-1">{t('crm.email')}</label>
+            <input type="email" value={form.email} onChange={sf('email')} className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-white text-sm" />
+          </div>
+          <div>
+            <label className="block text-slate-400 text-xs mb-1">{t('crm.addressLine1')}</label>
+            <input value={form.address_line1} onChange={sf('address_line1')} className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-white text-sm" />
+          </div>
+          <div>
+            <label className="block text-slate-400 text-xs mb-1">{t('crm.addressLine2')}</label>
+            <input value={form.address_line2} onChange={sf('address_line2')} className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-white text-sm" />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-slate-400 text-xs mb-1">{t('crm.city')}</label>
+              <input value={form.city} onChange={sf('city')} className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-white text-sm" />
+            </div>
+            <div>
+              <label className="block text-slate-400 text-xs mb-1">{t('crm.stateProvince')}</label>
+              <input value={form.state_province} onChange={sf('state_province')} className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-white text-sm" />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-slate-400 text-xs mb-1">{t('crm.postalCode')}</label>
+              <input value={form.postal_code} onChange={sf('postal_code')} className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-white text-sm" />
+            </div>
+            <div>
+              <label className="block text-slate-400 text-xs mb-1">{t('crm.birthday')}</label>
+              <input type="date" value={form.birthday} onChange={sf('birthday')} className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-white text-sm" />
+            </div>
+          </div>
+          <div>
+            <label className="block text-slate-400 text-xs mb-1">{t('crm.notes')}</label>
+            <textarea value={form.notes} onChange={sf('notes')} rows={2} className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-white text-sm resize-none" />
+          </div>
+          {error && <p className="text-red-400 text-xs">{error}</p>}
+        </div>
+        <div className="flex justify-end gap-2 px-5 py-3 border-t border-slate-700 shrink-0">
+          <button onClick={onClose} className="px-4 py-2 rounded text-sm text-slate-300 hover:text-white">{t('common.cancel')}</button>
+          <button
+            onClick={() => mutation.mutate()}
+            disabled={mutation.isPending || !form.first_name.trim() || !form.last_name.trim()}
+            className="px-4 py-2 rounded text-sm bg-orange-600 hover:bg-orange-500 text-white disabled:opacity-50"
+          >{mutation.isPending ? t('common.saving') : t('common.save')}</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Contact Detail Panel ──────────────────────────────────────────────────────
+
+function ContactPanel({ contactId, onClose }: { contactId: string; onClose: () => void }) {
+  const { t } = useTranslation()
+  const [editing, setEditing] = useState(false)
+  const [logging, setLogging] = useState(false)
+  const qc = useQueryClient()
+
+  const { data: contact, isLoading } = useQuery({
+    queryKey: ['crm-contact', contactId],
+    queryFn: () => crmApi.getContact(contactId),
+    staleTime: 0,
+  })
+
+  if (isLoading || !contact) {
+    return (
+      <div className="flex flex-col h-full">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-700">
+          <div className="h-4 w-32 bg-slate-700 rounded animate-pulse" />
+          <button onClick={onClose} className="text-slate-400 hover:text-white text-xl leading-none">&times;</button>
+        </div>
+        <div className="flex items-center justify-center flex-1 text-slate-500 text-sm">{t('common.loading')}</div>
+      </div>
+    )
+  }
+
+  const fullAddress = [contact.address_line1, contact.address_line2, contact.city, contact.state_province, contact.postal_code].filter(Boolean).join(', ')
+
+  return (
+    <>
+      <div className="flex flex-col h-full overflow-y-auto">
+        {/* Header */}
+        <div className="px-5 py-4 border-b border-slate-700 flex items-start justify-between gap-3 shrink-0">
+          <div className="min-w-0">
+            <h2 className="text-white font-semibold">{contact.first_name} {contact.last_name}</h2>
+            <p className="text-slate-400 text-sm mt-0.5">
+              {[contact.role, contact.company_name].filter(Boolean).join(' · ') || '—'}
+            </p>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button onClick={() => setEditing(true)} className="px-2.5 py-1 rounded text-xs bg-slate-700 hover:bg-slate-600 text-slate-300 hover:text-white transition-colors">{t('common.edit')}</button>
+            <button onClick={onClose} className="text-slate-400 hover:text-white text-xl leading-none">&times;</button>
+          </div>
+        </div>
+
+        {/* Action buttons */}
+        <div className="px-5 py-3 border-b border-slate-700 flex flex-wrap gap-2 shrink-0">
+          {contact.phone && (
+            <>
+              <a href={`tel:${contact.phone}`} className="flex items-center gap-1 px-3 py-1.5 rounded text-xs bg-green-800/50 hover:bg-green-700/60 text-green-300 border border-green-700 transition-colors">
+                📞 {t('crm.callLand')}
+              </a>
+              <a href={`https://wa.me/${waPhone(contact.phone)}`} target="_blank" rel="noreferrer" className="flex items-center gap-1 px-3 py-1.5 rounded text-xs bg-green-900/50 hover:bg-green-800/60 text-green-400 border border-green-800 transition-colors">
+                💬 {t('crm.whatsapp')}
+              </a>
+            </>
+          )}
+          {contact.phone2 && (
+            <>
+              <a href={`tel:${contact.phone2}`} className="flex items-center gap-1 px-3 py-1.5 rounded text-xs bg-blue-800/50 hover:bg-blue-700/60 text-blue-300 border border-blue-700 transition-colors">
+                📱 {t('crm.callCell')}
+              </a>
+              <a href={`https://wa.me/${waPhone(contact.phone2)}`} target="_blank" rel="noreferrer" className="flex items-center gap-1 px-3 py-1.5 rounded text-xs bg-green-900/50 hover:bg-green-800/60 text-green-400 border border-green-800 transition-colors">
+                💬 {t('crm.whatsappCell')}
+              </a>
+            </>
+          )}
+          {contact.email && (
+            <a href={`mailto:${contact.email}`} className="flex items-center gap-1 px-3 py-1.5 rounded text-xs bg-orange-900/50 hover:bg-orange-800/60 text-orange-300 border border-orange-700 transition-colors">
+              ✉️ {t('crm.sendEmail')}
+            </a>
+          )}
+          <button onClick={() => setLogging(true)} className="flex items-center gap-1 px-3 py-1.5 rounded text-xs bg-slate-700 hover:bg-slate-600 text-slate-300 border border-slate-600 transition-colors">
+            + {t('crm.logShort')}
+          </button>
+        </div>
+
+        {/* Details */}
+        <div className="px-5 py-3 border-b border-slate-700 space-y-1.5 shrink-0">
+          {contact.phone && (
+            <div className="flex gap-2 text-sm">
+              <span className="text-slate-500 w-20 shrink-0">{t('crm.landPhone')}</span>
+              <span className="text-slate-300">{contact.phone}</span>
+            </div>
+          )}
+          {contact.phone2 && (
+            <div className="flex gap-2 text-sm">
+              <span className="text-slate-500 w-20 shrink-0">{t('crm.cellPhone')}</span>
+              <span className="text-slate-300">{contact.phone2}</span>
+            </div>
+          )}
+          {contact.email && (
+            <div className="flex gap-2 text-sm">
+              <span className="text-slate-500 w-20 shrink-0">{t('crm.email')}</span>
+              <a href={`mailto:${contact.email}`} className="text-orange-400 hover:text-orange-300 truncate">{contact.email}</a>
+            </div>
+          )}
+          {fullAddress && (
+            <div className="flex gap-2 text-sm">
+              <span className="text-slate-500 w-20 shrink-0">{t('crm.addressLine1')}</span>
+              <span className="text-slate-300 text-xs leading-relaxed">{fullAddress}</span>
+            </div>
+          )}
+          {contact.birthday && (
+            <div className="flex gap-2 text-sm">
+              <span className="text-slate-500 w-20 shrink-0">{t('crm.birthday')}</span>
+              <span className="text-slate-300">{contact.birthday.slice(0, 10)}</span>
+            </div>
+          )}
+          <div className="flex gap-2 text-sm">
+            <span className="text-slate-500 w-20 shrink-0">{t('crm.added')}</span>
+            <span className="text-slate-400 text-xs">{fmtDate(contact.created_at)}</span>
+          </div>
+        </div>
+
+        {/* Notes */}
+        {contact.notes && (
+          <div className="px-5 py-3 border-b border-slate-700 shrink-0">
+            <p className="text-slate-400 text-xs font-medium uppercase tracking-wide mb-1">{t('crm.notes')}</p>
+            <p className="text-slate-300 text-sm whitespace-pre-wrap">{contact.notes}</p>
+          </div>
+        )}
+
+        {/* Interaction history */}
+        <div className="px-5 py-3 shrink-0">
+          <p className="text-slate-400 text-xs font-medium uppercase tracking-wide mb-2">{t('crm.interactions')}</p>
+          {(!contact.interactions || contact.interactions.length === 0) && (
+            <p className="text-slate-600 text-sm">{t('crm.noInteractions')}</p>
+          )}
+          {contact.interactions?.map(ix => (
+            <div key={ix.id} className="border border-slate-700 rounded p-3 mb-2 space-y-0.5">
+              <div className="flex items-center justify-between">
+                <span className="text-slate-300 text-sm font-medium">{ix.subject}</span>
+                <span className="text-slate-500 text-xs">{fmtDate(ix.occurred_at)}</span>
+              </div>
+              <p className="text-slate-500 text-xs">{ix.interaction_type}</p>
+              {ix.notes && <p className="text-slate-400 text-xs mt-1">{ix.notes}</p>}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {editing && (
+        <EditContactModal
+          contact={contact}
+          onClose={() => {
+            setEditing(false)
+            void qc.invalidateQueries({ queryKey: ['crm-contact', contactId] })
+          }}
+        />
+      )}
+      {logging && <LogInteractionModal contact={contact} onClose={() => setLogging(false)} />}
+    </>
+  )
+}
+
 // ── All Contacts Tab ──────────────────────────────────────────────────────────
 
 function ContactsTab() {
   const { t } = useTranslation()
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
-  const [logContact, setLogContact] = useState<Contact | null>(null)
+  const [selectedId, setSelectedId] = useState<string | null>(null)
   const [deletingContact, setDeletingContact] = useState<Contact | null>(null)
+  const [addingContact, setAddingContact] = useState(false)
   const qc = useQueryClient()
 
   const { data, isLoading } = useQuery({
     queryKey: ['crm-contacts', '', search, page],
     queryFn: () => crmApi.getContacts({ search: search || undefined, page, limit: 30 }),
+    staleTime: 0,
   })
 
   const contacts = data?.contacts ?? []
   const pagination = data?.pagination
 
   return (
-    <div className="flex flex-col h-full">
-      <div className="px-4 py-3 border-b border-slate-700">
-        <input
-          type="text"
-          placeholder={t('crm.searchByName')}
-          value={search}
-          onChange={e => { setSearch(e.target.value); setPage(1) }}
-          className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-white text-sm placeholder:text-slate-500"
-        />
-      </div>
+    <div className="flex h-full">
+      {/* List */}
+      <div className={`flex flex-col ${selectedId ? 'hidden md:flex md:w-80 md:shrink-0' : 'flex-1'} border-r border-slate-700`}>
+        <div className="px-4 py-3 border-b border-slate-700 flex gap-2 shrink-0">
+          <input
+            type="text"
+            placeholder={t('crm.searchByName')}
+            value={search}
+            onChange={e => { setSearch(e.target.value); setPage(1) }}
+            className="flex-1 bg-slate-700 border border-slate-600 rounded px-3 py-2 text-white text-sm placeholder:text-slate-500"
+          />
+          <button
+            onClick={() => setAddingContact(true)}
+            className="px-3 py-2 rounded text-sm bg-orange-600 hover:bg-orange-500 text-white whitespace-nowrap"
+          >+ {t('crm.addContact')}</button>
+        </div>
 
-      <div className="flex-1 overflow-auto">
-        {isLoading && (
-          <div className="flex items-center justify-center h-32 text-slate-400 text-sm">{t('common.loading')}</div>
-        )}
-        {!isLoading && contacts.length === 0 && (
-          <div className="flex items-center justify-center h-32 text-slate-500 text-sm">{t('crm.noContactsFnd')}</div>
-        )}
-        {contacts.length > 0 && (
-          <table className="w-full text-sm">
-            <thead className="text-slate-400 text-xs uppercase tracking-wide border-b border-slate-700 sticky top-0 bg-slate-800">
-              <tr>
-                {[t('crm.colName'), t('crm.colCompany'), t('crm.role'), t('crm.email'), t('crm.phone'), t('crm.added'), ''].map(h => (
-                  <th key={h} className="px-4 py-2.5 text-left font-medium">{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {contacts.map(c => (
-                <tr key={c.id} className="border-b border-slate-700/50 hover:bg-slate-700/30 transition-colors">
-                  <td className="px-4 py-2.5 text-white font-medium">{c.first_name} {c.last_name}</td>
-                  <td className="px-4 py-2.5 text-slate-300">{c.company_name ?? '—'}</td>
-                  <td className="px-4 py-2.5 text-slate-400">{c.role || '—'}</td>
-                  <td className="px-4 py-2.5 text-slate-300">{c.email || '—'}</td>
-                  <td className="px-4 py-2.5 text-slate-300">{c.phone || '—'}</td>
-                  <td className="px-4 py-2.5 text-slate-500 text-xs">{fmtDate(c.created_at)}</td>
-                  <td className="px-4 py-2.5">
-                    <div className="flex gap-2 items-center">
-                      <button
-                        onClick={() => setLogContact(c)}
-                        className="px-2.5 py-1 rounded text-xs bg-slate-700 hover:bg-slate-600 text-slate-300 hover:text-white transition-colors"
-                      >{t('crm.logShort')}</button>
-                      <button
-                        onClick={() => setDeletingContact(c)}
-                        className="text-slate-600 hover:text-red-400 transition-colors text-sm"
-                        title="Delete contact"
-                      >&#x1F5D1;</button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
+        <div className="flex-1 overflow-y-auto divide-y divide-slate-700/50">
+          {isLoading && (
+            <div className="flex items-center justify-center h-32 text-slate-400 text-sm">{t('common.loading')}</div>
+          )}
+          {!isLoading && contacts.length === 0 && (
+            <div className="flex items-center justify-center h-32 text-slate-500 text-sm">{t('crm.noContactsFnd')}</div>
+          )}
+          {contacts.map(c => (
+            <button
+              key={c.id}
+              onClick={() => setSelectedId(c.id)}
+              className={`w-full text-left px-4 py-3 hover:bg-slate-700/40 transition-colors ${selectedId === c.id ? 'bg-slate-700/50 border-l-2 border-orange-500' : ''}`}
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="text-white text-sm font-medium truncate">{c.first_name} {c.last_name}</p>
+                  <p className="text-slate-400 text-xs mt-0.5 truncate">{c.company_name ?? '—'} {c.role ? `· ${c.role}` : ''}</p>
+                  <p className="text-slate-500 text-xs">{c.phone ?? c.phone2 ?? c.email ?? ''}</p>
+                </div>
+                <button
+                  onClick={e => { e.stopPropagation(); setDeletingContact(c) }}
+                  className="text-slate-600 hover:text-red-400 transition-colors text-sm shrink-0 mt-0.5"
+                  title="Delete"
+                >&#x1F5D1;</button>
+              </div>
+            </button>
+          ))}
+        </div>
 
-      {pagination && pagination.pages > 1 && (
-        <div className="flex items-center justify-between px-4 py-2 border-t border-slate-700 text-xs text-slate-400">
-          <span>{t('crm.contactsPagination', { total: pagination.total, page: pagination.page, pages: pagination.pages })}</span>
-          <div className="flex gap-1">
-            <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1} className="px-2 py-1 rounded bg-slate-700 disabled:opacity-40">‹</button>
-            <button onClick={() => setPage(p => Math.min(pagination.pages, p + 1))} disabled={page === pagination.pages} className="px-2 py-1 rounded bg-slate-700 disabled:opacity-40">›</button>
+        {pagination && pagination.pages > 1 && (
+          <div className="flex items-center justify-between px-4 py-2 border-t border-slate-700 text-xs text-slate-400 shrink-0">
+            <span>{t('crm.contactsPagination', { total: pagination.total, page: pagination.page, pages: pagination.pages })}</span>
+            <div className="flex gap-1">
+              <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1} className="px-2 py-1 rounded bg-slate-700 disabled:opacity-40">‹</button>
+              <button onClick={() => setPage(p => Math.min(pagination.pages, p + 1))} disabled={page === pagination.pages} className="px-2 py-1 rounded bg-slate-700 disabled:opacity-40">›</button>
+            </div>
           </div>
+        )}
+      </div>
+
+      {/* Detail */}
+      {selectedId ? (
+        <div className="flex-1 overflow-hidden">
+          <ContactPanel contactId={selectedId} onClose={() => setSelectedId(null)} />
+        </div>
+      ) : (
+        <div className="hidden md:flex flex-1 items-center justify-center text-slate-600 text-sm">
+          {t('crm.selectContact')}
         </div>
       )}
 
-      {logContact && (
-        <LogInteractionModal contact={logContact} onClose={() => setLogContact(null)} />
-      )}
       {deletingContact && (
         <ConfirmDeleteModal
           label={`${deletingContact.first_name} ${deletingContact.last_name ?? ''}`.trim()}
           onConfirm={() => crmApi.deleteContact(deletingContact.id).then(() => {
             void qc.invalidateQueries({ queryKey: ['crm-contacts'] })
+            if (selectedId === deletingContact.id) setSelectedId(null)
           })}
           onClose={() => setDeletingContact(null)}
         />
       )}
+      {addingContact && <AddContactModal onClose={() => setAddingContact(false)} />}
     </div>
   )
 }
@@ -540,11 +1098,12 @@ const fmtMoney = (v: string | number | null) => v ? `TTD ${tenderFmt.format(Numb
 const fmtDeadline = (d: string | null) =>
   d ? new Date(d).toLocaleDateString('en-TT', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'
 
-const ACTIVE_STAGES: PipelineStage[] = ['LEAD', 'QUALIFIED', 'PROPOSAL', 'SUBMITTED', 'NEGOTIATION']
+const ACTIVE_STAGES: PipelineStage[] = ['PREQUALIFICATION', 'LEAD', 'QUALIFIED', 'PROPOSAL', 'SUBMITTED', 'NEGOTIATION']
 const CLOSED_STAGES: PipelineStage[] = ['WON', 'LOST', 'NO_GO']
 const ALL_STAGES: PipelineStage[] = [...ACTIVE_STAGES, ...CLOSED_STAGES]
 
 const STAGE_STYLES: Record<PipelineStage, string> = {
+  PREQUALIFICATION: 'bg-teal-900/50 text-teal-300 border border-teal-700',
   LEAD:        'bg-slate-700/60 text-slate-300 border border-slate-600',
   QUALIFIED:   'bg-blue-900/50 text-blue-300 border border-blue-700',
   PROPOSAL:    'bg-purple-900/50 text-purple-300 border border-purple-700',
@@ -1235,7 +1794,7 @@ function OppDetail({
   const showGoNoGo = ['LEAD', 'QUALIFIED'].includes(opp.stage)
   const showSubmit = ['QUALIFIED', 'PROPOSAL', 'NEGOTIATION'].includes(opp.stage)
   const showDecide = opp.stage === 'SUBMITTED'
-  const showEdit   = ['LEAD', 'QUALIFIED', 'PROPOSAL', 'NEGOTIATION'].includes(opp.stage)
+  const showEdit   = ['PREQUALIFICATION', 'LEAD', 'QUALIFIED', 'PROPOSAL', 'NEGOTIATION'].includes(opp.stage)
 
   return (
     <>
@@ -1349,6 +1908,13 @@ function TenderPipelineTab() {
   const { data, isLoading } = useQuery({
     queryKey: ['tender-pipeline'],
     queryFn: () => pipelineApi.list({ pipeline_type: 'JABCO_TENDER', limit: 200 }),
+  })
+
+  // Prefetch companies so the picker is warm before the modal mounts
+  useQuery({
+    queryKey: ['crm-companies-picker'],
+    queryFn: () => crmApi.getCompanies({ limit: 200 }),
+    staleTime: 60_000,
   })
 
   const opps = data?.opportunities ?? []

@@ -36,7 +36,7 @@ const ENTITY_OPTIONS = [
 
 const cls = 'w-full bg-slate-700 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500'
 
-function AddModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
+function AddModal({ onClose, onCreated, rateMap }: { onClose: () => void; onCreated: () => void; rateMap: Record<string, number> }) {
   const { t } = useTranslation()
   const [form, setForm] = useState({
     owner_entity_id: ENTITY_OPTIONS[0].id,
@@ -54,18 +54,20 @@ function AddModal({ onClose, onCreated }: { onClose: () => void; onCreated: () =
     setForm(f => ({ ...f, [k]: e.target.value }))
 
   const { mutate, isPending, error } = useMutation({
-    mutationFn: () => financeApi.createInvestment({
+    mutationFn: () => {
+      const rate = rateMap[form.currency] ?? 1
+      return financeApi.createInvestment({
       owner_entity_id: form.owner_entity_id,
       investment_type: form.investment_type,
       asset_name: form.asset_name,
-      current_value_ttd: Number(form.current_value_ttd),
-      cost_basis_ttd: form.cost_basis_ttd ? Number(form.cost_basis_ttd) : undefined,
+      current_value_ttd: Number(form.current_value_ttd) * rate,
+      average_cost_per_unit: form.cost_basis_ttd ? Number(form.cost_basis_ttd) : undefined,
       currency: form.currency || 'TTD',
       institution_name: form.institution_name || undefined,
       ticker_symbol: form.ticker_symbol || undefined,
       maturity_date: form.maturity_date || undefined,
       notes: form.notes || undefined,
-    }),
+    })},
     onSuccess: () => { onCreated(); onClose() },
   })
 
@@ -250,7 +252,7 @@ function HistoryModal({ id, name, currency, onClose }: { id: string; name: strin
           <p className="text-slate-400 text-sm">No history yet. Add a past entry above, or history records automatically each time you save an update.</p>
         )}
         {valuations.length > 0 && (
-          <div className="rounded-lg overflow-hidden border border-slate-700">
+          <div className="overflow-x-auto rounded-lg border border-slate-700">
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-slate-700/50 text-slate-400 text-xs uppercase tracking-wide">
@@ -300,10 +302,11 @@ type UpdatingInv = {
   maturity_date: string; last_valued_at: string; notes: string
 }
 
-function UpdateValueModal({ inv, onClose, onUpdated }: {
-  inv: UpdatingInv; onClose: () => void; onUpdated: () => void
+function UpdateValueModal({ inv, onClose, onUpdated, rateMap }: {
+  inv: UpdatingInv; onClose: () => void; onUpdated: () => void; rateMap: Record<string, number>
 }) {
   const { t } = useTranslation()
+  const rate = rateMap[inv.currency] ?? 1
   const [assetName, setAssetName] = useState(inv.asset_name)
   const [investType, setInvestType] = useState<InvestmentType>(inv.investment_type)
   const [institution, setInstitution] = useState(inv.institution_name)
@@ -312,9 +315,13 @@ function UpdateValueModal({ inv, onClose, onUpdated }: {
   const [units, setUnits] = useState(() => fmt(inv.units_held))
   const [pricePerUnit, setPricePerUnit] = useState(() => fmt(inv.current_price))
   const [costPerUnit, setCostPerUnit] = useState(() => fmt(inv.average_cost_per_unit))
-  const [value, setValue] = useState(() => fmt(inv.current_value_ttd))
+  // current_value_ttd is stored in TTD — show user the native currency value
+  const [value, setValue] = useState(() => fmt(String(parseFloat(inv.current_value_ttd || '0') / rate)))
   const [valueManual, setValueManual] = useState(false)
-  const [gain, setGain] = useState(inv.unrealised_gain_ttd)
+  const [gain, setGain] = useState(() => {
+    const g = parseFloat(inv.unrealised_gain_ttd || '0')
+    return g !== 0 ? (g / rate).toFixed(2) : (inv.unrealised_gain_ttd ?? '')
+  })
 
   useEffect(() => {
     if (valueManual) return
@@ -342,8 +349,8 @@ function UpdateValueModal({ inv, onClose, onUpdated }: {
       units_held: units ? Number(units) : undefined,
       current_price: pricePerUnit ? Number(pricePerUnit) : undefined,
       average_cost_per_unit: costPerUnit ? Number(costPerUnit) : undefined,
-      current_value_ttd: value ? Number(value) : undefined,
-      unrealised_gain_ttd: gain ? Number(gain) : undefined,
+      current_value_ttd: value ? Number(value) * rate : undefined,
+      unrealised_gain_ttd: gain ? Number(gain) * rate : undefined,
       maturity_date: (maturity && DATE_RE.test(maturity)) ? maturity : undefined,
       last_valued_at: (valuedDate && DATE_RE.test(valuedDate)) ? new Date(valuedDate).toISOString() : undefined,
       notes: notes || undefined,
@@ -471,11 +478,9 @@ export default function InvestmentsPanel() {
   const rateMap: Record<string, number> = { TTD: 1 }
   for (const fx of fxRates) rateMap[fx.currency] = parseFloat(fx.rate_to_ttd)
 
-  const toTTD = (value: string, currency: string) =>
-    parseFloat(value) * (rateMap[currency] ?? 1)
-
-  const totalValueTTD = investments.reduce((s, i) => s + toTTD(i.current_value_ttd, i.currency ?? 'TTD'), 0)
-  const totalGain = investments.reduce((s, i) => s + toTTD(i.unrealised_gain_ttd ?? '0', i.currency ?? 'TTD'), 0)
+  // current_value_ttd and unrealised_gain_ttd are always stored in TTD — sum directly.
+  const totalValueTTD = investments.reduce((s, i) => s + parseFloat(i.current_value_ttd ?? '0'), 0)
+  const totalGain = investments.reduce((s, i) => s + parseFloat(i.unrealised_gain_ttd ?? '0'), 0)
 
   const byEntity: Record<string, typeof investments> = {}
   for (const inv of investments) {
@@ -485,7 +490,7 @@ export default function InvestmentsPanel() {
   return (
     <div>
       {investments.length > 0 && (
-        <div className="grid grid-cols-2 gap-4 mb-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
           <div className="bg-slate-800 rounded-lg p-4 border-l-4 border-blue-500">
             <p className="text-xs text-slate-400 uppercase tracking-wide mb-1">{t('finance.investments.portfolioValue')} (TTD)</p>
             <p className="text-lg font-semibold font-mono">{fmtTTD(String(totalValueTTD))}</p>
@@ -511,7 +516,7 @@ export default function InvestmentsPanel() {
       {Object.entries(byEntity).sort(([a], [b]) => entityName(a).localeCompare(entityName(b))).map(([entityId, rows]) => (
         <div key={entityId} className="mb-6">
           <h3 className="text-sm font-semibold text-slate-300 uppercase tracking-wide mb-2">{entityName(entityId)}</h3>
-          <div className="rounded-lg overflow-hidden border border-slate-700">
+          <div className="overflow-x-auto rounded-lg border border-slate-700">
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-slate-700/50 text-slate-400 text-xs uppercase tracking-wide">
@@ -527,7 +532,12 @@ export default function InvestmentsPanel() {
                 {rows.map(inv => {
                   const gain = parseFloat(inv.unrealised_gain_ttd ?? '0')
                   const invCurrency = inv.currency ?? 'TTD'
-                  const ttdEquiv = toTTD(inv.current_value_ttd, invCurrency)
+                  // current_value_ttd is always stored in TTD.
+                  // For non-TTD investments derive the native display value by dividing.
+                  const ttdValue = parseFloat(inv.current_value_ttd ?? '0')
+                  const fxRate = rateMap[invCurrency] ?? 1
+                  const nativeValue = invCurrency === 'TTD' ? ttdValue : ttdValue / fxRate
+                  const gainNative = invCurrency === 'TTD' ? gain : gain / fxRate
                   return (
                     <tr key={inv.id} className="hover:bg-slate-700/30 transition-colors">
                       <td className="px-4 py-3 text-slate-100 font-medium">
@@ -537,13 +547,13 @@ export default function InvestmentsPanel() {
                       <td className="px-4 py-3 text-slate-400">{t(`finance.investments.investmentTypes.${inv.investment_type}`, inv.investment_type)}</td>
                       <td className="px-4 py-3 text-slate-400">{inv.institution_name ?? '—'}</td>
                       <td className="px-4 py-3 text-right font-mono text-slate-100">
-                        {fmtNative(inv.current_value_ttd, invCurrency)}
+                        {fmtNative(String(nativeValue), invCurrency)}
                         {invCurrency !== 'TTD' && (
-                          <span className="block text-xs text-slate-500">≈ {fmtTTD(String(ttdEquiv))} TTD</span>
+                          <span className="block text-xs text-slate-500">≈ {fmtTTD(String(ttdValue))} TTD</span>
                         )}
                       </td>
                       <td className={`px-4 py-3 text-right font-mono text-sm ${gain >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                        {inv.unrealised_gain_ttd != null ? `${gain >= 0 ? '+' : ''}${fmtNative(inv.unrealised_gain_ttd, invCurrency)}` : '—'}
+                        {inv.unrealised_gain_ttd != null ? `${gain >= 0 ? '+' : ''}${fmtNative(String(gainNative), invCurrency)}` : '—'}
                       </td>
                       <td className="px-4 py-3 text-right">
                         <button onClick={() => setHistory({ id: inv.id, name: inv.asset_name, currency: inv.currency ?? 'TTD' })}
@@ -579,8 +589,8 @@ export default function InvestmentsPanel() {
         </div>
       ))}
 
-      {showAdd && <AddModal onClose={() => setShowAdd(false)} onCreated={refresh} />}
-      {updating && <UpdateValueModal inv={updating} onClose={() => setUpdating(null)} onUpdated={refresh} />}
+      {showAdd && <AddModal onClose={() => setShowAdd(false)} onCreated={refresh} rateMap={rateMap} />}
+      {updating && <UpdateValueModal inv={updating} onClose={() => setUpdating(null)} onUpdated={refresh} rateMap={rateMap} />}
       {history && <HistoryModal id={history.id} name={history.name} currency={history.currency} onClose={() => setHistory(null)} />}
     </div>
   )

@@ -7,6 +7,7 @@ import {
   clubVisitorApi, clubFloatApi, clubSharedApi,
   entertainmentReportsApi,
 } from '../api/entertainment'
+import CrmContactPicker, { CrmContactBadge } from '../components/crm/CrmContactPicker'
 import type { UtilityBill, SupplierInvoiceRaw, UtilityType } from '../api/entertainment'
 import type {
   Tab, Product, Member, MemberDetail,
@@ -576,7 +577,7 @@ function ClubMembers() {
   const [statusFilter, setStatusFilter] = useState('')
   const [selected, setSelected] = useState<MemberDetail | null>(null)
   const [showAdd, setShowAdd] = useState(false)
-  const [addForm, setAddForm] = useState({ first_name: '', last_name: '', email: '', phone: '' })
+  const [addForm, setAddForm] = useState({ first_name: '', last_name: '', email: '', phone: '', crm_contact_id: null as string | null })
   const [creditForm, setCreditForm] = useState({ amount: '', description: '' })
   const [addErr, setAddErr] = useState<string | null>(null)
   const [creditErr, setCreditErr] = useState<string | null>(null)
@@ -595,8 +596,8 @@ function ClubMembers() {
   const { data: tiers = [] } = useQuery({ queryKey: ['club-tiers'], queryFn: () => clubTiersApi.list() })
 
   const createMut = useMutation({
-    mutationFn: () => clubMembersApi.create({ first_name: addForm.first_name, last_name: addForm.last_name, email: addForm.email || undefined, phone: addForm.phone || undefined }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['club-members'] }); setShowAdd(false) },
+    mutationFn: () => clubMembersApi.create({ first_name: addForm.first_name, last_name: addForm.last_name, email: addForm.email || undefined, phone: addForm.phone || undefined, crm_contact_id: addForm.crm_contact_id || undefined }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['club-members'] }); setShowAdd(false); setAddForm({ first_name: '', last_name: '', email: '', phone: '', crm_contact_id: null }) },
     onError: (e: Error) => setAddErr(e.message),
   })
 
@@ -615,6 +616,11 @@ function ClubMembers() {
         setSelected({ ...selected, active_membership: { id: ms.id, started_at: ms.started_at, expires_at: ms.expires_at, status: ms.status, tier_id: ms.tier_id, tier_name: ms.tier_name, bar_discount_pct: ms.bar_discount_pct, guest_passes_per_month: tier?.guest_passes_per_month ?? 0, monthly_fee: tier?.monthly_fee ?? 0 } })
       }
     },
+  })
+
+  const crmLinkMut = useMutation({
+    mutationFn: (id: string | null) => clubMembersApi.update(selected!.id, { crm_contact_id: id }),
+    onSuccess: (rec) => { qc.invalidateQueries({ queryKey: ['club-members'] }); setSelected(s => s ? { ...s, crm_contact_id: rec.crm_contact_id } : s) },
   })
 
   return (
@@ -641,6 +647,10 @@ function ClubMembers() {
                 <input type="text" value={(addForm as Record<string, string>)[key]} onChange={e => setAddForm(f => ({ ...f, [key]: e.target.value }))} className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-1.5 text-white text-sm" />
               </div>
             ))}
+            <div>
+              <label className="block text-slate-400 text-xs mb-0.5">{t('crm.linkedContact', 'CRM Contact')}</label>
+              <CrmContactPicker value={addForm.crm_contact_id} onChange={id => setAddForm(f => ({ ...f, crm_contact_id: id }))} />
+            </div>
             {addErr && <p className="text-red-400 text-xs">{addErr}</p>}
             <div className="flex gap-2">
               <button onClick={() => createMut.mutate()} disabled={createMut.isPending || !addForm.first_name || !addForm.last_name} className="flex-1 py-1.5 rounded text-xs bg-orange-600 hover:bg-orange-500 text-white disabled:opacity-50 transition-colors">{createMut.isPending ? t('common.saving') : t('ent.addMember')}</button>
@@ -679,6 +689,18 @@ function ClubMembers() {
                 <p className="text-white font-medium mt-1">{t('ent.balance')} {fmtM(selected.credit_balance)}</p>
               </div>
               <button onClick={() => setSelected(null)} className="text-slate-400 hover:text-white text-xl">&times;</button>
+            </div>
+
+            {/* CRM contact link */}
+            <div className="bg-slate-700/40 rounded-lg p-3 space-y-2">
+              <p className="text-slate-400 text-xs font-medium uppercase tracking-wide">{t('crm.linkedContact', 'CRM Contact')}</p>
+              {selected.crm_contact_id
+                ? <CrmContactBadge contactId={selected.crm_contact_id} />
+                : <p className="text-slate-500 text-xs">{t('crm.noContactLinked', 'No CRM contact linked.')}</p>}
+              <CrmContactPicker
+                value={selected.crm_contact_id}
+                onChange={id => crmLinkMut.mutate(id)}
+              />
             </div>
 
             {/* Active membership */}

@@ -55,6 +55,7 @@ export interface DBClient {
   pricing_tier_id:    string | null
   pricing_tier_name:  string | null
   default_margin_pct: number | null
+  crm_contact_id:     string | null
   created_at:         string
 }
 

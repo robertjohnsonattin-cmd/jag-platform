@@ -25,6 +25,7 @@ const CreateMemberSchema = z.object({
   photo_url:         z.string().url().optional(),
   emergency_contact: z.record(z.unknown()).optional(),
   notes:             z.string().max(2000).optional(),
+  crm_contact_id:    z.string().uuid().nullable().optional(),
 }).strict();
 
 const PatchMemberSchema = z.object({
@@ -37,6 +38,7 @@ const PatchMemberSchema = z.object({
   emergency_contact: z.record(z.unknown()).optional(),
   notes:             z.string().max(2000).optional(),
   status:            z.enum(['ACTIVE', 'SUSPENDED', 'EXPIRED']).optional(),
+  crm_contact_id:    z.string().uuid().nullable().optional(),
 }).strict().refine(o => Object.keys(o).length > 0, { message: 'At least one field required.' });
 
 // ── GET /club/members ─────────────────────────────────────────────────────────
@@ -60,7 +62,7 @@ clubMembersRouter.get('/', async (req: Request, res: Response, next: NextFunctio
         const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
         return c.query(
           `SELECT id, member_number, first_name, last_name, email, phone,
-                  credit_balance, status, created_at, updated_at
+                  credit_balance, status, crm_contact_id, created_at, updated_at
            FROM   ent_members ${where}
            ORDER  BY last_name, first_name`,
           params,
@@ -87,15 +89,15 @@ clubMembersRouter.post('/', async (req: Request, res: Response, next: NextFuncti
         c.query(
           `INSERT INTO ent_members
              (tenant_id, member_number, first_name, last_name, email, phone,
-              date_of_birth, photo_url, emergency_contact, notes)
+              date_of_birth, photo_url, emergency_contact, notes, crm_contact_id)
            VALUES ($1, 'M-' || LPAD(nextval('ent_member_number_seq')::text, 4, '0'),
-                   $2,$3,$4,$5,$6,$7,$8,$9)
+                   $2,$3,$4,$5,$6,$7,$8,$9,$10)
            RETURNING *`,
           [tenantId, body.first_name, body.last_name,
            body.email ?? null, body.phone ?? null,
            body.date_of_birth ?? null, body.photo_url ?? null,
            body.emergency_contact ? JSON.stringify(body.emergency_contact) : null,
-           body.notes ?? null],
+           body.notes ?? null, body.crm_contact_id ?? null],
         ).then(r => r.rows[0]),
       );
       logger.info({ entity: 'CLUB', action: 'MEMBER_CREATED', user_id: userId, record_id: rec.id, member_number: rec.member_number });
@@ -160,6 +162,7 @@ clubMembersRouter.patch('/:id', async (req: Request, res: Response, next: NextFu
     if (body.emergency_contact !== undefined) setCols.push(`emergency_contact = ${push(JSON.stringify(body.emergency_contact))}`);
     if (body.notes             !== undefined) setCols.push(`notes             = ${push(body.notes)}`);
     if (body.status            !== undefined) setCols.push(`status            = ${push(body.status)}`);
+    if (body.crm_contact_id    !== undefined) setCols.push(`crm_contact_id    = ${push(body.crm_contact_id)}`);
     params.push(idP.data.id);
 
     const client = await entertainmentPool.connect();

@@ -93,7 +93,7 @@ export default function JournalEntries() {
         {!isLoading && entries.length === 0 && <p className="text-slate-400 text-sm">{t('journalEntries.noEntries')}</p>}
 
         {entries.length > 0 && (
-          <div className="rounded-lg overflow-hidden border border-slate-700">
+          <div className="overflow-x-auto rounded-lg border border-slate-700">
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-slate-700/50 text-slate-400 text-xs uppercase tracking-wide">

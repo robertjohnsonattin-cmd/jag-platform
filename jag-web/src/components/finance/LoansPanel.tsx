@@ -257,7 +257,7 @@ function LoanHistoryModal({ id, lender, onClose }: { id: string; lender: string;
           <p className="text-slate-400 text-sm">No history yet. History records automatically each time you update the balance.</p>
         )}
         {history.length > 0 && (
-          <div className="rounded-lg overflow-hidden border border-slate-700">
+          <div className="overflow-x-auto rounded-lg border border-slate-700">
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-slate-700/50 text-slate-400 text-xs uppercase tracking-wide">
@@ -332,7 +332,7 @@ export default function LoansPanel() {
       {Object.entries(byEntity).sort(([a], [b]) => entityName(a).localeCompare(entityName(b))).map(([entityId, rows]) => (
         <div key={entityId} className="mb-6">
           <h3 className="text-sm font-semibold text-slate-300 uppercase tracking-wide mb-2">{entityName(entityId)}</h3>
-          <div className="rounded-lg overflow-hidden border border-slate-700">
+          <div className="overflow-x-auto rounded-lg border border-slate-700">
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-slate-700/50 text-slate-400 text-xs uppercase tracking-wide">

@@ -163,7 +163,7 @@ function ConsolidatedView() {
           {data.entities.length === 0 && <p className="text-slate-500 text-sm">{t('intercompany.noGlData')}</p>}
 
           {data.entities.length > 0 && (
-            <div className="rounded-lg overflow-hidden border border-slate-700 mb-4">
+            <div className="overflow-x-auto rounded-lg border border-slate-700 mb-4">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-slate-700/50 text-slate-400 text-xs uppercase tracking-wide">
@@ -193,7 +193,7 @@ function ConsolidatedView() {
           {data.eliminations.length > 0 && (
             <div>
               <h4 className="text-xs font-medium text-slate-400 uppercase tracking-wide mb-2">{t('intercompany.eliminatedCharges')}</h4>
-              <div className="rounded-lg overflow-hidden border border-slate-700">
+              <div className="overflow-x-auto rounded-lg border border-slate-700">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="bg-slate-700/50 text-slate-400 text-xs uppercase tracking-wide">
@@ -264,7 +264,7 @@ export default function IntercompanyPanel() {
       {tab === 'charges' && (
         <div>
           {/* Summary */}
-          <div className="grid grid-cols-3 gap-4 mb-5">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-5">
             <div className="bg-slate-800 rounded-lg p-4 border-l-4 border-slate-500">
               <p className="text-xs text-slate-400 uppercase tracking-wide mb-1">{t('intercompany.statuses.DRAFT')}</p>
               <p className="text-sm font-mono font-semibold text-slate-200">{fmtTTD(String(totalDraft))}</p>
@@ -296,7 +296,7 @@ export default function IntercompanyPanel() {
           {!isLoading && charges.length === 0 && <p className="text-slate-500 text-sm">{t('intercompany.noCharges')}</p>}
 
           {charges.length > 0 && (
-            <div className="rounded-lg overflow-hidden border border-slate-700">
+            <div className="overflow-x-auto rounded-lg border border-slate-700">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-slate-700/50 text-slate-400 text-xs uppercase tracking-wide">

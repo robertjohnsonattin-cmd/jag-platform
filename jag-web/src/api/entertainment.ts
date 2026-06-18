@@ -145,13 +145,13 @@ export const clubMembersApi = {
 
   create: (data: {
     first_name: string; last_name: string
-    email?: string; phone?: string; date_of_birth?: string; notes?: string
+    email?: string; phone?: string; date_of_birth?: string; notes?: string; crm_contact_id?: string | null
   }): Promise<Member> =>
     c.post('/club/members', data),
 
   update: (id: string, data: Partial<{
     first_name: string; last_name: string; email: string; phone: string
-    date_of_birth: string; notes: string; status: string
+    date_of_birth: string; notes: string; status: string; crm_contact_id: string | null
   }>): Promise<Member> =>
     c.patch(`/club/members/${id}`, data),
 

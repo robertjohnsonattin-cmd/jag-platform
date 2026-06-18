@@ -1,9 +1,12 @@
 import { tenantApi } from './client'
 import type {
   CompaniesResponse, Company,
-  ContactsResponse,
+  ContactsResponse, Contact,
   Interaction,
   CreateCompanyPayload,
+  UpdateCompanyPayload,
+  CreateContactPayload,
+  UpdateContactPayload,
   LogInteractionPayload,
 } from '../types/crm'
 
@@ -25,6 +28,9 @@ export const crmApi = {
   createCompany: (data: CreateCompanyPayload): Promise<Company> =>
     client.post('/crm/companies', data),
 
+  updateCompany: (id: string, data: UpdateCompanyPayload): Promise<Company> =>
+    client.patch(`/crm/companies/${id}`, data),
+
   getContacts: (params: { company_id?: string; search?: string; page?: number; limit?: number } = {}): Promise<ContactsResponse> => {
     const q = new URLSearchParams()
     if (params.company_id) q.set('company_id', params.company_id)
@@ -34,6 +40,15 @@ export const crmApi = {
     const qs = q.toString()
     return client.get(`/crm/contacts${qs ? `?${qs}` : ''}`)
   },
+
+  getContact: (id: string): Promise<Contact> =>
+    client.get(`/crm/contacts/${id}`),
+
+  createContact: (data: CreateContactPayload): Promise<Contact> =>
+    client.post('/crm/contacts', data),
+
+  updateContact: (id: string, data: UpdateContactPayload): Promise<Contact> =>
+    client.patch(`/crm/contacts/${id}`, data),
 
   logInteraction: (data: LogInteractionPayload): Promise<Interaction> =>
     client.post('/crm/interactions', data),

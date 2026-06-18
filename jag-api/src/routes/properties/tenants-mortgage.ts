@@ -31,6 +31,7 @@ const PatchTenantSchema = z.object({
   identification_number:   z.string().max(50).nullable().optional(),
   emergency_contact_name:  z.string().max(100).nullable().optional(),
   emergency_contact_phone: z.string().max(30).nullable().optional(),
+  phone2:                  z.string().max(30).nullable().optional(),
   notes:                   z.string().max(2000).nullable().optional(),
 }).strict();
 
@@ -45,6 +46,7 @@ const CreateTenantSchema = z.object({
   identification_number:   z.string().max(50).optional(),
   emergency_contact_name:  z.string().max(100).optional(),
   emergency_contact_phone: z.string().max(30).optional(),
+  phone2:                  z.string().max(30).optional(),
   notes:                   z.string().max(2000).optional(),
 }).strict();
 
@@ -95,7 +97,7 @@ propTenantsRouter.get('/', async (req: Request, res: Response, next: NextFunctio
         }
         const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
         return c.query(
-          `SELECT id, first_name, last_name, company_name, is_company, phone, email,
+          `SELECT id, first_name, last_name, company_name, is_company, phone, phone2, email,
                   last_modified_at, created_at
            FROM   prop_property_tenants ${where}
            ORDER  BY COALESCE(company_name, last_name, first_name) ASC`,
@@ -124,13 +126,13 @@ propTenantsRouter.post('/', async (req: Request, res: Response, next: NextFuncti
       const newTenant = await withOwnerRLS(client, req.rlsCtx, (c) =>
         c.query(
           `INSERT INTO prop_property_tenants
-             (owner_id, first_name, last_name, company_name, is_company, phone, email,
+             (owner_id, first_name, last_name, company_name, is_company, phone, phone2, email,
               identification_type, identification_number, emergency_contact_name,
               emergency_contact_phone, notes, last_modified_at)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,now())
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,now())
            RETURNING *`,
           [ownerId, body.first_name, body.last_name ?? null, body.company_name ?? null,
-           body.is_company, body.phone ?? null, body.email ?? null,
+           body.is_company, body.phone ?? null, body.phone2 ?? null, body.email ?? null,
            body.identification_type ?? null, body.identification_number ?? null,
            body.emergency_contact_name ?? null, body.emergency_contact_phone ?? null,
            body.notes ?? null],
@@ -177,6 +179,7 @@ propTenantsRouter.patch('/:id', async (req: Request, res: Response, next: NextFu
         if (b.identification_number   !== undefined) sets.push(`identification_number = ${push(b.identification_number)}`);
         if (b.emergency_contact_name  !== undefined) sets.push(`emergency_contact_name = ${push(b.emergency_contact_name)}`);
         if (b.emergency_contact_phone !== undefined) sets.push(`emergency_contact_phone = ${push(b.emergency_contact_phone)}`);
+        if (b.phone2                  !== undefined) sets.push(`phone2 = ${push(b.phone2)}`);
         if (b.notes                   !== undefined) sets.push(`notes = ${push(b.notes)}`);
 
         params.push(id);
