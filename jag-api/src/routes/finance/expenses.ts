@@ -39,6 +39,7 @@ const CATEGORIES = [
   'INVESTMENT_PURCHASE','INVESTMENT_SALE','TRANSFER_OUT',
   'PERSONAL_EXPENSE','UTILITIES','INSURANCE','ENTERTAINMENT',
   'TRAVEL','MEDICAL','EDUCATION','CHARITY','UNCLASSIFIED',
+  'GROCERIES','FUEL','DINING','MAINTENANCE','SUBSCRIPTIONS','TRANSPORT','CLOTHING',
 ] as const;
 
 const PAYMENT_METHODS = ['CASH','BANK_TRANSFER','CREDIT_CARD','CHEQUE','DIRECT_DEBIT','OTHER'] as const;
@@ -66,6 +67,7 @@ const CreateExpenseSchema = z.object({
   category:            z.enum(CATEGORIES).default('OPERATING_EXPENSE'),
   gl_debit_account_id: z.string().uuid().optional(),
   notes:               z.string().max(2000).optional(),
+  card_id:             z.string().uuid().optional(),
   idempotency_key:     z.string().min(1).max(500),
 }).strict();
 
@@ -81,6 +83,7 @@ const UpdateExpenseSchema = z.object({
   category:            z.enum(CATEGORIES).optional(),
   gl_debit_account_id: z.string().uuid().optional(),
   notes:               z.string().max(2000).optional(),
+  card_id:             z.string().uuid().optional(),
 }).strict().refine(d => Object.keys(d).length > 0, { message: 'At least one field required.' });
 
 const ApproveExpenseSchema = z.object({
@@ -155,13 +158,14 @@ expensesRouter.post('/', async (req: Request, res: Response, next: NextFunction)
           `INSERT INTO fin_expenses
              (owner_id, owner_entity_id, submitted_by, expense_date, description, payee_name,
               amount, currency, amount_ttd, fx_rate_used, payment_method, category,
-              gl_debit_account_id, notes, idempotency_key)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+              gl_debit_account_id, notes, idempotency_key, card_id)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
            RETURNING *`,
           [ownerId, b.owner_entity_id, userId, b.expense_date, b.description,
            b.payee_name ?? null, b.amount, b.currency, b.amount_ttd,
            b.fx_rate_used ?? null, b.payment_method, b.category,
-           b.gl_debit_account_id ?? null, b.notes ?? null, b.idempotency_key],
+           b.gl_debit_account_id ?? null, b.notes ?? null, b.idempotency_key,
+           b.card_id ?? null],
         ).then(r => r.rows[0]);
       });
       logger.info({ entity: 'EXPENSE', action: 'CREATED', user_id: ownerId, record_id: rec.id });
@@ -244,6 +248,7 @@ expensesRouter.patch('/:id', async (req: Request, res: Response, next: NextFunct
         if (b.category            !== undefined) sets.push(`category = ${push(b.category)}`);
         if (b.gl_debit_account_id !== undefined) sets.push(`gl_debit_account_id = ${push(b.gl_debit_account_id)}`);
         if (b.notes               !== undefined) sets.push(`notes = ${push(b.notes)}`);
+        if (b.card_id             !== undefined) sets.push(`card_id = ${push(b.card_id)}`);
         params.push(id);
         return c.query(
           `UPDATE fin_expenses SET ${sets.join(', ')} WHERE id = $${params.length} RETURNING *`,

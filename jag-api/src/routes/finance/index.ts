@@ -17,6 +17,7 @@ import { intercompanyRouter }   from './intercompany';
 import { insuranceRouter }      from './insurance';
 import { exportRouter }         from './export';
 import { reportsRouter }        from './reports';
+import { creditCardsRouter }    from './credit-cards';
 
 export const financeRouter = Router();
 financeRouter.use(requireAuth());
@@ -38,3 +39,4 @@ financeRouter.use('/bank-statements', bankStatementsRouter);
 financeRouter.use('/document-jobs',   documentJobsRouter);
 financeRouter.use('/pending-review',  pendingReviewRouter);
 financeRouter.use('/reports',         reportsRouter);
+financeRouter.use('/credit-cards',    creditCardsRouter);

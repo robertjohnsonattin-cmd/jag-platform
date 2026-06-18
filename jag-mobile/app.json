@@ -1,0 +1,39 @@
+{
+  "expo": {
+    "name": "JAG Mobile",
+    "slug": "jag-mobile",
+    "version": "1.0.0",
+    "scheme": "jagmobile",
+    "platforms": ["ios", "android"],
+    "orientation": "portrait",
+    "ios": {
+      "bundleIdentifier": "com.jagcorporate.mobile",
+      "supportsTablet": false
+    },
+    "android": {
+      "package": "com.jagcorporate.mobile",
+      "adaptiveIcon": {
+        "backgroundColor": "#1e293b"
+      }
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "JAG Mobile needs photo library access to attach receipts."
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "JAG Mobile needs camera access to photograph receipts."
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}
