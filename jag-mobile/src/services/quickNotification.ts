@@ -18,6 +18,9 @@ export async function showQuickEntryNotification() {
     return
   }
 
+  // Cancel the boot-receiver notification to avoid duplicates
+  await notifee.cancelDisplayedNotification('jag-boot-1')
+
   await notifee.createChannel({
     id: CHANNEL_ID,
     name: 'Quick Entry',

@@ -1,21 +1,26 @@
 import { useEffect, useState } from 'react'
 import { Stack, useRouter, useSegments } from 'expo-router'
+import * as SecureStore from 'expo-secure-store'
 import { isAuthenticated } from '../src/auth/keycloak'
 import notifee, { EventType } from '@notifee/react-native'
 import { showQuickEntryNotification, registerForegroundHandler } from '../src/services/quickNotification'
 
-// Handle notification action when app is launched from background/closed
-notifee.onBackgroundEvent(async ({ type, detail }) => {
-  if (type === EventType.ACTION_PRESS && detail.pressAction?.id === 'new-expense') {
-    // App will launch via launchActivity: 'default' — deep link handled in useEffect below
-  }
-})
+notifee.onBackgroundEvent(async () => {})
 
 export default function RootLayout() {
   const router = useRouter()
   const segments = useSegments()
   const [authed, setAuthed] = useState(false)
   const [checking, setChecking] = useState(true)
+
+  // Show notification as soon as a refresh token exists — no need to wait for full auth
+  useEffect(() => {
+    SecureStore.getItemAsync('jag_refresh_token').then(token => {
+      if (token) showQuickEntryNotification()
+    })
+    const unsub = registerForegroundHandler(() => router.push('/expense-form'))
+    return unsub
+  }, [])
 
   useEffect(() => {
     setChecking(true)
@@ -32,22 +37,15 @@ export default function RootLayout() {
       router.replace('/login')
     } else if (authed && inAuthGroup) {
       router.replace('/expense-form')
+      showQuickEntryNotification()  // ensure notification is up after fresh login
     }
   }, [checking, authed, segments])
 
-  // Show persistent notification and wire up foreground handler
-  useEffect(() => {
-    if (!authed) return
-    showQuickEntryNotification()
-    const unsub = registerForegroundHandler(() => router.push('/expense-form'))
-    return unsub
-  }, [authed])
-
-  // Handle app opened via notification action (background → foreground)
+  // Handle app opened via notification action
   useEffect(() => {
     notifee.getInitialNotification().then(n => {
-      if (n?.pressAction?.id === 'new-expense' && authed) {
-        router.push('/expense-form')
+      if (n?.pressAction?.id === 'new-expense') {
+        if (authed) router.push('/expense-form')
       }
     })
   }, [authed])
