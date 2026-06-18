@@ -168,7 +168,7 @@ pipelineRouter.get('/', async (req: Request, res: Response, next: NextFunction):
       });
 
       logger.info({ entity: 'CRM_PIPELINE', action: 'PIPELINE_LIST', user_id: req.rlsCtx.userId, tenant_id: req.rlsCtx.tenantId, count: rows.length });
-      ok(res, { pipeline: rows, pagination: { page, limit, total, pages: Math.ceil(total / limit) } });
+      ok(res, { opportunities: rows, pagination: { page, limit, total, pages: Math.ceil(total / limit) } });
     } finally { client.release(); }
   } catch (e) { next(e); }
 });
