@@ -364,7 +364,7 @@ pipelineRouter.post('/', async (req: Request, res: Response, next: NextFunction)
             tenantId, body.title, body.pipeline_type,
             body.company_id ?? null, body.contact_id ?? null,
             body.estimated_value ?? null, body.bid_deadline ?? null,
-            body.source_url ?? null, body.assigned_to ?? null,
+            body.source_url ?? null, body.assigned_to ?? userId,
             body.notes ?? null, body.idempotency_key,
           ],
         );
