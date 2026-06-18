@@ -163,7 +163,11 @@ function AddCompanyModal({ onClose }: { onClose: () => void }) {
 
   const mutation = useMutation({
     mutationFn: () => crmApi.createCompany({ ...form }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['crm-companies'] }); onClose() },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['crm-companies'] })
+      void qc.invalidateQueries({ queryKey: ['crm-companies-picker'] })
+      onClose()
+    },
     onError: (e: Error) => setError(e.message),
   })
 
@@ -237,7 +241,11 @@ function EditCompanyModal({ company, onClose }: { company: Company; onClose: () 
       state_province:form.state_province?.trim() || null,
       postal_code:   form.postal_code?.trim() || null,
     }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['crm-companies'] }); onClose() },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['crm-companies'] })
+      void qc.invalidateQueries({ queryKey: ['crm-companies-picker'] })
+      onClose()
+    },
     onError: (e: Error) => setError(e.message),
   })
 
@@ -432,7 +440,8 @@ function CompanyPanel({
           company={company}
           onClose={() => {
             setEditingCompany(false)
-            qc.invalidateQueries({ queryKey: ['crm-companies'] })
+            void qc.invalidateQueries({ queryKey: ['crm-companies'] })
+            void qc.invalidateQueries({ queryKey: ['crm-companies-picker'] })
             onEdited?.(company)
           }}
         />
@@ -537,6 +546,7 @@ function CompaniesTab() {
           label={deletingCompany.name}
           onConfirm={() => crmApi.deleteCompany(deletingCompany.id).then(() => {
             void qc.invalidateQueries({ queryKey: ['crm-companies'] })
+            void qc.invalidateQueries({ queryKey: ['crm-companies-picker'] })
             if (selected?.id === deletingCompany.id) setSelected(null)
           })}
           onClose={() => setDeletingCompany(null)}
@@ -590,7 +600,8 @@ function AddContactModal({ defaultCompanyId, onClose }: { defaultCompanyId?: str
     }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['crm-contacts'] })
-      if (defaultCompanyId) void qc.invalidateQueries({ queryKey: ['crm-companies'] })
+      void qc.invalidateQueries({ queryKey: ['crm-companies'] })
+      void qc.invalidateQueries({ queryKey: ['crm-companies-picker'] })
       onClose()
     },
     onError: (e: Error) => setError(e.message),
@@ -1910,13 +1921,6 @@ function TenderPipelineTab() {
     queryFn: () => pipelineApi.list({ pipeline_type: 'JABCO_TENDER', limit: 200 }),
   })
 
-  // Prefetch companies so the picker is warm before the modal mounts
-  useQuery({
-    queryKey: ['crm-companies-picker'],
-    queryFn: () => crmApi.getCompanies({ limit: 200 }),
-    staleTime: 60_000,
-  })
-
   const opps = data?.opportunities ?? []
 
   const byStage = (stage: PipelineStage) => opps.filter(o => o.stage === stage)
@@ -2047,6 +2051,14 @@ type Tab = 'companies' | 'contacts' | 'tender'
 export default function CRM() {
   const { t } = useTranslation()
   const [tab, setTab] = useState<Tab>('companies')
+
+  // Warm the companies picker cache as soon as CRM page loads so
+  // Add/Edit contact modals and New Opportunity modal have data immediately.
+  useQuery({
+    queryKey: ['crm-companies-picker'],
+    queryFn: () => crmApi.getCompanies({ limit: 200 }),
+    staleTime: 60_000,
+  })
 
   return (
     <div className="flex flex-col h-full bg-slate-900">
