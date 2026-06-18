@@ -36,7 +36,7 @@ export const CATEGORY_LABELS: Record<ExpenseCategory, string> = {
 }
 
 export const PAYMENT_METHODS = [
-  'CASH', 'BANK_TRANSFER', 'CREDIT_CARD', 'CHEQUE', 'DIRECT_DEBIT', 'OTHER',
+  'CASH', 'BANK_TRANSFER', 'CREDIT_CARD', 'DEBIT_CARD', 'CHEQUE', 'DIRECT_DEBIT', 'OTHER',
 ] as const
 export type PaymentMethod = (typeof PAYMENT_METHODS)[number]
 
@@ -44,6 +44,7 @@ export const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
   CASH:          'Cash',
   BANK_TRANSFER: 'Bank Transfer',
   CREDIT_CARD:   'Credit Card',
+  DEBIT_CARD:    'Debit Card',
   CHEQUE:        'Cheque',
   DIRECT_DEBIT:  'Direct Debit',
   OTHER:         'Other',

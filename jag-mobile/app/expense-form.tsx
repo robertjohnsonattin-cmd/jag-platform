@@ -154,7 +154,7 @@ export default function ExpenseForm() {
         amount_ttd:      toTTD(numAmount, currency),
         payment_method:  paymentMethod,
         category,
-        card_id:         paymentMethod === 'CREDIT_CARD' ? selectedCardId ?? undefined : undefined,
+        card_id:         (paymentMethod === 'CREDIT_CARD' || paymentMethod === 'DEBIT_CARD') ? selectedCardId ?? undefined : undefined,
         notes:           note.trim() || undefined,
         idempotency_key: randomKey(),
       })
@@ -210,7 +210,6 @@ export default function ExpenseForm() {
               placeholderTextColor="#475569"
               value={newCardName}
               onChangeText={setNewCardName}
-              autoFocus
             />
             <TextInput
               style={styles.pickerInput}
@@ -261,7 +260,7 @@ export default function ExpenseForm() {
       current  = paymentMethod
       onSelect = v => {
         setPaymentMethod(v as PaymentMethod)
-        if (v !== 'CREDIT_CARD') setSelectedCardId(null)
+        if (v !== 'CREDIT_CARD' && v !== 'DEBIT_CARD') setSelectedCardId(null)
         setActivePicker(null)
       }
     } else if (activePicker === 'card') {
@@ -373,8 +372,8 @@ export default function ExpenseForm() {
           <Text style={styles.chevron}>▾</Text>
         </TouchableOpacity>
 
-        {/* Credit Card — shown only when Credit Card is selected */}
-        {paymentMethod === 'CREDIT_CARD' && (
+        {/* Card — shown for Credit Card and Debit Card */}
+        {(paymentMethod === 'CREDIT_CARD' || paymentMethod === 'DEBIT_CARD') && (
           <>
             <Text style={styles.label}>Card</Text>
             <TouchableOpacity
@@ -448,7 +447,7 @@ export default function ExpenseForm() {
 
       </ScrollView>
 
-      <PickerSheet />
+      {PickerSheet()}
     </View>
   )
 }

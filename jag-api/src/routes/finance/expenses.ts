@@ -42,7 +42,7 @@ const CATEGORIES = [
   'GROCERIES','FUEL','DINING','MAINTENANCE','SUBSCRIPTIONS','TRANSPORT','CLOTHING',
 ] as const;
 
-const PAYMENT_METHODS = ['CASH','BANK_TRANSFER','CREDIT_CARD','CHEQUE','DIRECT_DEBIT','OTHER'] as const;
+const PAYMENT_METHODS = ['CASH','BANK_TRANSFER','CREDIT_CARD','DEBIT_CARD','CHEQUE','DIRECT_DEBIT','OTHER'] as const;
 
 const ExpenseQuerySchema = z.object({
   owner_entity_id: z.string().uuid().optional(),
