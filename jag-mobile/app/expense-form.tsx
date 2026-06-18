@@ -14,7 +14,7 @@ import {
 import * as ImagePicker from 'expo-image-picker'
 import { useRouter } from 'expo-router'
 import { logout } from '../src/auth/keycloak'
-import { expensesApi, creditCardsApi, type CreditCard } from '../src/api/expenses'
+import { expensesApi, creditCardsApi, fxRatesApi, type CreditCard } from '../src/api/expenses'
 import {
   CATEGORIES,
   CATEGORY_LABELS,
@@ -27,12 +27,13 @@ import {
   type Currency,
 } from '../src/constants/enums'
 
-const FX_TO_TTD: Record<Currency, number> = {
+const FALLBACK_FX: Record<string, number> = {
   TTD: 1, USD: 6.78, CNY: 0.94, EUR: 7.35, GBP: 8.60,
 }
 
-function toTTD(amount: number, currency: Currency): number {
-  return parseFloat((amount * FX_TO_TTD[currency]).toFixed(2))
+function toTTD(amount: number, currency: Currency, rateMap: Record<string, number>): number {
+  const rate = rateMap[currency] ?? FALLBACK_FX[currency] ?? 1
+  return parseFloat((amount * rate).toFixed(2))
 }
 
 function randomKey(): string {
@@ -71,8 +72,16 @@ export default function ExpenseForm() {
   const [newCardLast4, setNewCardLast4]   = useState('')
   const [savingCard, setSavingCard]       = useState(false)
 
+  // Live FX rates fetched from API — fallback to hardcoded if unavailable
+  const [rateMap, setRateMap] = useState<Record<string, number>>(FALLBACK_FX)
+
   useEffect(() => {
     creditCardsApi.list().then(setCards).catch(() => {})
+    fxRatesApi.getAll().then(rates => {
+      const map: Record<string, number> = { TTD: 1 }
+      rates.forEach(r => { map[r.currency] = parseFloat(r.rate_to_ttd) })
+      setRateMap(map)
+    }).catch(() => {}) // keep fallback on network error
   }, [])
 
   // ── Helpers ────────────────────────────────────────────────────────────────
@@ -153,7 +162,7 @@ export default function ExpenseForm() {
         payee_name:      payee.trim() || undefined,
         amount:          numAmount,
         currency,
-        amount_ttd:      toTTD(numAmount, currency),
+        amount_ttd:      toTTD(numAmount, currency, rateMap),
         payment_method:  paymentMethod,
         category,
         card_id:         (paymentMethod === 'CREDIT_CARD' || paymentMethod === 'DEBIT_CARD') ? selectedCardId ?? undefined : undefined,
@@ -344,7 +353,7 @@ export default function ExpenseForm() {
         </View>
         {amount && !isNaN(parseFloat(amount)) && currency !== 'TTD' && (
           <Text style={styles.hint}>
-            ≈ TTD {toTTD(parseFloat(amount), currency).toLocaleString('en-TT', { minimumFractionDigits: 2 })}
+            ≈ TTD {toTTD(parseFloat(amount), currency, rateMap).toLocaleString('en-TT', { minimumFractionDigits: 2 })}
           </Text>
         )}
 

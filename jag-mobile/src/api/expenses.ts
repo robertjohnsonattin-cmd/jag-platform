@@ -63,6 +63,15 @@ export const expensesApi = {
     api.post<Expense>(`/finance/expenses/${id}/submit`, {}),
 }
 
+export interface FxRate {
+  currency: string
+  rate_to_ttd: string
+}
+
+export const fxRatesApi = {
+  getAll: () => api.get<FxRate[]>('/finance/fx-rates'),
+}
+
 export const creditCardsApi = {
   list: () =>
     api.get<CreditCard[]>('/finance/credit-cards'),
