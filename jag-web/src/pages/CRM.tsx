@@ -1800,12 +1800,29 @@ function OppDetail({
   onClose: () => void
 }) {
   const { t } = useTranslation()
+  const qc = useQueryClient()
   const [modal, setModal] = useState<TenderModal>(null)
+  const [confirmDelete, setConfirmDelete] = useState(false)
 
-  const showGoNoGo = ['LEAD', 'QUALIFIED'].includes(opp.stage)
-  const showSubmit = ['QUALIFIED', 'PROPOSAL', 'NEGOTIATION'].includes(opp.stage)
-  const showDecide = opp.stage === 'SUBMITTED'
-  const showEdit   = ['PREQUALIFICATION', 'LEAD', 'QUALIFIED', 'PROPOSAL', 'NEGOTIATION'].includes(opp.stage)
+  const showAdvance = opp.stage === 'PREQUALIFICATION'
+  const showGoNoGo  = ['LEAD', 'QUALIFIED'].includes(opp.stage)
+  const showSubmit  = ['QUALIFIED', 'PROPOSAL', 'NEGOTIATION'].includes(opp.stage)
+  const showDecide  = opp.stage === 'SUBMITTED'
+  const showEdit    = ['PREQUALIFICATION', 'LEAD', 'QUALIFIED', 'PROPOSAL', 'NEGOTIATION'].includes(opp.stage)
+  const canDelete   = !['WON', 'LOST', 'NO_GO'].includes(opp.stage)
+
+  const advanceMut = useMutation({
+    mutationFn: () => pipelineApi.advance(opp.id),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['tender-pipeline'] }); },
+  })
+
+  const deleteMut = useMutation({
+    mutationFn: () => pipelineApi.delete(opp.id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['tender-pipeline'] });
+      onClose();
+    },
+  })
 
   return (
     <>
@@ -1850,6 +1867,13 @@ function OppDetail({
 
         {/* Actions */}
         <div className="px-5 py-3 flex flex-wrap gap-2">
+          {showAdvance && (
+            <button
+              onClick={() => advanceMut.mutate()}
+              disabled={advanceMut.isPending}
+              className="px-3 py-1.5 rounded text-xs bg-green-700 hover:bg-green-600 text-white transition-colors disabled:opacity-50"
+            >{advanceMut.isPending ? '...' : t('tender.advanceToLead', 'Advance to Lead')}</button>
+          )}
           {showGoNoGo && (
             <button
               onClick={() => setModal('gonogo')}
@@ -1873,6 +1897,27 @@ function OppDetail({
               onClick={() => setModal('edit')}
               className="px-3 py-1.5 rounded text-xs bg-slate-600 hover:bg-slate-500 text-white transition-colors"
             >Edit</button>
+          )}
+          {canDelete && (
+            confirmDelete ? (
+              <div className="flex items-center gap-1 ml-auto">
+                <span className="text-xs text-red-400">Delete?</span>
+                <button
+                  onClick={() => deleteMut.mutate()}
+                  disabled={deleteMut.isPending}
+                  className="px-2 py-1 rounded text-xs bg-red-700 hover:bg-red-600 text-white transition-colors disabled:opacity-50"
+                >{deleteMut.isPending ? '...' : 'Yes'}</button>
+                <button
+                  onClick={() => setConfirmDelete(false)}
+                  className="px-2 py-1 rounded text-xs bg-slate-600 hover:bg-slate-500 text-white transition-colors"
+                >No</button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setConfirmDelete(true)}
+                className="px-3 py-1.5 rounded text-xs bg-red-900/60 hover:bg-red-800 text-red-300 hover:text-white transition-colors ml-auto"
+              >Delete</button>
+            )
           )}
         </div>
       </div>

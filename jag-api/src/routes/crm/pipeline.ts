@@ -798,3 +798,86 @@ pipelineRouter.post('/:id/decide', async (req: Request, res: Response, next: Nex
     next(e);
   }
 });
+
+// ── POST /pipeline/:id/advance ─────────────────────────────────────────────────
+// Advance from PREQUALIFICATION → LEAD. No other stage transitions allowed here;
+// LEAD→QUALIFIED uses Go/No-Go, QUALIFIED+→SUBMITTED uses Submit, SUBMITTED→ uses Decide.
+
+pipelineRouter.post('/:id/advance', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const idParsed = UUIDParam.safeParse(req.params);
+    if (!idParsed.success) { err(res, 422, 'VALIDATION_ERROR', 'Pipeline ID must be a valid UUID.'); return; }
+    const { id } = idParsed.data;
+    const { userId, tenantId } = req.rlsCtx;
+
+    const client = await commercialPool.connect();
+    try {
+      const updated = await withTenantRLS(client, req.rlsCtx, async (c) => {
+        const current = await c.query<{ stage: string }>(
+          `SELECT stage FROM crm_sales_pipeline WHERE id = $1`, [id],
+        ).then(r => r.rows[0] ?? null);
+
+        if (!current) throw Object.assign(new Error('Pipeline opportunity not found.'), { status: 404, code: 'PIPELINE_NOT_FOUND' });
+        if (current.stage !== 'PREQUALIFICATION') {
+          throw Object.assign(
+            new Error(`Advance only moves PREQUALIFICATION → LEAD (currently ${current.stage}).`),
+            { status: 409, code: 'INVALID_STAGE' },
+          );
+        }
+
+        return c.query(
+          `UPDATE crm_sales_pipeline SET stage = 'LEAD', updated_at = now() WHERE id = $1 RETURNING *`, [id],
+        ).then(r => r.rows[0]);
+      });
+
+      logger.info({ entity: 'CRM_PIPELINE', action: 'PIPELINE_ADVANCED', user_id: userId, tenant_id: tenantId, record_id: id });
+      await auditLog(tenantId, userId, 'CrmPipeline', 'PIPELINE_ADVANCED', id, { from: 'PREQUALIFICATION', to: 'LEAD' });
+      ok(res, updated);
+    } finally { client.release(); }
+  } catch (e: unknown) {
+    const ex = e as { status?: number; code?: string; message: string };
+    if (ex.status === 404) { err(res, 404, ex.code ?? 'PIPELINE_NOT_FOUND', ex.message); return; }
+    if (ex.status === 409) { err(res, 409, ex.code ?? 'CONFLICT', ex.message); return; }
+    next(e);
+  }
+});
+
+// ── DELETE /pipeline/:id ───────────────────────────────────────────────────────
+// Only allowed for non-terminal stages (WON/LOST/NO_GO cannot be deleted).
+
+pipelineRouter.delete('/:id', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const idParsed = UUIDParam.safeParse(req.params);
+    if (!idParsed.success) { err(res, 422, 'VALIDATION_ERROR', 'Pipeline ID must be a valid UUID.'); return; }
+    const { id } = idParsed.data;
+    const { userId, tenantId } = req.rlsCtx;
+
+    const client = await commercialPool.connect();
+    try {
+      await withTenantRLS(client, req.rlsCtx, async (c) => {
+        const current = await c.query<{ stage: string }>(
+          `SELECT stage FROM crm_sales_pipeline WHERE id = $1`, [id],
+        ).then(r => r.rows[0] ?? null);
+
+        if (!current) throw Object.assign(new Error('Pipeline opportunity not found.'), { status: 404, code: 'PIPELINE_NOT_FOUND' });
+        if (['WON', 'LOST', 'NO_GO'].includes(current.stage)) {
+          throw Object.assign(
+            new Error(`Cannot delete a ${current.stage} opportunity — it is part of the bid intelligence record.`),
+            { status: 409, code: 'INVALID_STAGE' },
+          );
+        }
+
+        await c.query(`DELETE FROM crm_sales_pipeline WHERE id = $1`, [id]);
+      });
+
+      logger.info({ entity: 'CRM_PIPELINE', action: 'PIPELINE_DELETED', user_id: userId, tenant_id: tenantId, record_id: id });
+      await auditLog(tenantId, userId, 'CrmPipeline', 'PIPELINE_DELETED', id, {});
+      ok(res, { deleted: true });
+    } finally { client.release(); }
+  } catch (e: unknown) {
+    const ex = e as { status?: number; code?: string; message: string };
+    if (ex.status === 404) { err(res, 404, ex.code ?? 'PIPELINE_NOT_FOUND', ex.message); return; }
+    if (ex.status === 409) { err(res, 409, ex.code ?? 'CONFLICT', ex.message); return; }
+    next(e);
+  }
+});

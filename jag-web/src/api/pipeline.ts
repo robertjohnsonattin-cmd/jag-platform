@@ -70,6 +70,12 @@ export const pipelineApi = {
     idempotency_key: string
   }) => client.post<{ pipeline: PipelineOpportunity; created: boolean }>(`/crm/pipeline/${id}/decide`, body),
 
+  advance: (id: string) =>
+    client.post<PipelineOpportunity>(`/crm/pipeline/${id}/advance`, {}),
+
+  delete: (id: string) =>
+    client.delete<{ deleted: boolean }>(`/crm/pipeline/${id}`),
+
   intelligence: (client_company_id: string, work_package_tags?: string) =>
     client.get<IntelligenceResult>(
       `/crm/pipeline/intelligence${qs({ client_company_id, work_package_tags })}`
