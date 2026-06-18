@@ -25,7 +25,7 @@ const PipelineQuerySchema = z.object({
   pipeline_type: z.enum(['JABCO_TENDER','DRAGONBRIDGE_DEAL']).optional(),
   assigned_to: z.string().uuid().optional(),
   page: z.coerce.number().int().min(1).default(1),
-  limit: z.coerce.number().int().min(1).max(100).default(50),
+  limit: z.coerce.number().int().min(1).max(500).default(50),
 }).strict();
 
 const CreatePipelineSchema = z.object({
