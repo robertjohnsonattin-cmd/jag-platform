@@ -1,7 +1,7 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useCallback } from 'react'
 import {
   View, Text, FlatList, TouchableOpacity,
-  StyleSheet, RefreshControl, ActivityIndicator, Platform,
+  StyleSheet, RefreshControl, ActivityIndicator, Platform, Alert,
 } from 'react-native'
 import { useRouter, useFocusEffect } from 'expo-router'
 import { expensesApi, type Expense } from '../src/api/expenses'
@@ -29,9 +29,10 @@ function fmtDate(dateStr: string) {
 
 export default function ExpenseList() {
   const router = useRouter()
-  const [expenses, setExpenses] = useState<Expense[]>([])
-  const [loading, setLoading]   = useState(true)
+  const [expenses, setExpenses]     = useState<Expense[]>([])
+  const [loading, setLoading]       = useState(true)
   const [refreshing, setRefreshing] = useState(false)
+  const [submitting, setSubmitting] = useState<string | null>(null)
 
   async function load(silent = false) {
     if (!silent) setLoading(true)
@@ -46,6 +47,26 @@ export default function ExpenseList() {
   }
 
   useFocusEffect(useCallback(() => { load() }, []))
+
+  async function handleSubmit(id: string) {
+    Alert.alert('Submit Expense', 'Submit this expense for approval?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Submit', style: 'default',
+        onPress: async () => {
+          setSubmitting(id)
+          try {
+            await expensesApi.submit(id)
+            await load(true)
+          } catch {
+            Alert.alert('Error', 'Could not submit expense.')
+          } finally {
+            setSubmitting(null)
+          }
+        },
+      },
+    ])
+  }
 
   function onRefresh() {
     setRefreshing(true)
@@ -71,8 +92,21 @@ export default function ExpenseList() {
         {e.payee_name ? <Text style={styles.cardPayee}>{e.payee_name}</Text> : null}
         <View style={[styles.cardRow, { marginTop: 8 }]}>
           <Text style={styles.cardCat}>{catLabel}</Text>
-          <View style={[styles.badge, { backgroundColor: STATUS_COLORS[e.status] ?? '#475569' }]}>
-            <Text style={styles.badgeText}>{e.status}</Text>
+          <View style={styles.cardRowRight}>
+            <View style={[styles.badge, { backgroundColor: STATUS_COLORS[e.status] ?? '#475569' }]}>
+              <Text style={styles.badgeText}>{e.status}</Text>
+            </View>
+            {e.status === 'DRAFT' && (
+              <TouchableOpacity
+                style={styles.submitBtn}
+                onPress={() => handleSubmit(e.id)}
+                disabled={submitting === e.id}
+              >
+                {submitting === e.id
+                  ? <ActivityIndicator size="small" color="#fff" />
+                  : <Text style={styles.submitBtnText}>Submit</Text>}
+              </TouchableOpacity>
+            )}
           </View>
         </View>
       </View>
@@ -166,8 +200,11 @@ const styles = StyleSheet.create({
   cardPayee:  { color: '#94a3b8', fontSize: 13, marginTop: 2 },
   cardCat:    { color: '#64748b', fontSize: 12 },
 
-  badge: {
-    paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6,
-  },
+  cardRowRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  badge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 },
   badgeText: { color: '#fff', fontSize: 11, fontWeight: '700' },
+  submitBtn: {
+    backgroundColor: '#3b82f6', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 6,
+  },
+  submitBtnText: { color: '#fff', fontSize: 11, fontWeight: '700' },
 })
