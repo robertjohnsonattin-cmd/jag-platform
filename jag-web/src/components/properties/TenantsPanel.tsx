@@ -47,27 +47,23 @@ function AddTenantModal({ onClose, onCreated }: { onClose: () => void; onCreated
       <div className="bg-slate-800 border border-slate-700 rounded-xl w-full max-w-lg p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
         <h2 className="text-lg font-semibold mb-4 text-white">{t('tenants.addTenant')}</h2>
         <div className="space-y-3">
-          <div className="flex items-center gap-2">
-            <input type="checkbox" id="is_company" checked={form.is_company} onChange={setCheck('is_company')} className="rounded" />
-            <label htmlFor="is_company" className="text-sm text-slate-300">{t('tenants.company')}</label>
+          <div className="flex gap-3">
+            <div className="flex-1">
+              <label className="block text-xs text-slate-400 mb-1">{t('tenants.firstName')}</label>
+              <input value={form.first_name} onChange={set('first_name')} className={cls} disabled={form.is_company} />
+            </div>
+            <div className="flex-1">
+              <label className="block text-xs text-slate-400 mb-1">{t('tenants.lastName')}</label>
+              <input value={form.last_name} onChange={set('last_name')} className={cls} disabled={form.is_company} />
+            </div>
           </div>
-          {form.is_company ? (
-            <div>
-              <label className="block text-xs text-slate-400 mb-1">{t('tenants.companyName')}</label>
-              <input value={form.company_name} onChange={set('company_name')} className={cls} placeholder="e.g. ABC Holdings Ltd" />
+          <div>
+            <div className="flex items-center gap-2 mb-1">
+              <input type="checkbox" id="is_company" checked={form.is_company} onChange={setCheck('is_company')} className="rounded" />
+              <label htmlFor="is_company" className="text-xs text-slate-400">{t('tenants.company')} {form.is_company ? '*' : `(${t('common.optional', 'optional')})`}</label>
             </div>
-          ) : (
-            <div className="flex gap-3">
-              <div className="flex-1">
-                <label className="block text-xs text-slate-400 mb-1">{t('tenants.firstName')}</label>
-                <input value={form.first_name} onChange={set('first_name')} className={cls} />
-              </div>
-              <div className="flex-1">
-                <label className="block text-xs text-slate-400 mb-1">{t('tenants.lastName')}</label>
-                <input value={form.last_name} onChange={set('last_name')} className={cls} />
-              </div>
-            </div>
-          )}
+            <input value={form.company_name} onChange={set('company_name')} className={cls} placeholder="e.g. ABC Holdings Ltd" />
+          </div>
           <div className="flex gap-3">
             <div className="flex-1">
               <label className="block text-xs text-slate-400 mb-1">{t('tenants.phone')}</label>
@@ -173,27 +169,23 @@ function EditTenantModal({ tenant, onClose, onSaved }: { tenant: PropertyTenant;
       <div className="bg-slate-800 border border-slate-700 rounded-xl w-full max-w-lg p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
         <h2 className="text-lg font-semibold mb-4 text-white">{t('tenants.editTenant')}</h2>
         <div className="space-y-3">
-          <div className="flex items-center gap-2">
-            <input type="checkbox" id="edit_is_company" checked={form.is_company} onChange={setCheck('is_company')} className="rounded" />
-            <label htmlFor="edit_is_company" className="text-sm text-slate-300">{t('tenants.company')}</label>
+          <div className="flex gap-3">
+            <div className="flex-1">
+              <label className="block text-xs text-slate-400 mb-1">{t('tenants.firstName')}</label>
+              <input value={form.first_name} onChange={set('first_name')} className={cls} disabled={form.is_company} />
+            </div>
+            <div className="flex-1">
+              <label className="block text-xs text-slate-400 mb-1">{t('tenants.lastName')}</label>
+              <input value={form.last_name} onChange={set('last_name')} className={cls} disabled={form.is_company} />
+            </div>
           </div>
-          {form.is_company ? (
-            <div>
-              <label className="block text-xs text-slate-400 mb-1">{t('tenants.companyName')}</label>
-              <input value={form.company_name} onChange={set('company_name')} className={cls} />
+          <div>
+            <div className="flex items-center gap-2 mb-1">
+              <input type="checkbox" id="edit_is_company" checked={form.is_company} onChange={setCheck('is_company')} className="rounded" />
+              <label htmlFor="edit_is_company" className="text-xs text-slate-400">{t('tenants.company')} {form.is_company ? '*' : `(${t('common.optional', 'optional')})`}</label>
             </div>
-          ) : (
-            <div className="flex gap-3">
-              <div className="flex-1">
-                <label className="block text-xs text-slate-400 mb-1">{t('tenants.firstName')}</label>
-                <input value={form.first_name} onChange={set('first_name')} className={cls} />
-              </div>
-              <div className="flex-1">
-                <label className="block text-xs text-slate-400 mb-1">{t('tenants.lastName')}</label>
-                <input value={form.last_name} onChange={set('last_name')} className={cls} />
-              </div>
-            </div>
-          )}
+            <input value={form.company_name} onChange={set('company_name')} className={cls} placeholder="e.g. ABC Holdings Ltd" />
+          </div>
           <div className="flex gap-3">
             <div className="flex-1">
               <label className="block text-xs text-slate-400 mb-1">{t('tenants.phone')}</label>
