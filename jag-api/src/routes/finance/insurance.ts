@@ -24,6 +24,7 @@ import { withOwnerRLS } from '../../middleware/rls';
 import { familyPool } from '../../db/index';
 import { logger } from '../../lib/logger';
 import { ok, err } from '../../lib/response';
+import { createAllDayCalendarEvent, deleteCalendarEvent } from '../../lib/google-calendar';
 
 export const insuranceRouter = Router();
 
@@ -275,6 +276,27 @@ insuranceRouter.post('/policies', async (req: Request, res: Response, next: Next
         ).then(r => r.rows[0])
       );
       logger.info({ entity: 'Insurance', action: 'POLICY_CREATED', user_id: ownerId, record_id: rec.id });
+
+      // Non-blocking: create calendar event for expiry_date
+      const createdRec = rec;
+      void (async () => {
+        try {
+          const evId = await createAllDayCalendarEvent({
+            title: `Insurance Policy Expiry: ${b.policy_type} — ${b.insurer_name}`,
+            description: `Policy ${b.policy_number} (${b.insurer_name}) expires\nType: ${b.policy_type} / ${b.insured_asset_type}${b.broker_name ? `\nBroker: ${b.broker_name}` : ''}`,
+            date: b.expiry_date,
+          });
+          const c2 = await familyPool.connect();
+          try {
+            await withOwnerRLS(c2, req.rlsCtx, async (c) => {
+              await c.query(`UPDATE fin_insurance_policies SET calendar_event_id = $1 WHERE id = $2`, [evId, createdRec.id]);
+            });
+          } finally { c2.release(); }
+        } catch (calErr) {
+          logger.warn({ entity: 'Insurance', action: 'POLICY_CAL_ERROR', error_message: (calErr as Error).message });
+        }
+      })();
+
       ok(res, rec, 201);
     } finally { client.release(); }
   } catch (e) { next(e); }
@@ -315,6 +337,32 @@ insuranceRouter.patch('/policies/:id', async (req: Request, res: Response, next:
         return updated;
       });
       if (!rec) { err(res, 404, 'NOT_FOUND', 'Policy not found'); return; }
+
+      // Non-blocking: update calendar event when expiry_date changes
+      if (b.expiry_date !== undefined) {
+        const patchedRec = rec;
+        void (async () => {
+          try {
+            if (patchedRec.calendar_event_id) {
+              try { await deleteCalendarEvent(patchedRec.calendar_event_id); } catch { /* stale */ }
+            }
+            const evId = await createAllDayCalendarEvent({
+              title: `Insurance Policy Expiry: ${patchedRec.policy_type} — ${patchedRec.insurer_name}`,
+              description: `Policy ${patchedRec.policy_number} (${patchedRec.insurer_name}) expires\nType: ${patchedRec.policy_type} / ${patchedRec.insured_asset_type}`,
+              date: b.expiry_date as string,
+            });
+            const c2 = await familyPool.connect();
+            try {
+              await withOwnerRLS(c2, req.rlsCtx, async (c) => {
+                await c.query(`UPDATE fin_insurance_policies SET calendar_event_id = $1 WHERE id = $2`, [evId, patchedRec.id]);
+              });
+            } finally { c2.release(); }
+          } catch (calErr) {
+            logger.warn({ entity: 'Insurance', action: 'POLICY_CAL_UPDATE_ERROR', error_message: (calErr as Error).message });
+          }
+        })();
+      }
+
       ok(res, rec);
     } finally { client.release(); }
   } catch (e) { next(e); }

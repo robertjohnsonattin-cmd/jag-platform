@@ -2,6 +2,8 @@
 // POST   /api/v1/ims/vehicles
 // PATCH  /api/v1/ims/vehicles/:id
 // DELETE /api/v1/ims/vehicles/:id  (Owner only — hard delete if no movements/depreciation)
+// GET    /api/v1/ims/vehicles/:id/service-log
+// POST   /api/v1/ims/vehicles/:id/service-log
 
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import { z } from 'zod';
@@ -9,6 +11,7 @@ import { withTenantRLS } from '../../middleware/rls';
 import { commercialPool } from '../../db/index';
 import { logger } from '../../lib/logger';
 import { ok, err } from '../../lib/response';
+import { createAllDayCalendarEvent, deleteCalendarEvent } from '../../lib/google-calendar';
 
 export const imsVehiclesRouter = Router();
 
@@ -72,6 +75,18 @@ const VehiclesQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(20),
 }).strict();
 
+const SERVICE_TYPES = ['OIL_CHANGE','FULL_SERVICE','TYRES','BRAKES','INSPECTION','WASH','OTHER'] as const;
+
+const CreateServiceLogSchema = z.object({
+  service_date:          z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  mileage_km:            z.number().int().min(0).optional(),
+  service_type:          z.enum(SERVICE_TYPES).default('OTHER'),
+  description:           z.string().max(2000).optional(),
+  cost_ttd:              z.number().min(0).optional(),
+  performed_by:          z.string().max(200).optional(),
+  service_interval_days: z.number().int().min(1).max(3650).optional(),
+}).strict();
+
 const UUIDParam = z.object({ id: z.string().uuid() });
 
 // ── GET /vehicles ─────────────────────────────────────────────────────────────
@@ -112,6 +127,7 @@ imsVehiclesRouter.get('/', async (req: Request, res: Response, next: NextFunctio
                   v.current_mileage_km, v.assigned_to_user_id,
                   v.last_service_date, v.next_service_date, v.service_interval_days,
                   v.sim_number,
+                  v.cal_service_event_id, v.cal_insurance_event_id, v.cal_registration_event_id,
                   v.last_modified_at, v.created_at,
                   i.id          AS item_id,
                   i.name        AS item_name,
@@ -202,6 +218,53 @@ imsVehiclesRouter.post('/', async (req: Request, res: Response, next: NextFuncti
       });
 
       logger.info({ entity: 'IMS', action: 'VEHICLE_CREATED', user_id: userId, tenant_id: tenantId, item_id: vehicle.item_id });
+
+      // Non-blocking calendar event creation after commit
+      const label = `${b.registration_number} — ${b.make} ${b.model}`;
+      const calUpdates: Record<string, string> = {};
+
+      void (async () => {
+        try {
+          if (nextServiceDate) {
+            const evId = await createAllDayCalendarEvent({
+              title: `Vehicle Service Due: ${label}`,
+              description: `Next scheduled service for ${label} (${b.owner_entity})`,
+              date: nextServiceDate,
+            });
+            calUpdates['cal_service_event_id'] = evId;
+          }
+          if (b.insurance_expiry) {
+            const evId = await createAllDayCalendarEvent({
+              title: `Vehicle Insurance Expiry: ${label}`,
+              description: `Insurance policy expires for ${label} (${b.insurance_provider ?? b.owner_entity})`,
+              date: b.insurance_expiry,
+            });
+            calUpdates['cal_insurance_event_id'] = evId;
+          }
+          if (b.registration_expiry) {
+            const evId = await createAllDayCalendarEvent({
+              title: `Vehicle Registration Expiry: ${label}`,
+              description: `Registration expires for ${label} (${b.owner_entity})`,
+              date: b.registration_expiry,
+            });
+            calUpdates['cal_registration_event_id'] = evId;
+          }
+
+          if (Object.keys(calUpdates).length > 0) {
+            const sets = Object.keys(calUpdates).map((k, i) => `${k} = $${i + 2}`).join(', ');
+            const vals = Object.values(calUpdates);
+            const c2 = await commercialPool.connect();
+            try {
+              await withTenantRLS(c2, req.rlsCtx, async (c) => {
+                await c.query(`UPDATE ims_vehicles SET ${sets} WHERE id = $1`, [vehicle.vehicle_id, ...vals]);
+              });
+            } finally { c2.release(); }
+          }
+        } catch (calErr) {
+          logger.warn({ entity: 'IMS', action: 'VEHICLE_CAL_CREATE_ERROR', error_message: (calErr as Error).message });
+        }
+      })();
+
       ok(res, vehicle, 201);
     } finally { client.release(); }
   } catch (e) { next(e); }
@@ -218,17 +281,30 @@ imsVehiclesRouter.patch('/:id', async (req: Request, res: Response, next: NextFu
 
     const b = bodyP.data;
     const { userId } = req.rlsCtx;
+    const vehicleId = idP.data.id;
 
     const client = await commercialPool.connect();
     try {
-      const result = await withTenantRLS(client, req.rlsCtx, async (c) => {
-        // Fetch current service_interval_days to compute next_service_date
-        const cur = await c.query<{ service_interval_days: number; item_id: string }>(
-          `SELECT service_interval_days, item_id FROM ims_vehicles WHERE id = $1`,
-          [idP.data.id],
+      const { result, currentVehicle } = await withTenantRLS(client, req.rlsCtx, async (c) => {
+        // Fetch current values needed for calendar management and next_service_date calc
+        const cur = await c.query<{
+          service_interval_days: number; item_id: string;
+          make: string; model: string; registration_number: string; owner_entity: string;
+          insurance_expiry: string | null; registration_expiry: string | null;
+          next_service_date: string | null;
+          cal_service_event_id: string | null;
+          cal_insurance_event_id: string | null;
+          cal_registration_event_id: string | null;
+        }>(
+          `SELECT service_interval_days, item_id, make, model, registration_number, owner_entity,
+                  insurance_expiry, registration_expiry, next_service_date,
+                  cal_service_event_id, cal_insurance_event_id, cal_registration_event_id
+           FROM ims_vehicles WHERE id = $1`,
+          [vehicleId],
         );
-        if (cur.rows.length === 0) return null;
-        const intervalDays = b.service_interval_days ?? cur.rows[0].service_interval_days;
+        if (cur.rows.length === 0) return { result: null, currentVehicle: null };
+        const cv = cur.rows[0];
+        const intervalDays = b.service_interval_days ?? cv.service_interval_days;
 
         // Vehicle row updates
         const vCols: string[] = ['last_modified_at = now()'];
@@ -249,7 +325,7 @@ imsVehiclesRouter.patch('/:id', async (req: Request, res: Response, next: NextFu
         }
         if (b.sim_number !== undefined) vCols.push(`sim_number = ${vPush(b.sim_number)}`);
 
-        vParams.push(idP.data.id);
+        vParams.push(vehicleId);
         await c.query(
           `UPDATE ims_vehicles SET ${vCols.join(', ')} WHERE id = $${vParams.length}`,
           vParams,
@@ -265,21 +341,224 @@ imsVehiclesRouter.patch('/:id', async (req: Request, res: Response, next: NextFu
         if (b.location_id !== undefined) iCols.push(`location_id = ${iPush(b.location_id)}`);
 
         if (iCols.length > 2) {
-          iParams.push(cur.rows[0].item_id);
+          iParams.push(cv.item_id);
           await c.query(
             `UPDATE ims_items SET ${iCols.join(', ')} WHERE id = $${iParams.length}`,
             iParams,
           );
         }
 
-        return { updated: true };
+        return { result: { updated: true }, currentVehicle: cv };
       });
 
       if (!result) { err(res, 404, 'VEHICLE_NOT_FOUND', 'Vehicle not found.'); return; }
-      logger.info({ entity: 'IMS', action: 'VEHICLE_UPDATED', user_id: userId, record_id: idP.data.id });
+      logger.info({ entity: 'IMS', action: 'VEHICLE_UPDATED', user_id: userId, record_id: vehicleId });
+
+      // Non-blocking calendar event management
+      if (currentVehicle) {
+        const cv = currentVehicle;
+        const label = `${cv.registration_number} — ${cv.make} ${cv.model}`;
+        void (async () => {
+          try {
+            const calUpdates: Record<string, string | null> = {};
+
+            if (b.last_service_date !== undefined || b.service_interval_days !== undefined) {
+              if (cv.cal_service_event_id) {
+                try { await deleteCalendarEvent(cv.cal_service_event_id); } catch { /* stale */ }
+              }
+              const newInterval = b.service_interval_days ?? cv.service_interval_days;
+              const newLastDate = b.last_service_date ?? null;
+              if (newLastDate) {
+                const newNextDate = computeNextService(newLastDate, newInterval);
+                const evId = await createAllDayCalendarEvent({
+                  title: `Vehicle Service Due: ${label}`,
+                  description: `Next scheduled service for ${label} (${cv.owner_entity})`,
+                  date: newNextDate,
+                });
+                calUpdates['cal_service_event_id'] = evId;
+              } else {
+                calUpdates['cal_service_event_id'] = null;
+              }
+            }
+
+            if (b.insurance_expiry !== undefined) {
+              if (cv.cal_insurance_event_id) {
+                try { await deleteCalendarEvent(cv.cal_insurance_event_id); } catch { /* stale */ }
+              }
+              if (b.insurance_expiry) {
+                const evId = await createAllDayCalendarEvent({
+                  title: `Vehicle Insurance Expiry: ${label}`,
+                  description: `Insurance policy expires for ${label} (${cv.owner_entity})`,
+                  date: b.insurance_expiry,
+                });
+                calUpdates['cal_insurance_event_id'] = evId;
+              } else {
+                calUpdates['cal_insurance_event_id'] = null;
+              }
+            }
+
+            if (b.registration_expiry !== undefined) {
+              if (cv.cal_registration_event_id) {
+                try { await deleteCalendarEvent(cv.cal_registration_event_id); } catch { /* stale */ }
+              }
+              if (b.registration_expiry) {
+                const evId = await createAllDayCalendarEvent({
+                  title: `Vehicle Registration Expiry: ${label}`,
+                  description: `Registration expires for ${label} (${cv.owner_entity})`,
+                  date: b.registration_expiry,
+                });
+                calUpdates['cal_registration_event_id'] = evId;
+              } else {
+                calUpdates['cal_registration_event_id'] = null;
+              }
+            }
+
+            if (Object.keys(calUpdates).length > 0) {
+              const sets = Object.keys(calUpdates).map((k, i) => `${k} = $${i + 2}`).join(', ');
+              const vals = Object.values(calUpdates);
+              const c2 = await commercialPool.connect();
+              try {
+                await withTenantRLS(c2, req.rlsCtx, async (c) => {
+                  await c.query(`UPDATE ims_vehicles SET ${sets} WHERE id = $1`, [vehicleId, ...vals]);
+                });
+              } finally { c2.release(); }
+            }
+          } catch (calErr) {
+            logger.warn({ entity: 'IMS', action: 'VEHICLE_CAL_UPDATE_ERROR', error_message: (calErr as Error).message });
+          }
+        })();
+      }
+
       ok(res, result);
     } finally { client.release(); }
   } catch (e) { next(e); }
+});
+
+// ── GET /vehicles/:id/service-log ─────────────────────────────────────────────
+
+imsVehiclesRouter.get('/:id/service-log', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const idP = UUIDParam.safeParse(req.params);
+    if (!idP.success) { err(res, 422, 'VALIDATION_ERROR', 'ID must be a valid UUID.'); return; }
+
+    const client = await commercialPool.connect();
+    try {
+      const rows = await withTenantRLS(client, req.rlsCtx, async (c) =>
+        c.query(
+          `SELECT * FROM ims_vehicle_service_log
+           WHERE vehicle_id = $1
+           ORDER BY service_date DESC, created_at DESC`,
+          [idP.data.id],
+        ).then(r => r.rows),
+      );
+      ok(res, rows);
+    } finally { client.release(); }
+  } catch (e) { next(e); }
+});
+
+// ── POST /vehicles/:id/service-log ────────────────────────────────────────────
+// Creates a log entry, updates vehicle's last_service_date/next_service_date,
+// and creates/replaces the service calendar event.
+
+imsVehiclesRouter.post('/:id/service-log', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const idP = UUIDParam.safeParse(req.params);
+    if (!idP.success) { err(res, 422, 'VALIDATION_ERROR', 'ID must be a valid UUID.'); return; }
+    const bodyP = CreateServiceLogSchema.safeParse(req.body);
+    if (!bodyP.success) { err(res, 422, 'VALIDATION_ERROR', 'Request body validation failed.'); return; }
+
+    const b = bodyP.data;
+    const vehicleId = idP.data.id;
+    const { tenantId, userId } = req.rlsCtx;
+
+    const client = await commercialPool.connect();
+    try {
+      const { logEntry, vehicle } = await withTenantRLS(client, req.rlsCtx, async (c) => {
+        // Fetch current vehicle data
+        const cur = await c.query<{
+          service_interval_days: number;
+          make: string; model: string; registration_number: string; owner_entity: string;
+          cal_service_event_id: string | null;
+        }>(
+          `SELECT service_interval_days, make, model, registration_number, owner_entity, cal_service_event_id
+           FROM ims_vehicles WHERE id = $1`,
+          [vehicleId],
+        );
+        if (cur.rows.length === 0) throw Object.assign(new Error('Vehicle not found.'), { status: 404 });
+        const cv = cur.rows[0];
+
+        const intervalDays = b.service_interval_days ?? cv.service_interval_days;
+        const nextServiceDate = computeNextService(b.service_date, intervalDays);
+
+        // Insert service log entry
+        const logResult = await c.query(
+          `INSERT INTO ims_vehicle_service_log
+             (vehicle_id, tenant_id, service_date, mileage_km, service_type,
+              description, cost_ttd, performed_by, next_service_date, last_modified_by)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+           RETURNING *`,
+          [vehicleId, tenantId, b.service_date, b.mileage_km ?? null,
+           b.service_type, b.description ?? null, b.cost_ttd ?? null,
+           b.performed_by ?? null, nextServiceDate, userId],
+        );
+
+        // Update vehicle's last_service_date and next_service_date
+        if (b.service_interval_days !== undefined) {
+          await c.query(
+            `UPDATE ims_vehicles
+             SET last_service_date = $1, next_service_date = $2, service_interval_days = $3, last_modified_at = now()
+             WHERE id = $4`,
+            [b.service_date, nextServiceDate, intervalDays, vehicleId],
+          );
+        } else {
+          await c.query(
+            `UPDATE ims_vehicles
+             SET last_service_date = $1, next_service_date = $2, last_modified_at = now()
+             WHERE id = $3`,
+            [b.service_date, nextServiceDate, vehicleId],
+          );
+        }
+
+        // Update mileage if provided
+        if (b.mileage_km !== undefined) {
+          await c.query(`UPDATE ims_vehicles SET current_mileage_km = $1 WHERE id = $2`, [b.mileage_km, vehicleId]);
+        }
+
+        return { logEntry: logResult.rows[0], vehicle: { ...cv, intervalDays, nextServiceDate } };
+      });
+
+      logger.info({ entity: 'IMS', action: 'VEHICLE_SERVICE_LOGGED', user_id: userId, tenant_id: tenantId, record_id: vehicleId });
+
+      // Non-blocking: replace service calendar event
+      void (async () => {
+        try {
+          if (vehicle.cal_service_event_id) {
+            try { await deleteCalendarEvent(vehicle.cal_service_event_id); } catch { /* stale */ }
+          }
+          const label = `${vehicle.registration_number} — ${vehicle.make} ${vehicle.model}`;
+          const evId = await createAllDayCalendarEvent({
+            title: `Vehicle Service Due: ${label}`,
+            description: `Next scheduled service for ${label} (${vehicle.owner_entity})\nLast serviced: ${b.service_date}`,
+            date: vehicle.nextServiceDate,
+          });
+          const c2 = await commercialPool.connect();
+          try {
+            await withTenantRLS(c2, req.rlsCtx, async (c) => {
+              await c.query(`UPDATE ims_vehicles SET cal_service_event_id = $1 WHERE id = $2`, [evId, vehicleId]);
+            });
+          } finally { c2.release(); }
+        } catch (calErr) {
+          logger.warn({ entity: 'IMS', action: 'VEHICLE_CAL_SERVICE_LOG_ERROR', error_message: (calErr as Error).message });
+        }
+      })();
+
+      ok(res, logEntry, 201);
+    } finally { client.release(); }
+  } catch (e: unknown) {
+    const ex = e as { status?: number; message: string };
+    if (ex.status === 404) { err(res, 404, 'VEHICLE_NOT_FOUND', ex.message); return; }
+    next(e);
+  }
 });
 
 // ── DELETE /vehicles/:id ──────────────────────────────────────────────────────
@@ -300,7 +579,9 @@ imsVehiclesRouter.delete('/:id', async (req: Request, res: Response, next: NextF
     try {
       await withTenantRLS(client, req.rlsCtx, async (c) => {
         const vehicle = await c.query(
-          `SELECT v.id, v.item_id, i.name FROM ims_vehicles v JOIN ims_items i ON i.id = v.item_id WHERE v.id = $1`,
+          `SELECT v.id, v.item_id, i.name,
+                  v.cal_service_event_id, v.cal_insurance_event_id, v.cal_registration_event_id
+           FROM ims_vehicles v JOIN ims_items i ON i.id = v.item_id WHERE v.id = $1`,
           [id],
         ).then(r => r.rows[0] ?? null);
         if (!vehicle) throw Object.assign(new Error('Vehicle not found.'), { status: 404, code: 'VEHICLE_NOT_FOUND' });
@@ -326,8 +607,16 @@ imsVehiclesRouter.delete('/:id', async (req: Request, res: Response, next: NextF
 
         await c.query(`DELETE FROM ims_vehicles WHERE id = $1`, [id]);
         await c.query(`DELETE FROM ims_items    WHERE id = $1`, [vehicle.item_id]);
+
+        // Clean up calendar events non-blocking
+        void Promise.allSettled([
+          vehicle.cal_service_event_id      ? deleteCalendarEvent(vehicle.cal_service_event_id)      : Promise.resolve(),
+          vehicle.cal_insurance_event_id    ? deleteCalendarEvent(vehicle.cal_insurance_event_id)    : Promise.resolve(),
+          vehicle.cal_registration_event_id ? deleteCalendarEvent(vehicle.cal_registration_event_id) : Promise.resolve(),
+        ]);
+
         return vehicle.name as string;
-      }).then(async (name) => {
+      }).then(async () => {
         logger.info({ entity: 'IMS', action: 'VEHICLE_DELETED', user_id: userId, tenant_id: tenantId, record_id: id });
       });
 

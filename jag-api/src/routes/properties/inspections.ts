@@ -8,6 +8,7 @@ import { withOwnerRLS } from '../../middleware/rls';
 import { propertiesPool } from '../../db/index';
 import { logger } from '../../lib/logger';
 import { ok, err } from '../../lib/response';
+import { createAllDayCalendarEvent, deleteCalendarEvent } from '../../lib/google-calendar';
 
 export const inspectionsRouter = Router({ mergeParams: true });
 
@@ -91,6 +92,31 @@ inspectionsRouter.post('/', async (req: Request, res: Response, next: NextFuncti
       });
 
       logger.info({ entity: 'Properties', action: 'INSPECTION_CREATED', user_id: req.rlsCtx.userId, owner_id: ownerId, record_id: record.id });
+
+      // Non-blocking: create calendar event for inspection_date
+      const inspectionRecord = record;
+      void (async () => {
+        try {
+          const prop = await propertiesPool.connect();
+          try {
+            const addr = await prop.query<{ address: string }>(
+              `SELECT COALESCE(address_line1, 'Property') AS address FROM prop_properties WHERE id = $1`,
+              [propertyId],
+            ).then(r => r.rows[0]?.address ?? 'Property');
+            const evId = await createAllDayCalendarEvent({
+              title: `Property Inspection: ${addr} — ${b.inspection_type}`,
+              description: `${b.inspection_type} inspection at property ${propertyId}${b.inspector_name ? `\nInspector: ${b.inspector_name}` : ''}${b.notes ? `\nNotes: ${b.notes}` : ''}`,
+              date: b.inspection_date,
+            });
+            await withOwnerRLS(prop, req.rlsCtx, async (c) => {
+              await c.query(`UPDATE prop_inspections SET calendar_event_id = $1 WHERE id = $2`, [evId, inspectionRecord.id]);
+            });
+          } finally { prop.release(); }
+        } catch (calErr) {
+          logger.warn({ entity: 'Properties', action: 'INSPECTION_CAL_ERROR', error_message: (calErr as Error).message });
+        }
+      })();
+
       ok(res, record, 201);
     } finally { client.release(); }
   } catch (e) { next(e); }
@@ -138,6 +164,36 @@ inspectionsRouter.patch('/:id', async (req: Request, res: Response, next: NextFu
 
       if (!record) { err(res, 404, 'NOT_FOUND', 'Inspection not found.'); return; }
       logger.info({ entity: 'Properties', action: 'INSPECTION_UPDATED', user_id: req.rlsCtx.userId, record_id: id });
+
+      // Non-blocking: update calendar event when inspection_date changes
+      if (b.inspection_date !== undefined) {
+        void (async () => {
+          try {
+            const cur = record as { calendar_event_id?: string; inspection_type: string; inspector_name?: string; notes?: string };
+            if (cur.calendar_event_id) {
+              try { await deleteCalendarEvent(cur.calendar_event_id); } catch { /* stale */ }
+            }
+            const prop2 = await propertiesPool.connect();
+            try {
+              const addr = await prop2.query<{ address: string }>(
+                `SELECT COALESCE(address_line1, 'Property') AS address FROM prop_properties WHERE id = $1`,
+                [propertyId],
+              ).then(r => r.rows[0]?.address ?? 'Property');
+              const evId = await createAllDayCalendarEvent({
+                title: `Property Inspection: ${addr} — ${cur.inspection_type}`,
+                description: `${cur.inspection_type} inspection at property ${propertyId}${cur.inspector_name ? `\nInspector: ${cur.inspector_name}` : ''}${cur.notes ? `\nNotes: ${cur.notes}` : ''}`,
+                date: b.inspection_date as string,
+              });
+              await withOwnerRLS(prop2, req.rlsCtx, async (c) => {
+                await c.query(`UPDATE prop_inspections SET calendar_event_id = $1 WHERE id = $2`, [evId, id]);
+              });
+            } finally { prop2.release(); }
+          } catch (calErr) {
+            logger.warn({ entity: 'Properties', action: 'INSPECTION_CAL_UPDATE_ERROR', error_message: (calErr as Error).message });
+          }
+        })();
+      }
+
       ok(res, record);
     } finally { client.release(); }
   } catch (e) { next(e); }

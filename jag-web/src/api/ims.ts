@@ -104,6 +104,20 @@ export const imsApi = {
   }): Promise<{ updated: boolean }> =>
     client.patch(`/ims/vehicles/${vehicleId}`, data),
 
+  getVehicleServiceLog: (vehicleId: string): Promise<import('../types/ims').VehicleServiceLog[]> =>
+    client.get(`/ims/vehicles/${vehicleId}/service-log`),
+
+  logVehicleService: (vehicleId: string, data: {
+    service_date: string;
+    mileage_km?: number;
+    service_type?: string;
+    description?: string;
+    cost_ttd?: number;
+    performed_by?: string;
+    service_interval_days?: number;
+  }): Promise<import('../types/ims').VehicleServiceLog> =>
+    client.post(`/ims/vehicles/${vehicleId}/service-log`, data),
+
   // ── Photos ───────────────────────────────────────────────────────────────────
 
   getPhotos: (itemId: string): Promise<{ id: string; storage_path: string; is_primary: boolean; created_at: string }[]> =>

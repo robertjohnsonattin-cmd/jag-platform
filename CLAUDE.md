@@ -1,7 +1,7 @@
 # JAG Integrated Business Platform — Claude Session Context
 
 **Owner:** Robert Johnson-Attin | Barataria, Trinidad & Tobago
-**Architecture:** v1.9 | **Current Phase:** ALL PHASES COMPLETE — in production | **Updated:** 2026-06-17 (session 16)
+**Architecture:** v1.9 | **Current Phase:** ALL PHASES COMPLETE — in production | **Updated:** 2026-06-18 (session 22)
 
 ---
 
@@ -184,6 +184,20 @@ The Dockerfile copies `dist/` (pre-compiled TypeScript) — **NOT** `src/`. Uplo
 Deploy runs **7 steps**: TypeScript compile → frontend build → VM check → dist upload → health check → ZAP baseline → frontend upload.
 Step 6 (ZAP baseline) fires automatically when `ZAP_SCAN_PASSWORD` env var is set; silently skips if unset. Blocks deploy on HIGH-risk findings only.
 
+### Google Calendar service account key
+The service account JSON key is stored as a file **not** a base64 env var. Base64 encoding through heredoc + docker-compose env chain caused `invalid_grant: Invalid JWT Signature` (silent corruption).
+
+**File location on VM:** `/opt/jag/jag-api/google-calendar-key.json` (read-only, outside the Docker image)
+**docker-compose.yml volume mount:** `- /opt/jag/jag-api/google-calendar-key.json:/opt/jag/jag-api/google-calendar-key.json:ro`
+**`getAccessToken()`** reads the file via `fs.readFileSync` first; falls back to `GOOGLE_SERVICE_ACCOUNT_KEY` base64 env var if the file is absent.
+**Service account:** `jag-api@gen-lang-client-0812561230.iam.gserviceaccount.com` — calendar shared with this address (Editor permission on `robertjohnsonattin@gmail.com` calendar).
+**If key needs rotation:** download new JSON from Google Cloud → SCP to `/opt/jag/jag-api/google-calendar-key.json` on VM → `docker compose up -d api` (no rebuild needed — file is mounted, not baked into image).
+
+### RLS and bare-connection UPDATEs — CRITICAL
+Any `UPDATE` on an RLS-protected table run on a pool connection **without** first calling `withTenantRLS` (or `withOwnerRLS`) will silently update 0 rows — no error, no warning. This is the correct RLS behaviour but easy to miss in async `.then()` callbacks that acquire a fresh connection after the original RLS context has closed.
+
+**Rule:** always wrap UPDATE/DELETE on tenant-scoped tables in `withTenantRLS(conn, ctx, ...)` even in fire-and-forget callbacks. Capture `req.rlsCtx` before the async boundary so it's available inside the `.then()`.
+
 ### OWASP ZAP security scanning
 - Scripts: `security/zap-baseline.sh` (passive, ~5 min, deploy gate) and `security/zap-full-scan.sh` (active, ~60 min, manual)
 - Auth hook: `security/zap_auth_hook.py` — injects JWT Bearer token + Cache-Control bypass into every ZAP request
@@ -322,6 +336,8 @@ All financial documents (loan statements, investment portfolios, insurance polic
 | MinIO root | `jag_minio_admin` / `EsvMOHas4ASnWY9f1M9rTV2rQByRsqAz` (admin only — console + mc) |
 | MinIO jag_app | access key `aVl4SrRl0YtilT55zCNe` / secret `gjdzq9IH8IZM0MSlazE8szxH67kz2VYtbWavQe29` (scoped to 4 JAG buckets via `jag-app-buckets` policy) |
 | MinIO audit token | stored in VM `.env` as `MINIO_AUDIT_TOKEN` — shared secret for MinIO→jag-api webhook |
+| Gemini API key | stored in VM `.env` as `GEMINI_API_KEY` — used by listing.ts suggest-price endpoint |
+| Gemini model | `GEMINI_MODEL=gemini-3.5-flash` in VM `.env` — change here to upgrade model without code deploy |
 
 ---
 
@@ -418,6 +434,7 @@ All financial documents (loan statements, investment portfolios, insurance polic
 | Succession routes | `routes/succession/` | Succession planning |
 | Family routes | `routes/family/` | Family module |
 | Finance bank statements | `routes/finance/bank-statements.ts` | Upload, queue, list, delete jobs; MinIO storage; `fin_bank_statement_jobs` table; `POST /import` for Path 2 local script |
+| Finance credit/debit cards | `routes/finance/credit-cards.ts` | Card CRUD for mobile expense form; `fin_credit_cards` table; used by mobile for card picker on CREDIT_CARD/DEBIT_CARD payment methods |
 | Finance document jobs | `routes/finance/document-jobs.ts` | Path 1 cloud upload → REVIEW → approve; writes to loans/investments/insurance on approve; auto-deletes MinIO object |
 | Finance /import endpoints | `bank-statements.ts`, `loans.ts`, `investments.ts`, `insurance.ts` | Path 2 direct JSON import from local script; all require `idempotency_key` |
 | Finance investment valuations | `routes/finance/investments.ts` | `GET /:id/valuations` — history sorted desc by as_of_date; `POST /:id/valuations` — manual historical backfill; auto-insert valuation row on every PATCH to `fin_investments` (same `withOwnerRLS` callback); table `fin_investment_valuations` (migration 009 jag_family) |
@@ -434,9 +451,13 @@ All financial documents (loan statements, investment portfolios, insurance polic
 | Tenancy maintenance | `routes/properties/maintenance-tickets.ts` | P1–P4 tickets + ticket updates + `/check-sla` batch; contractors CRUD |
 | Tenancy renewals | `routes/properties/renewals.ts` | Renewal notices + tenant response + process-renew/vacate; `/send-notices` D-60/D-30/D-14 batch |
 | Tenancy WhatsApp | `routes/properties/whatsapp-send.ts` | Outbound template send; `routes/internal/whatsapp-webhook.ts` inbound webhook (Meta verify + message store) |
-| Tenancy listing | `routes/properties/listing.ts` | Unit listing CRUD + Ollama AI rent suggestion + SMS broadcast |
-| Google Calendar lib | `src/lib/google-calendar.ts` | `getAvailableSlots()` + `createCalendarEvent()` + `deleteCalendarEvent()` via Google Calendar v3 API (service account); `google-auth-library` npm dep |
+| Tenancy listing | `routes/properties/listing.ts` | Unit listing CRUD + Gemini AI rent suggestion + SMS broadcast + photo upload/confirm/list/delete + listing-info PATCH; `triggerAutoListing()` exported and called by handover.ts on EXIT completion |
+| Google Calendar lib | `src/lib/google-calendar.ts` | `getAvailableSlots()` + `createCalendarEvent()` + `deleteCalendarEvent()` + `createAllDayCalendarEvent()` via Google Calendar v3 API (service account); `google-auth-library` npm dep; key read from `/opt/jag/jag-api/google-calendar-key.json` (volume-mounted), falls back to `GOOGLE_SERVICE_ACCOUNT_KEY` base64 env var |
+| CRM calendar integration | `routes/crm/crm.ts` + `routes/internal/crm-calendar-backfill.ts` | All-day Google Calendar event created non-blocking when `follow_up_date` set on interaction; `calendar_event_id` stored back via `withTenantRLS` UPDATE; backfill endpoint `POST /internal/crm/backfill-calendar` for historical rows; ✓/⚠ sync indicator in CRM panel |
 | WhatsApp lib | `src/lib/whatsapp.ts` | `sendTemplate()` + `sendText()` via Meta Cloud API |
+| WA approvals | `routes/properties/wa-approvals.ts` | PENDING approval queue for RENT_FORMAL_DEMAND / RENT_LEGAL_NOTICE / DEPOSIT_RECON; approve-and-send + dismiss endpoints |
+| WA inbox | `routes/properties/wa-inbox.ts` | Unified conversation timeline (WA messages + contact log); `prop_contact_log` entries |
+| MinIO lib | `src/lib/minio.ts` | Added `getPresignedGetUrl()` (1h TTL for web display, 7-day TTL for Facebook photo posts) |
 
 ### Phase 7 Migrations (jag_commercial)
 
@@ -457,6 +478,8 @@ All financial documents (loan statements, investment portfolios, insurance polic
 | `021_project_tasks.sql` | jabco_project_tasks (MOBILIZATION/POST_MORTEM/GENERAL; OPEN/IN_PROGRESS/DONE); RLS |
 | `022_punch_incidents_quality.sql` | jabco_punch_list_items (IDENTIFIED→RECTIFIED→VERIFIED), jabco_site_incidents, jabco_quality_inspections; all RLS |
 | `023_project_closeout_fields.sql` | handover_document_url TEXT on jabco_projects |
+| `028_crm_interaction_calendar_event_id.sql` | `calendar_event_id TEXT` on `crm_interactions` — stores Google Calendar event ID for follow-up date sync |
+| `029_vehicle_calendar_service_log.sql` | `cal_service_event_id`, `cal_insurance_event_id`, `cal_registration_event_id TEXT` on `ims_vehicles`; `ims_vehicle_service_log` append-only table (vehicle_id FK, service_date, mileage_km, service_type, description, cost_ttd, performed_by, next_service_date); RLS tenant policy |
 
 ### Phase 7 Migrations (jag_family)
 
@@ -467,6 +490,9 @@ All financial documents (loan statements, investment portfolios, insurance polic
 | `009_investment_valuations.sql` | `fin_investment_valuations` append-only table; FK → `fin_investments(id) ON DELETE CASCADE`; indexes on `(investment_id, as_of_date DESC)` and `(owner_id, as_of_date DESC)`; RLS using `NULLIF(current_setting('app.current_owner_id', true), '')::uuid` |
 | `010_loan_balance_history.sql` | `fin_loan_balance_history` append-only table; FK → `fin_mortgages_loans(id) ON DELETE CASCADE`; tracks outstanding_balance, interest_rate, monthly_payment; same RLS + index pattern |
 | `011_insurance_policy_history.sql` | `fin_insurance_policy_history` append-only table; FK → `fin_insurance_policies(id) ON DELETE CASCADE`; tracks coverage_amount_ttd, premium_amount_ttd, expiry_date; same RLS + index pattern |
+| `012_credit_cards_categories.sql` | `fin_credit_cards` table (card_name, last_four, card_type, is_active); `card_id UUID` FK column on `fin_expenses`; expense category CHECK constraint expanded; applied via postgres superuser (jag_app not owner of fin_expenses) |
+| `013_debit_card_payment_method.sql` | `ALTER TYPE expense_payment_method ADD VALUE 'DEBIT_CARD'` — enum extension for debit card support |
+| `016_insurance_calendar_event_id.sql` | `calendar_event_id TEXT` on `fin_insurance_policies` — stores Google Calendar event ID for expiry date |
 
 ### Phase 7 Migrations (jag_properties)
 
@@ -492,7 +518,17 @@ All financial documents (loan statements, investment portfolios, insurance polic
 | `019_maintenance_tickets.sql` | `prop_maintenance_tickets`, `prop_ticket_updates`, `prop_contractors` — P1–P4 tickets, SLA breach flag, update log, contractor directory |
 | `020_whatsapp_messages.sql` | `prop_wa_conversations`, `prop_wa_messages` — WhatsApp thread + message store (INBOUND/OUTBOUND) |
 | `021_renewal_notices.sql` | `prop_renewal_notices` — lease renewal tracking with D-60/D-30/D-14 notice timestamps |
-| `022_unit_enhancements.sql` | `prop_units` additions: `listing_status`, `booking_slug` (unique), rent suggestion columns; `prop_listings` table |
+| `022_unit_enhancements.sql` | `prop_units` additions: `listing_status`, `booking_slug` (unique), rent suggestion columns; `prop_broadcast_contacts` table |
+| `023_tenant_phone2.sql` | phone2 on tenants |
+| `024_contractor_crm_link.sql` | crm_contact_id FK on prop_contractors |
+| `025_maintenance_contractor_assign.sql` | contractor assignment on maintenance tickets |
+| `026_wa_pending_approvals.sql` | `prop_wa_pending_approvals` — manual-approve queue for RENT_FORMAL_DEMAND / RENT_LEGAL_NOTICE / DEPOSIT_RECON |
+| `027_contact_log.sql` | `prop_contact_log` — call/note log entries in WA inbox timeline |
+| `028_rent_schedule_reminder_cols.sql` | reminder tracking columns on rent schedule |
+| `029_viewing_1h_reminder_col.sql` | 1h reminder sent flag on prop_viewings |
+| `030_unit_stale_alert_col.sql` | stale_alert_sent_at on prop_units for dedup |
+| `031_unit_photos.sql` | `listing_description TEXT` on prop_units; `prop_unit_photos` table (owner_id, unit_id FK, object_key, display_order, caption) — MinIO `jag-photos` bucket; RLS |
+| `032_inspection_calendar_event_id.sql` | `calendar_event_id TEXT` on `prop_inspections` — stores Google Calendar event ID for inspection_date |
 
 ### VM Cron Scripts (`jag-infra/scripts/`)
 
@@ -506,6 +542,7 @@ All financial documents (loan statements, investment portfolios, insurance polic
 | `post-viewing-app-link.sh` | 00:30 * | 20:30 * | Hourly (at :30) — send application link to COMPLETED viewings in last 24h |
 | `renewal-notices.sh` | 08:00 | 04:00 | Send D-60/D-30/D-14 WhatsApp renewal notices for expiring leases |
 | `sla-monitor.sh` | */30 * | every 30 min | Mark open maintenance tickets where SLA hours exceeded; creates BREACH update log |
+| `stale-listing-alert.sh` | 09:00 | 05:00 | WhatsApp alert to Robert for units LISTED >14 days without a booked viewing; deduped via `stale_alert_sent_at` on prop_units |
 | `setup-minio-policy.sh` | one-time | — | Create `jag-app-buckets` IAM policy + attach to jag_app user; re-run after MinIO data wipe |
 | `fdw-rotate-password.sh` | manual | — | Resync FDW USER MAPPING passwords after jag_app PG credential rotation |
 
@@ -532,6 +569,86 @@ Path 2 local extraction — reads PDFs from local hard drive, Ollama extracts, p
 
 ---
 
+## JAG MOBILE APP (session 17, 2026-06-18)
+
+**App directory:** `jag-mobile/` (at repo root, alongside `jag-api/`, `jag-web/`, `jag-infra/`)
+**Package:** `com.jagcorporate.mobile`
+**Platform:** Android only (Samsung S24 Ultra — Robert's primary device)
+**Release APK:** sideloaded via `adb install -r android/app/build/outputs/apk/release/app-release.apk`
+
+### Stack
+
+| Component | Choice |
+|---|---|
+| Framework | React Native 0.76.3 / Expo 52 (bare workflow) |
+| Routing | expo-router v4 |
+| Auth | Keycloak PKCE via `react-native-app-auth` v8; redirect scheme `jagmobile://` |
+| Token storage | `expo-secure-store` (Android Keystore hardware-backed encryption) |
+| Notifications | `@notifee/react-native` — persistent ongoing notification in Android shade |
+| Camera / gallery | `expo-image-picker` for receipt photos |
+
+### Screens
+
+| Route | Purpose |
+|---|---|
+| `/login` | Keycloak PKCE login; auto-redirects if refresh token exists |
+| `/expense-form` | Quick expense entry — amount, currency, category, payment method, payee, card picker, receipt photo; auto-submits on save |
+| `/expenses` | Expense list (50 most recent); DRAFT items show Submit button |
+
+### Auth Pattern
+- First login: PKCE browser redirect → tokens stored in SecureStore (`jag_access_token`, `jag_refresh_token`, `jag_id_token`)
+- Subsequent opens: silent refresh via `refresh_token` grant — no manual login required
+- Notification shown as soon as `jag_refresh_token` exists in SecureStore (no need to wait for full auth check)
+
+### Notification Widget
+- Persistent ongoing notification in Android shade (like Money Manager) — channel `jag-quick-entry`
+- `+ New Expense` action button opens expense-form directly
+- Importance: `DEFAULT` (silent on Samsung One UI — no sound, no vibration)
+- `ongoing: true` keeps notification pinned until force-stop or restart
+- **After phone restart:** `BootReceiver.kt` restores notification via `BOOT_COMPLETED` broadcast
+  - `exported="false"` (security — protected broadcast, external apps can't trigger it)
+  - Samsung battery optimization blocks boot receiver for sideloaded apps → set **Settings → Apps → JAG Mobile → Battery → Unrestricted**
+
+### Release Signing
+- Keystore: `jag-mobile/android/app/jag-mobile.keystore` (gitignored via `android/.gitignore`)
+- Credentials: `jag-mobile/android/signing.properties` (gitignored) — `MYAPP_UPLOAD_STORE_FILE`, `MYAPP_UPLOAD_KEY_ALIAS`, `MYAPP_UPLOAD_STORE_PASSWORD`, `MYAPP_UPLOAD_KEY_PASSWORD`
+- `build.gradle` reads `signing.properties` via `Properties.load()` — never stores credentials in code
+- Password: `labourday2026` (both store and key password)
+
+### App Icon
+- Square + round variants at all mipmap densities (mdpi through xxxhdpi)
+- JAG hexagonal logo, white background, logo fills ~96% of icon space
+- Source: PowerShell brightness-threshold pixel scan to find tight logo bounds, gray background pixels replaced with white
+
+### Splash Screen
+- Dark navy background (`#0f172a`) via `res/values/colors.xml` → `splashscreen_background`
+- White silhouette JAG logo (`splashscreen_logo.png`) at all drawable densities
+
+### Build Commands
+```powershell
+# Debug build
+cd jag-mobile && npx expo run:android
+
+# Release build
+cd jag-mobile/android && ./gradlew assembleRelease
+
+# Install on connected device
+adb install -r app/build/outputs/apk/release/app-release.apk
+```
+
+### Key Patterns
+- **FX rates:** fetched live from `GET /finance/fx-rates` on expense-form mount; `FALLBACK_FX` used if offline (`TTD:1, USD:6.78, CNY:0.94, EUR:7.35, GBP:8.60`)
+- **Card picker:** fetches `GET /finance/credit-cards`; shown only when payment method is `CREDIT_CARD` or `DEBIT_CARD`
+- **Receipt photo:** `expo-image-picker` (camera or gallery) → `POST /finance/expenses/:id/receipt` as multipart/form-data
+- **Notification icon:** `ic_notification.png` — must be white on transparent (Android requirement); at drawable densities 24/36/48/72/96px
+
+### Security Notes
+- `BootReceiver` uses `exported="false"` — BOOT_COMPLETED is a protected broadcast so system still delivers it, but other apps cannot trigger the receiver by component name
+- No biometric lock (decided not to add — acceptable for current use)
+- All tokens in Android Keystore via expo-secure-store; never in AsyncStorage or plaintext
+
+---
+
 ## OPEN ITEMS
 
 - ~~**WiPay webhook**~~ — **REMOVED**: WiPay does not issue webhooks to individuals; rents paid directly to personal bank accounts
@@ -550,7 +667,6 @@ Path 2 local extraction — reads PDFs from local hard drive, Ollama extracts, p
 - **Ollama vision** — `DRY_RUN=false` ✓; text-PDF extraction working; scanned PDFs use vision model. **Use `llava` not `llama3.2-vision`** — mllama architecture not supported by Ollama 0.30.8 on this machine (error: unknown model architecture 'mllama'). `.env.ollama-batch` already set to `OLLAMA_MODEL_VISION=llava`. Run `ollama pull llava` (~4.7GB) to enable scanned-PDF extraction. Until then, scanned docs land in REVIEW with nulls — fill manually in Finance → Documents.
 - ~~**Chart of Accounts (A2)**~~ — **DONE 2026-06-12**: 150 accounts across 7 entities seeded via `migration/coa-populate.js`; GL route fix (23505 error code) committed `621a976`
 - ~~**FX Rates (A3)**~~ — **DONE 2026-06-12**: `jag-infra/scripts/fx-rates-sync.sh` seeds rates from open.er-api.com daily at 06:00 TT via VM cron; today's seed: 1 USD = 6.7829 TTD, 1 CNY = 0.9993 TTD
-- **Leases (B3)** — PENDING: all leases expired; need monthly rent amounts per unit from Robert to create new leases
 - **JAG Plantations / JAG Trading** — future phases; placeholder pages exist in frontend
 - ~~**JAG Entertainment UI** — BAR + Members Club frontend not yet built~~ **DONE**
 - ~~**DragonBridge UI** — China sourcing / forex frontend not yet built~~ **DONE**
@@ -581,6 +697,22 @@ Path 2 local extraction — reads PDFs from local hard drive, Ollama extracts, p
 - ~~**Dashboard investments double-conversion**~~ — **DONE 2026-06-17 (session 15)**: `Dashboard.tsx` line 104 was multiplying `current_value_ttd` (already TTD) by `rateMap[currency]` again. Fixed to `investments.reduce((s, i) => s + parseFloat(i.current_value_ttd ?? '0'), 0)`. Inflated USD holdings ~6.77x — dashboard showed ~$34.6M for investments; correct value is now shown.
 - ~~**IMS valuation double-counting fixed assets**~~ — **DONE 2026-06-17 (session 15)**: `routes/ims/items.ts` summary query counted `is_asset = true` items in both `total_stock_value` AND `total_asset_value`. Fixed: `total_stock_value` now filters `AND is_asset IS NOT TRUE`; `total_asset_value` now uses `SUM(qty * unit_value)` (was `SUM(unit_value)` — omitted quantity). API rebuilt and deployed.
 - ~~**CRM contact detail fields + entity cross-linking**~~ — **DONE 2026-06-17 (session 16)**: Contacts now store address (line1/line2/city/state/postal), birthday, notes, land/cell phone labels. `GET /crm/contacts/:id` returns full contact + last 20 interactions. `PATCH /crm/companies/:id` + EditCompanyModal for editing company address. PREQUALIFICATION stage added to pipeline kanban; company dropdown prefetch fix (staleTime:60s on `crm-companies-picker`); `contactCount` pluralization fixed (`Number()` cast). CRM contact detail panel (ContactPanel) with call/WhatsApp/email action links; contacts list rewritten as master-detail layout. New `CrmContactPicker` component (`jag-web/src/components/crm/CrmContactPicker.tsx`) — search-as-you-type with linked contact display (📞💬📱✉️). `CrmContactBadge` for inline read-only card display. `crm_contact_id` (cross-DB soft ref, nullable UUID, no FK) wired into: `prop_contractors` (migration 024 jag_properties), `ent_members` (migration 006 jag_entertainment), `db_clients` (migration 027 jag_commercial). All 7 migrations for this + prior session applied to VM. Commit `7d72654`.
+- ~~**JAG Mobile Android app**~~ — **DONE 2026-06-18 (session 17)**: React Native 0.76.3 / Expo 52 bare workflow; expo-router v4; Keycloak PKCE auth; expo-secure-store token storage. Screens: `/login`, `/expense-form`, `/expenses`. Persistent notification widget in Android shade (`@notifee/react-native`, ongoing, `+ New Expense` action). BootReceiver.kt restores notification after restart (exported=false, RECEIVE_BOOT_COMPLETED). Release-signed APK installed on Samsung S24 Ultra via adb. App icon: JAG hexagonal logo white-background mipmap icons. Splash: dark navy + white JAG logo. Live FX rates from `GET /finance/fx-rates` with FALLBACK_FX for offline. Credit/debit card picker from `GET /finance/credit-cards`. Receipt camera upload. Submit button for DRAFT expenses in list.
+- ~~**Finance credit/debit cards (platform + mobile)**~~ — **DONE 2026-06-18 (session 17)**: `routes/finance/credit-cards.ts` deployed; `fin_credit_cards` table (migration 012 jag_family); `DEBIT_CARD` enum value (migration 013 jag_family); card picker in mobile expense form. Add real cards via Finance → Expenses in web platform (credit-cards tab not yet in web UI — use API or mobile to manage).
+- ~~**WhatsApp template gap analysis + approval queue**~~ — **DONE 2026-06-22 (session 18)**: Full WhatsApp coverage audit. 17 new template triggers wired to backend events. `prop_wa_pending_approvals` table + `prop_contact_log` table (migrations 026–027). `routes/properties/wa-approvals.ts` (pending queue + approve-send + dismiss) and `routes/properties/wa-inbox.ts` (unified conversation timeline). PropertiesWhatsAppPanel updated with Inbox + Pending Approvals tabs. Contractor field added to maintenance tickets. Renamed 3 templates to match Meta approved names (`jag_adv_stale_alert`, `jag_mnt_sla_breach`, `jag_onb_lease_ready`). `stale-listing-alert.sh` VM cron added (09:00 UTC, daily). Deployed.
+- ~~**Unit photo upload + auto-listing on vacancy**~~ — **DONE 2026-06-22 (session 19)**: `prop_unit_photos` table (migration 031 jag_properties) + `listing_description` on prop_units. 5 new endpoints on listing.ts (GET/POST photos, upload-url presigned PUT, DELETE photo, PATCH listing-info). `getPresignedGetUrl()` added to minio.ts. `triggerAutoListing()` exported from listing.ts — called automatically by handover.ts on EXIT sign-off (idempotent, skips if already LISTED). Manual List+Broadcast also fetches photos for Facebook (7-day presigned GET URLs). Public booking page returns photos. ManageListingModal in PropertiesPanel: photo gallery (3-col, hover-to-delete), description, asking rent, utilities (WASA/Electricity/Internet), AI Suggest Price. Deployed.
+- ~~**Gemini AI rent suggestion**~~ — **DONE 2026-06-22 (session 19)**: Replaced Ollama with Gemini (`responseSchema` guarantees structured JSON — no regex parsing). `GEMINI_API_KEY` set on VM `/opt/jag/.env`. `GEMINI_MODEL=gemini-3.5-flash` set on VM (configurable without code change). Returns `{ min, max, recommended, rationale }`. Field name mismatch between backend and frontend fixed in same PR.
+- ~~**CRM Google Calendar follow-up sync**~~ — **DONE 2026-06-22 (session 20)**: `WHATSAPP_CALL` and `WHATSAPP_MESSAGE` added as distinct interaction types (VARCHAR — no migration needed). CRM interaction timestamps now display in Trinidad time (UTC-4 / `America/Port_of_Spain`). `createAllDayCalendarEvent()` added to `google-calendar.ts`; called non-blocking on `POST /crm/interactions` when `follow_up_date` set; `calendar_event_id` written back via `withTenantRLS` UPDATE. Migration 028 (`calendar_event_id TEXT` on `crm_interactions`). Backfill endpoint `POST /internal/crm/backfill-calendar`. ✓/⚠ sync indicator in CRM interaction log. Google service account JSON key stored at `/opt/jag/jag-api/google-calendar-key.json` (volume-mounted read-only) — base64 env var approach caused `invalid_grant` due to encoding corruption. All 8 historical interactions backfilled.
+- ~~**Tender Pipeline kanban empty**~~ — **FIXED 2026-06-18 (session 22)**: `GET /pipeline` returned `{ pipeline: rows }` but frontend `pipelineApi.list()` typed response as `{ opportunities: [...] }` — key mismatch caused `data?.opportunities` to always be `undefined`, `opps=[]`, kanban never rendered. Fixed: renamed response key to `opportunities`. Commit `12c93c4`.
+- ~~**Companies dropdown empty in Add Contact / Edit Contact / New Opportunity modals**~~ — **FIXED 2026-06-18 (session 22)**: `CompaniesQuerySchema` had `limit: max(100)` but all picker queries send `limit: 200` → Zod 422 → React Query error state → empty dropdown. Raised to `max(500)`. Commit `4a18052`.
+- ~~**New Opportunity save error (null assigned_to)**~~ — **FIXED 2026-06-18 (session 22)**: `crm_sales_pipeline.assigned_to` is NOT NULL but `pipeline.ts` POST sent `body.assigned_to ?? null` when not provided. Changed to `body.assigned_to ?? userId` to default to current user. Commit `55e9fb9`.
+- ~~**Pipeline list Zod limit cap**~~ — **FIXED 2026-06-18 (session 22)**: `PipelineQuerySchema` also had `limit: max(100)`; `TenderPipelineTab` queries `limit: 200` → 422 → `opps=[]`. Raised to `max(500)`. Commit `6e2dedf`.
+- ~~**Tenants company field hidden for non-company tenants**~~ — **FIXED 2026-06-18 (session 22)**: `company_name` field was only visible when `is_company=true` checkbox was checked — individuals had no way to add a company/employer name. Restructured Add/Edit tenant modals: first/last name always shown, company field always shown (labelled optional unless `is_company` checked). Commit `422cb5c`.
+- ~~**Pipeline advance + delete actions**~~ — **DONE 2026-06-18 (session 22)**: `POST /pipeline/:id/advance` moves PREQUALIFICATION→LEAD; `DELETE /pipeline/:id` removes non-terminal opportunities (WON/LOST/NO_GO protected — part of bid intelligence). `pipelineApi.advance()` + `pipelineApi.delete()` added to frontend client. OppDetail action panel: green "Advance to Lead" button for PREQUALIFICATION; inline "Delete? Yes/No" confirm for editable stages. Commit `4f7b927`.
+- **Credit/debit cards web UI** — PENDING: no web UI tab for managing `fin_credit_cards` yet; cards can be added via mobile app expense form for now
+- **Leases (B3)** — PENDING: all leases expired; need monthly rent amounts per unit from Robert to create new leases (moved from above, still outstanding)
+- **Unit listing content** — PENDING: 25 units all VACANT; photos, descriptions, asking rent, and utilities need to be filled in manually via Properties → Units → Listing button for each unit
+- **Money Manager reconciliation import** — PENDING: `scripts/mm-import/` not yet built; all-source reconciliation (MM Excel + second Excel report + bank PDFs/CSVs) → single clean import into fin_transactions; 54 existing Scotia rows will be enriched not duplicated; RBC eSavings (`ffa985f6`, last4 3841, $53,755.57 TTD opening balance) and RBC Rewards Visa Platinum (`077b8014`, last4 0512) accounts already created in JAG; Cash account still needs creating; second Excel report contents TBD
 
 ---
 

@@ -132,6 +132,10 @@ export interface Vehicle {
   last_service_date: string | null
   next_service_date: string | null
   service_interval_days: number
+  // Calendar event IDs (migration 029)
+  cal_service_event_id: string | null
+  cal_insurance_event_id: string | null
+  cal_registration_event_id: string | null
   last_modified_at: string
   created_at: string
   item_id: string
@@ -142,6 +146,23 @@ export interface Vehicle {
   serial_number: string | null
   location_id: string | null
   location_name: string | null
+}
+
+export type VehicleServiceType = 'OIL_CHANGE' | 'FULL_SERVICE' | 'TYRES' | 'BRAKES' | 'INSPECTION' | 'WASH' | 'OTHER'
+
+export interface VehicleServiceLog {
+  id: string
+  vehicle_id: string
+  tenant_id: string
+  service_date: string
+  mileage_km: number | null
+  service_type: VehicleServiceType
+  description: string | null
+  cost_ttd: string | null
+  performed_by: string | null
+  next_service_date: string | null
+  created_at: string
+  last_modified_at: string
 }
 
 export interface VehiclesResponse {

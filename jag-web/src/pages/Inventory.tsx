@@ -7,7 +7,7 @@ import type {
   Item, ItemDetail,
   ItemCondition, MovementType,
   StockTakeSummary, StockTakeLine, StockTakeStatus,
-  DepreciationSchedule, Vehicle,
+  DepreciationSchedule, Vehicle, VehicleServiceLog,
 } from '../types/ims'
 import { VEHICLE_OWNER_OPTIONS } from '../types/ims'
 
@@ -243,6 +243,8 @@ function CreateLocationModal({ onClose, onCreated }: { onClose: () => void; onCr
   )
 }
 
+const SERVICE_TYPE_OPTIONS = ['OIL_CHANGE','FULL_SERVICE','TYRES','BRAKES','INSPECTION','WASH','OTHER'] as const
+
 // ── Log Service Modal ─────────────────────────────────────────────────────────
 
 function LogServiceModal({ vehicle, onClose }: { vehicle: Vehicle; onClose: () => void }) {
@@ -252,18 +254,27 @@ function LogServiceModal({ vehicle, onClose }: { vehicle: Vehicle; onClose: () =
   const [serviceDate, setServiceDate] = useState(todayStr)
   const [mileage, setMileage] = useState(String(vehicle.current_mileage_km ?? ''))
   const [intervalDays, setIntervalDays] = useState(String(vehicle.service_interval_days))
+  const [serviceType, setServiceType] = useState('OTHER')
+  const [description, setDescription] = useState('')
+  const [costTtd, setCostTtd] = useState('')
+  const [performedBy, setPerformedBy] = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
   const submit = async () => {
     setSaving(true); setError('')
     try {
-      await imsApi.updateVehicle(vehicle.id, {
-        last_service_date: serviceDate,
+      await imsApi.logVehicleService(vehicle.id, {
+        service_date: serviceDate,
+        service_type: serviceType,
         service_interval_days: Number(intervalDays),
-        current_mileage_km: mileage ? Number(mileage) : undefined,
+        mileage_km: mileage ? Number(mileage) : undefined,
+        description: description || undefined,
+        cost_ttd: costTtd ? Number(costTtd) : undefined,
+        performed_by: performedBy || undefined,
       })
       qc.invalidateQueries({ queryKey: ['ims-vehicles'] })
+      qc.invalidateQueries({ queryKey: ['ims-vehicle-service-log', vehicle.id] })
       onClose()
     } catch (e) { setError((e as Error).message); setSaving(false) }
   }
@@ -275,23 +286,48 @@ function LogServiceModal({ vehicle, onClose }: { vehicle: Vehicle; onClose: () =
   })()
 
   return (
-    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[60]">
-      <div className="bg-slate-800 border border-slate-700 rounded-xl w-full max-w-sm p-5 shadow-2xl">
+    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[60] p-4">
+      <div className="bg-slate-800 border border-slate-700 rounded-xl w-full max-w-md p-5 shadow-2xl">
         <h3 className="text-base font-semibold mb-1 text-white">{t('inv.logServiceTitle')}</h3>
         <p className="text-xs text-slate-400 mb-4">{vehicle.registration_number} — {vehicle.make} {vehicle.model}</p>
         <div className="space-y-3">
-          <div>
-            <label className="block text-xs text-slate-400 mb-1">{t('inv.serviceDate')}</label>
-            <input type="date" value={serviceDate} onChange={e => setServiceDate(e.target.value)} className={cls} />
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">{t('inv.serviceDate')} *</label>
+              <input type="date" value={serviceDate} onChange={e => setServiceDate(e.target.value)} className={cls} />
+            </div>
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">{t('inv.serviceType')}</label>
+              <select value={serviceType} onChange={e => setServiceType(e.target.value)} className={cls}>
+                {SERVICE_TYPE_OPTIONS.map(opt => <option key={opt} value={opt}>{opt.replace('_',' ')}</option>)}
+              </select>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">{t('inv.serviceIntervalDays')}</label>
+              <input type="number" min="1" max="3650" value={intervalDays} onChange={e => setIntervalDays(e.target.value)} className={cls} />
+              <p className="text-xs text-slate-500 mt-1">{t('inv.nextServiceDue')} <span className="text-orange-400 font-medium">{fmtDate(nextDate)}</span></p>
+            </div>
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">{t('inv.currentMileageKm')}</label>
+              <input type="number" min="0" value={mileage} onChange={e => setMileage(e.target.value)} className={cls} />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">{t('inv.serviceCostTTD')}</label>
+              <input type="number" min="0" step="0.01" value={costTtd} onChange={e => setCostTtd(e.target.value)} className={cls} placeholder="0.00" />
+            </div>
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">{t('inv.performedBy')}</label>
+              <input value={performedBy} onChange={e => setPerformedBy(e.target.value)} className={cls} placeholder={t('inv.performedByPlaceholder')} />
+            </div>
           </div>
           <div>
-            <label className="block text-xs text-slate-400 mb-1">{t('inv.serviceIntervalDays')}</label>
-            <input type="number" min="1" max="3650" value={intervalDays} onChange={e => setIntervalDays(e.target.value)} className={cls} />
-            <p className="text-xs text-slate-500 mt-1">{t('inv.nextServiceDue')} <span className="text-orange-400 font-medium">{fmtDate(nextDate)}</span></p>
-          </div>
-          <div>
-            <label className="block text-xs text-slate-400 mb-1">{t('inv.currentMileageKm')}</label>
-            <input type="number" min="0" value={mileage} onChange={e => setMileage(e.target.value)} className={cls} />
+            <label className="block text-xs text-slate-400 mb-1">{t('inv.serviceDescription')}</label>
+            <textarea value={description} onChange={e => setDescription(e.target.value)} rows={2}
+              className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-orange-500 resize-none" />
           </div>
           {error && <p className="text-red-400 text-xs">{error}</p>}
         </div>
@@ -301,6 +337,66 @@ function LogServiceModal({ vehicle, onClose }: { vehicle: Vehicle; onClose: () =
             {saving ? t('common.saving') : t('inv.saveServiceLog')}
           </button>
           <button onClick={onClose} className="px-4 py-2 text-slate-400 hover:text-white text-sm">{t('common.cancel')}</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Service History Modal ──────────────────────────────────────────────────────
+
+function ServiceHistoryModal({ vehicle, onClose }: { vehicle: Vehicle; onClose: () => void }) {
+  const { t } = useTranslation()
+  const { data: logs, isLoading } = useQuery<VehicleServiceLog[]>({
+    queryKey: ['ims-vehicle-service-log', vehicle.id],
+    queryFn: () => imsApi.getVehicleServiceLog(vehicle.id),
+  })
+
+  const fmt2 = new Intl.NumberFormat('en-TT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+
+  return (
+    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[60] p-4">
+      <div className="bg-slate-800 border border-slate-700 rounded-xl w-full max-w-2xl shadow-2xl flex flex-col max-h-[80vh]">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-700 flex-shrink-0">
+          <div>
+            <h3 className="text-base font-semibold text-white">{t('inv.serviceHistoryTitle')}</h3>
+            <p className="text-xs text-slate-400">{vehicle.registration_number} — {vehicle.make} {vehicle.model}</p>
+          </div>
+          <button onClick={onClose} className="text-slate-400 hover:text-white text-xl leading-none">&times;</button>
+        </div>
+        <div className="flex-1 overflow-auto">
+          {isLoading && <div className="flex items-center justify-center h-20 text-slate-400 text-sm">{t('common.loading')}</div>}
+          {!isLoading && (!logs || logs.length === 0) && (
+            <div className="flex items-center justify-center h-20 text-slate-500 text-sm">{t('inv.noServiceHistory')}</div>
+          )}
+          {logs && logs.length > 0 && (
+            <table className="w-full text-sm">
+              <thead className="text-slate-400 text-xs uppercase tracking-wide border-b border-slate-700 sticky top-0 bg-slate-800">
+                <tr>
+                  {(['date','type','mileage','cost','performedBy','description'] as const).map(key => (
+                    <th key={key} className="px-4 py-2.5 text-left font-medium">{t(`inv.svcLog_${key}`)}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {logs.map(log => (
+                  <tr key={log.id} className="border-b border-slate-700/50 hover:bg-slate-700/20">
+                    <td className="px-4 py-2.5 text-white">{fmtDate(log.service_date)}</td>
+                    <td className="px-4 py-2.5">
+                      <span className="px-2 py-0.5 rounded bg-slate-700 text-slate-300 text-xs">{log.service_type.replace('_',' ')}</span>
+                    </td>
+                    <td className="px-4 py-2.5 text-slate-300">{log.mileage_km != null ? `${log.mileage_km.toLocaleString()} km` : '—'}</td>
+                    <td className="px-4 py-2.5 text-slate-300">{log.cost_ttd ? `TTD ${fmt2.format(parseFloat(log.cost_ttd))}` : '—'}</td>
+                    <td className="px-4 py-2.5 text-slate-300 text-xs">{log.performed_by ?? '—'}</td>
+                    <td className="px-4 py-2.5 text-slate-400 text-xs max-w-xs truncate">{log.description ?? '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+        <div className="px-5 py-3 border-t border-slate-700 flex-shrink-0 text-xs text-slate-500">
+          {logs ? t('inv.serviceHistoryCount', { count: logs.length }) : ''}
         </div>
       </div>
     </div>
@@ -1510,6 +1606,7 @@ function VehiclesTab() {
   const [page, setPage] = useState(1)
   const [showAdd, setShowAdd] = useState(false)
   const [logServiceFor, setLogServiceFor] = useState<Vehicle | null>(null)
+  const [serviceHistoryFor, setServiceHistoryFor] = useState<Vehicle | null>(null)
   const [editVehicle, setEditVehicle] = useState<Vehicle | null>(null)
   const [deletingVehicle, setDeletingVehicle] = useState<Vehicle | null>(null)
   const qc = useQueryClient()
@@ -1618,6 +1715,7 @@ function VehiclesTab() {
                   ['insurance',    t('inv.colInsurance')],
                   ['regExpiry',    t('inv.colRegExpiry')],
                   ['nextService',  t('inv.colNextService')],
+                  ['history',      ''],
                   ['actions',      ''],
                 ] as [string, string][]).map(([key, label]) => (
                   <th key={key} className="px-4 py-2.5 text-left font-medium">{label}</th>
@@ -1639,16 +1737,47 @@ function VehiclesTab() {
                     </span>
                   </td>
                   <td className={`px-4 py-2.5 text-xs ${isExpired(v.insurance_expiry) ? 'text-red-400 font-bold' : isExpiringSoon(v.insurance_expiry) ? 'text-orange-400 font-medium' : 'text-slate-300'}`}>
-                    {fmtDate(v.insurance_expiry)}
-                    {(isExpired(v.insurance_expiry) || isExpiringSoon(v.insurance_expiry)) && <span className="ml-1">⚠</span>}
+                    <div className="flex items-center gap-1">
+                      {fmtDate(v.insurance_expiry)}
+                      {(isExpired(v.insurance_expiry) || isExpiringSoon(v.insurance_expiry)) && <span>⚠</span>}
+                      {v.insurance_expiry && (
+                        <span title={v.cal_insurance_event_id ? t('inv.calSynced') : t('inv.calNotSynced')}
+                          className={v.cal_insurance_event_id ? 'text-green-400' : 'text-slate-600'}>
+                          {v.cal_insurance_event_id ? '📅' : '○'}
+                        </span>
+                      )}
+                    </div>
                   </td>
                   <td className={`px-4 py-2.5 text-xs ${isExpired(v.registration_expiry) ? 'text-red-400 font-bold' : isExpiringSoon(v.registration_expiry) ? 'text-orange-400 font-medium' : 'text-slate-300'}`}>
-                    {fmtDate(v.registration_expiry)}
-                    {(isExpired(v.registration_expiry) || isExpiringSoon(v.registration_expiry)) && <span className="ml-1">⚠</span>}
+                    <div className="flex items-center gap-1">
+                      {fmtDate(v.registration_expiry)}
+                      {(isExpired(v.registration_expiry) || isExpiringSoon(v.registration_expiry)) && <span>⚠</span>}
+                      {v.registration_expiry && (
+                        <span title={v.cal_registration_event_id ? t('inv.calSynced') : t('inv.calNotSynced')}
+                          className={v.cal_registration_event_id ? 'text-green-400' : 'text-slate-600'}>
+                          {v.cal_registration_event_id ? '📅' : '○'}
+                        </span>
+                      )}
+                    </div>
                   </td>
                   <td className={`px-4 py-2.5 text-xs ${isServiceDue(v) ? 'text-yellow-400 font-medium' : 'text-slate-300'}`}>
-                    {v.next_service_date ? fmtDate(v.next_service_date) : v.last_service_date ? '—' : <span className="text-slate-500 italic">{t('inv.notSet')}</span>}
-                    {isServiceDue(v) && <span className="ml-1">🔧</span>}
+                    <div className="flex items-center gap-1">
+                      {v.next_service_date ? fmtDate(v.next_service_date) : v.last_service_date ? '—' : <span className="text-slate-500 italic">{t('inv.notSet')}</span>}
+                      {isServiceDue(v) && <span>🔧</span>}
+                      {v.next_service_date && (
+                        <span title={v.cal_service_event_id ? t('inv.calSynced') : t('inv.calNotSynced')}
+                          className={v.cal_service_event_id ? 'text-green-400' : 'text-slate-600'}>
+                          {v.cal_service_event_id ? '📅' : '○'}
+                        </span>
+                      )}
+                    </div>
+                  </td>
+                  <td className="px-4 py-2.5">
+                    <button onClick={() => setServiceHistoryFor(v)}
+                      className="text-xs px-2 py-1 rounded bg-slate-700 hover:bg-slate-600 text-slate-400 hover:text-white transition-colors"
+                      title={t('inv.serviceHistoryBtn')}>
+                      📋
+                    </button>
                   </td>
                   <td className="px-4 py-2.5">
                     <div className="flex gap-1">
@@ -1686,6 +1815,7 @@ function VehiclesTab() {
 
       {showAdd && <AddVehicleModal locations={locData ?? []} onClose={() => { setShowAdd(false); qc.invalidateQueries({ queryKey: ['ims-vehicles'] }) }} />}
       {logServiceFor && <LogServiceModal vehicle={logServiceFor} onClose={() => setLogServiceFor(null)} />}
+      {serviceHistoryFor && <ServiceHistoryModal vehicle={serviceHistoryFor} onClose={() => setServiceHistoryFor(null)} />}
       {editVehicle && <EditVehicleModal vehicle={editVehicle} locations={locData ?? []} onClose={() => setEditVehicle(null)} />}
       {deletingVehicle && (
         <ConfirmDeleteModal
