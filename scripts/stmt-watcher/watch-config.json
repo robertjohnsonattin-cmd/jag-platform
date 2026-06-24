@@ -1,0 +1,10 @@
+{
+  "watch_folders": [
+    {
+      "account_name": "Scotiabank MasterCard Gold",
+      "account_id":   "4d8a57ea-dee5-4e60-8ff5-dc5abf434b5c",
+      "path":         "C:\\Users\\rober\\Desktop\\Accounts"
+    }
+  ],
+  "archive_base": "C:\\Users\\rober\\Desktop\\Accounts\\Archive"
+}

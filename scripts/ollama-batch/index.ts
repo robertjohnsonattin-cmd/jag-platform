@@ -192,7 +192,7 @@ async function callOllamaVision(prompt: string, images: Buffer[]): Promise<strin
     method:  'POST',
     headers: { 'Content-Type': 'application/json' },
     body,
-    signal:  AbortSignal.timeout(300_000),
+    signal:  AbortSignal.timeout(600_000), // 10 min per page — llava is slow on CPU-only machines
   });
 
   if (!res.ok) throw new Error(`Ollama vision HTTP ${res.status}: ${await res.text()}`);
@@ -217,7 +217,7 @@ async function pdfToImages(buf: Buffer): Promise<Buffer[]> {
 
   for (let pageNum = 1; pageNum <= numPages; pageNum++) {
     const page = await pdf.getPage(pageNum);
-    const viewport = page.getViewport({ scale: 1.5 }); // 1.5x: good quality, manageable size
+    const viewport = page.getViewport({ scale: 1.0 }); // 1.0x: faster for llava OCR
     const canvas = createCanvas(Math.floor(viewport.width), Math.floor(viewport.height));
     const ctx = canvas.getContext('2d');
 
@@ -250,10 +250,19 @@ async function extractText(
     try {
       // eslint-disable-next-line @typescript-eslint/no-var-requires
       const pdfParseModule = require('pdf-parse');
-      // pdf-parse exports the function as default OR as the module itself depending on version
-      const pdfParse = (typeof pdfParseModule === 'function' ? pdfParseModule : pdfParseModule.default) as
-        (buf: Buffer) => Promise<{ text: string }>;
-      const { text } = await pdfParse(buf);
+      // v1.x exports the function directly; v2.x wraps it under .default
+      const pdfParseFn = (
+        typeof pdfParseModule === 'function' ? pdfParseModule :
+        typeof pdfParseModule?.default === 'function' ? pdfParseModule.default :
+        null
+      ) as ((buf: Buffer) => Promise<{ text: string }>) | null;
+      if (!pdfParseFn) {
+        throw new Error(
+          `pdf-parse loaded but export is not callable ` +
+          `(type: ${typeof pdfParseModule}, keys: ${Object.keys(pdfParseModule ?? {}).slice(0, 8).join(',')})`,
+        );
+      }
+      const { text } = await pdfParseFn(buf);
       const trimmed = text.trim();
       // Quality heuristic: count runs of 3+ alphanumeric chars as readable content
       const readable = (trimmed.match(/[a-zA-Z0-9]{3,}/g) ?? []).join('').length;
@@ -307,7 +316,7 @@ async function callOllama(statementText: string): Promise<ParsedTransaction[]> {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body,
-    signal: AbortSignal.timeout(300_000), // 5 min — large statements can be slow
+    signal: AbortSignal.timeout(600_000), // 10 min — Scotia statements can be slow on local hardware
   });
 
   if (!res.ok) {
@@ -349,6 +358,128 @@ async function callOllama(statementText: string): Promise<ParsedTransaction[]> {
     });
   }
   return transactions;
+}
+
+// ── Deterministic CSV parser ──────────────────────────────────────────────────
+// Parses bank statement CSVs without Ollama when headers are recognisable.
+// Returns null → caller falls back to Ollama.
+
+function parseDateTT(raw: string): string | null {
+  const s = raw.trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  const dmy = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+  if (dmy) return `${dmy[3]}-${dmy[2].padStart(2, '0')}-${dmy[1].padStart(2, '0')}`;
+  const MON: Record<string, string> = {
+    jan:'01',feb:'02',mar:'03',apr:'04',may:'05',jun:'06',
+    jul:'07',aug:'08',sep:'09',oct:'10',nov:'11',dec:'12',
+  };
+  const dMonY = s.match(/^(\d{1,2})[\/\- ]([A-Za-z]{3})[\/\- ](\d{4})$/);
+  if (dMonY) { const m = MON[dMonY[2].toLowerCase()]; if (m) return `${dMonY[3]}-${m}-${dMonY[1].padStart(2,'0')}`; }
+  const monDY = s.match(/^([A-Za-z]{3})\s+(\d{1,2}),?\s+(\d{4})$/);
+  if (monDY) { const m = MON[monDY[1].toLowerCase()]; if (m) return `${monDY[3]}-${m}-${monDY[2].padStart(2,'0')}`; }
+  return null;
+}
+
+function parseAmountStr(raw: string): number {
+  if (!raw?.trim()) return 0;
+  let s = raw.trim();
+  const neg = (s.startsWith('(') && s.endsWith(')')) || s.startsWith('-');
+  s = s.replace(/[()$£€\s]/g, '').replace(/,/g, '').replace(/^-/, '');
+  const n = parseFloat(s);
+  return isNaN(n) ? 0 : (neg && n > 0 ? -n : n);
+}
+
+function parseCsvRaw(text: string): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let cell = '';
+  let inQ = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === '"') {
+      if (inQ && text[i + 1] === '"') { cell += '"'; i++; } else { inQ = !inQ; }
+    } else if (ch === ',' && !inQ) {
+      row.push(cell); cell = '';
+    } else if ((ch === '\n' || ch === '\r') && !inQ) {
+      if (ch === '\r' && text[i + 1] === '\n') i++;
+      row.push(cell); cell = '';
+      if (row.some(c => c.trim())) rows.push(row);
+      row = [];
+    } else { cell += ch; }
+  }
+  if (cell || row.length) { row.push(cell); if (row.some(c => c.trim())) rows.push(row); }
+  return rows;
+}
+
+// Returns parsed transactions when the CSV has recognisable column headers.
+// Returns null when format is unrecognised.
+function parseCsvStatement(text: string): ParsedTransaction[] | null {
+  const rows = parseCsvRaw(text);
+  if (rows.length < 2) return null;
+
+  // Find first row that looks like a header: 3+ non-empty cells containing "date"
+  let headerIdx = -1;
+  let hdr: string[] = [];
+  for (let i = 0; i < Math.min(15, rows.length); i++) {
+    const cells = rows[i];
+    const joined = cells.join(' ').toLowerCase();
+    if (cells.filter(c => c.trim()).length >= 3 && joined.includes('date')) {
+      headerIdx = i; hdr = cells; break;
+    }
+  }
+  if (headerIdx < 0) return null;
+
+  const h = hdr.map(c => c.toLowerCase().replace(/[^a-z0-9]/g, ''));
+  const find = (...terms: string[]): number => {
+    for (const t of terms) { const idx = h.findIndex(col => col.includes(t)); if (idx >= 0) return idx; }
+    return -1;
+  };
+
+  const dateIdx  = find('date','transdate','txndate','valuedate','postdate','postingdate');
+  const descIdx  = find('description','narration','particulars','narrative','details','memo','remarks','transactiontype','type');
+  const debitIdx = find('debit','withdrawal','withdraw','dr','payment','charge');
+  const creditIdx= find('credit','deposit','cr','receipt');
+  const amtIdx   = find('amount','transactionamount','txnamount','value','net');
+  const refIdx   = find('reference','refno','refnumber','chequenumber','cheque','check','txnref','transref');
+  const mchIdx   = find('merchant','payee','beneficiary','counterparty','tradingname');
+
+  if (dateIdx < 0 || descIdx < 0) return null;
+  if (debitIdx < 0 && creditIdx < 0 && amtIdx < 0) return null;
+
+  const txns: ParsedTransaction[] = [];
+
+  for (let i = headerIdx + 1; i < rows.length; i++) {
+    const row = rows[i];
+    const rawDate = row[dateIdx]?.trim() ?? '';
+    if (!rawDate) continue;
+    const dateStr = parseDateTT(rawDate);
+    if (!dateStr) continue; // footer or summary line — not a transaction date
+
+    let amount: number;
+    if (amtIdx >= 0) {
+      amount = parseAmountStr(row[amtIdx] ?? '');
+    } else {
+      const dr = Math.abs(parseAmountStr(row[debitIdx!] ?? ''));
+      const cr = Math.abs(parseAmountStr(row[creditIdx!] ?? ''));
+      amount = cr - dr; // positive = credit (money in), negative = debit (money out)
+    }
+
+    const description = (row[descIdx] ?? '').trim();
+    if (!description && amount === 0) continue;
+
+    txns.push({
+      transaction_date:   dateStr,
+      amount,
+      currency:           'TTD',
+      description,
+      merchant_name:      mchIdx >= 0 ? ((row[mchIdx] ?? '').trim() || null) : null,
+      reference_number:   refIdx >= 0 ? ((row[refIdx] ?? '').trim() || null) : null,
+      suggested_category: 'UNCLASSIFIED',
+      confidence:         0.85,
+    });
+  }
+
+  return txns.length > 0 ? txns : null;
 }
 
 // ── DB writes ─────────────────────────────────────────────────────────────────
@@ -405,106 +536,141 @@ async function writeTransactions(
 // ── Job processor ─────────────────────────────────────────────────────────────
 
 async function processJob(job: StatementJob): Promise<void> {
-  const client = await pool.connect();
   console.log(`\n[job ${job.id}] ${job.file_name}`);
 
-  try {
-    // Mark PROCESSING
-    await withOwner(client, (c) =>
-      c.query(
-        `UPDATE fin_bank_statement_jobs SET status = 'PROCESSING', started_at = now(), updated_at = now() WHERE id = $1`,
-        [job.id],
-      )
-    );
+  // ── Phase 1: Mark PROCESSING — get a client, write, release immediately ──────
+  // Releasing before the Ollama call prevents the TCP connection going stale
+  // during a 5–10 minute extraction, which previously caused "Connection
+  // terminated unexpectedly" when the write phase tried to use the same client.
+  {
+    const c1 = await pool.connect();
+    try {
+      await withOwner(c1, (c) =>
+        c.query(
+          `UPDATE fin_bank_statement_jobs SET status = 'PROCESSING', started_at = now(), updated_at = now() WHERE id = $1`,
+          [job.id],
+        )
+      );
+    } finally { c1.release(); }
+  }
 
-    // Download from MinIO
+  // ── Phase 2: Download, extract, call Ollama — no DB client held ──────────────
+  let transactions: ParsedTransaction[] | null = null;
+  let extractionError: string | null = null;
+
+  try {
     console.log(`  Downloading ${job.storage_path} …`);
     const buf = await downloadObject(CONFIG.minio.bucketStmts, job.storage_path);
     console.log(`  Downloaded ${buf.length} bytes`);
 
-    // Extract text — or detect scanned PDF
     const { text, scanned } = await extractText(buf, job.mime_type, job.file_name);
 
-    // Call Ollama — vision model for scanned PDFs, text model otherwise
-    let transactions: ParsedTransaction[];
     if (scanned) {
       console.log(`  Scanned PDF — rendering to images for ${CONFIG.modelVision} …`);
       const images = await pdfToImages(buf);
       console.log(`  Rendered ${images.length} page(s)`);
       const visionPrompt = `${SYSTEM_PROMPT}\n\nExtract all transactions from the bank statement image(s). Return ONLY the JSON array.`;
-      const raw = await callOllamaVision(visionPrompt, images);
-      let parsed: unknown;
-      try { parsed = JSON.parse(raw); } catch { parsed = []; }
-      if (!Array.isArray(parsed)) parsed = [];
-      transactions = (parsed as Record<string, unknown>[]).filter(
-        r => r && r['transaction_date'] && typeof r['amount'] === 'number'
-      ).map(r => ({
-        transaction_date:   String(r['transaction_date']),
-        amount:             Number(r['amount']),
-        currency:           String(r['currency'] ?? 'TTD'),
-        description:        String(r['description'] ?? ''),
-        merchant_name:      r['merchant_name'] ? String(r['merchant_name']) : null,
-        reference_number:   r['reference_number'] ? String(r['reference_number']) : null,
-        suggested_category: String(r['suggested_category'] ?? 'UNCLASSIFIED'),
-        confidence:         Number(r['confidence'] ?? 0.5),
-      }));
-      console.log(`  Vision model returned ${transactions.length} transactions`);
+      const allTxns: ParsedTransaction[] = [];
+      for (let pageIdx = 0; pageIdx < images.length; pageIdx++) {
+        console.log(`  Page ${pageIdx + 1}/${images.length} → ${CONFIG.modelVision} …`);
+        const raw = await callOllamaVision(visionPrompt, [images[pageIdx]]);
+        let parsed: unknown;
+        try { parsed = JSON.parse(raw); } catch { parsed = []; }
+        if (!Array.isArray(parsed)) continue;
+        const pageTxns = (parsed as Record<string, unknown>[]).filter(
+          r => r && r['transaction_date'] && typeof r['amount'] === 'number'
+        ).map(r => ({
+          transaction_date:   String(r['transaction_date']),
+          amount:             Number(r['amount']),
+          currency:           String(r['currency'] ?? 'TTD'),
+          description:        String(r['description'] ?? ''),
+          merchant_name:      r['merchant_name'] ? String(r['merchant_name']) : null,
+          reference_number:   r['reference_number'] ? String(r['reference_number']) : null,
+          suggested_category: String(r['suggested_category'] ?? 'UNCLASSIFIED'),
+          confidence:         Number(r['confidence'] ?? 0.5),
+        }));
+        allTxns.push(...pageTxns);
+        console.log(`  Page ${pageIdx + 1}: ${pageTxns.length} transactions`);
+      }
+      transactions = allTxns;
+      console.log(`  Vision model returned ${transactions.length} transactions total`);
     } else {
-      console.log(`  Extracted ${text.length} chars — calling Ollama (${CONFIG.model}) …`);
-      transactions = await callOllama(text);
-      console.log(`  Ollama returned ${transactions.length} transactions`);
+      const ext = path.extname(job.file_name).toLowerCase();
+      if (ext === '.csv' || ext === '.txt') {
+        const csvTxns = parseCsvStatement(text);
+        if (csvTxns !== null) {
+          console.log(`  CSV parser: ${csvTxns.length} transactions (deterministic — no Ollama needed)`);
+          transactions = csvTxns;
+        } else {
+          console.log(`  CSV parser: unrecognised format — calling Ollama (${CONFIG.model}) …`);
+          transactions = await callOllama(text);
+          console.log(`  Ollama returned ${transactions.length} transactions`);
+        }
+      } else {
+        console.log(`  Extracted ${text.length} chars — calling Ollama (${CONFIG.model}) …`);
+        transactions = await callOllama(text);
+        console.log(`  Ollama returned ${transactions.length} transactions`);
+      }
+    }
+  } catch (e) {
+    extractionError = ((e as Error).message ?? String(e)).slice(0, 2000);
+    console.error(`  [extraction error] ${extractionError}`);
+  }
+
+  // ── Phase 3: Write results — fresh client, no stale connection risk ───────────
+  const c2 = await pool.connect();
+  try {
+    if (extractionError || transactions === null) {
+      await withOwner(c2, (c) =>
+        c.query(
+          `UPDATE fin_bank_statement_jobs SET status = 'FAILED', error_detail = $2, updated_at = now() WHERE id = $1`,
+          [job.id, extractionError ?? 'No transactions extracted'],
+        )
+      );
+      // File kept on failure — retry endpoint resets to PENDING.
+      return;
     }
 
     if (CONFIG.dryRun) {
       console.log('  DRY RUN — skipping DB writes and MinIO delete');
       console.log('  Sample:', JSON.stringify(transactions.slice(0, 2), null, 2));
-      await withOwner(client, (c) =>
-        c.query(
-          `UPDATE fin_bank_statement_jobs SET status = 'PENDING', updated_at = now() WHERE id = $1`,
-          [job.id],
-        )
+      await withOwner(c2, (c) =>
+        c.query(`UPDATE fin_bank_statement_jobs SET status = 'PENDING', updated_at = now() WHERE id = $1`, [job.id])
       );
       return;
     }
 
-    // Write transactions
-    const { imported, skipped } = await withOwner(client, (c) =>
-      writeTransactions(c, job, transactions)
+    const { imported, skipped } = await withOwner(c2, (c) =>
+      writeTransactions(c, job, transactions!)
     );
     console.log(`  Imported ${imported}, skipped ${skipped}`);
 
-    // Update job to COMPLETE or PARTIAL
     const status = imported > 0 ? (skipped > 0 ? 'PARTIAL' : 'COMPLETE') : 'FAILED';
-    await withOwner(client, (c) =>
+    await withOwner(c2, (c) =>
       c.query(
         `UPDATE fin_bank_statement_jobs
          SET status = $2, completed_at = now(), updated_at = now(),
              rows_parsed = $3, rows_imported = $4, rows_skipped = $5
          WHERE id = $1`,
-        [job.id, status, transactions.length, imported, skipped],
+        [job.id, status, transactions!.length, imported, skipped],
       )
     );
     console.log(`  Job → ${status}`);
 
-    // Auto-delete source file — transactions are in the DB, original file no longer needed
     await deleteObject(CONFIG.minio.bucketStmts, job.storage_path);
   } catch (e) {
     const msg = (e as Error).message ?? String(e);
-    console.error(`  [error] ${msg}`);
+    console.error(`  [write error] ${msg}`);
     try {
-      await withOwner(client, (c) =>
+      await withOwner(c2, (c) =>
         c.query(
-          `UPDATE fin_bank_statement_jobs
-           SET status = 'FAILED', error_detail = $2, updated_at = now()
-           WHERE id = $1`,
+          `UPDATE fin_bank_statement_jobs SET status = 'FAILED', error_detail = $2, updated_at = now() WHERE id = $1`,
           [job.id, msg.slice(0, 2000)],
         )
       );
-      // Also delete on failure — no point keeping the file if processing failed
-      await deleteObject(CONFIG.minio.bucketStmts, job.storage_path);
     } catch { /* ignore secondary failure */ }
   } finally {
-    client.release();
+    c2.release();
   }
 }
 
@@ -623,25 +789,32 @@ async function callOllamaForDocument(docType: DocumentJob['doc_type'], text: str
 // ── Document job processor ────────────────────────────────────────────────────
 
 async function processDocumentJob(job: DocumentJob): Promise<void> {
-  const client = await pool.connect();
   console.log(`\n[doc-job ${job.id}] ${job.doc_type} — ${job.file_name}`);
 
-  try {
-    await withOwner(client, (c) =>
-      c.query(
-        `UPDATE fin_document_jobs SET status = 'PROCESSING', started_at = now(), updated_at = now() WHERE id = $1`,
-        [job.id],
-      )
-    );
+  // Phase 1: Mark PROCESSING — release immediately before the long Ollama call
+  {
+    const c1 = await pool.connect();
+    try {
+      await withOwner(c1, (c) =>
+        c.query(
+          `UPDATE fin_document_jobs SET status = 'PROCESSING', started_at = now(), updated_at = now() WHERE id = $1`,
+          [job.id],
+        )
+      );
+    } finally { c1.release(); }
+  }
 
+  // Phase 2: Download, extract, call Ollama — no DB client held
+  let extracted: unknown = null;
+  let extractionError: string | null = null;
+
+  try {
     console.log(`  Downloading ${job.storage_path} …`);
     const buf = await downloadObject(CONFIG.minio.bucketDocuments, job.storage_path);
     console.log(`  Downloaded ${buf.length} bytes`);
 
-    // Try text extraction first (fast). Fall back to llava vision if text is empty/garbled.
     const { text, scanned } = await extractText(buf, job.mime_type, job.file_name);
 
-    let extracted: unknown;
     if (!scanned && text.trim().length > 0) {
       console.log(`  Extracted ${text.length} chars — calling Ollama (${CONFIG.model}) for ${job.doc_type} …`);
       extracted = await callOllamaForDocument(job.doc_type, text);
@@ -650,20 +823,42 @@ async function processDocumentJob(job: DocumentJob): Promise<void> {
       const images = await pdfToImages(buf);
       console.log(`  Rendered ${images.length} page(s)`);
       const visionPrompt = `${DOC_PROMPTS[job.doc_type]}\n\nExtract the data from the document image(s). Return ONLY the JSON object.`;
-      const raw = await callOllamaVision(visionPrompt, images);
-      extracted = parseOllamaDocJson(raw, job.doc_type);
+      let combinedRaw = '';
+      for (let pageIdx = 0; pageIdx < images.length; pageIdx++) {
+        console.log(`  Page ${pageIdx + 1}/${images.length} → ${CONFIG.modelVision} …`);
+        combinedRaw += await callOllamaVision(visionPrompt, [images[pageIdx]]);
+      }
+      extracted = parseOllamaDocJson(combinedRaw, job.doc_type);
     }
     console.log(`  Extracted:`, JSON.stringify(extracted, null, 2).slice(0, 400));
+  } catch (e) {
+    extractionError = ((e as Error).message ?? String(e)).slice(0, 2000);
+    console.error(`  [extraction error] ${extractionError}`);
+  }
+
+  // Phase 3: Write results — fresh client
+  const c2 = await pool.connect();
+  try {
+    if (extractionError) {
+      await withOwner(c2, (c) =>
+        c.query(
+          `UPDATE fin_document_jobs SET status = 'FAILED', error_detail = $2, updated_at = now() WHERE id = $1`,
+          [job.id, extractionError],
+        )
+      );
+      // File kept on failure so the job can be retried.
+      return;
+    }
 
     if (CONFIG.dryRun) {
       console.log('  DRY RUN — skipping DB write and MinIO delete');
-      await withOwner(client, (c) =>
+      await withOwner(c2, (c) =>
         c.query(`UPDATE fin_document_jobs SET status = 'PENDING', updated_at = now() WHERE id = $1`, [job.id])
       );
       return;
     }
 
-    await withOwner(client, (c) =>
+    await withOwner(c2, (c) =>
       c.query(
         `UPDATE fin_document_jobs
          SET status = 'REVIEW', extracted_data = $2, completed_at = now(), updated_at = now()
@@ -676,18 +871,17 @@ async function processDocumentJob(job: DocumentJob): Promise<void> {
     await deleteObject(CONFIG.minio.bucketDocuments, job.storage_path);
   } catch (e) {
     const msg = (e as Error).message ?? String(e);
-    console.error(`  [error] ${msg}`);
+    console.error(`  [write error] ${msg}`);
     try {
-      await withOwner(client, (c) =>
+      await withOwner(c2, (c) =>
         c.query(
           `UPDATE fin_document_jobs SET status = 'FAILED', error_detail = $2, updated_at = now() WHERE id = $1`,
           [job.id, msg.slice(0, 2000)],
         )
       );
-      await deleteObject(CONFIG.minio.bucketDocuments, job.storage_path);
     } catch { /* ignore secondary failure */ }
   } finally {
-    client.release();
+    c2.release();
   }
 }
 

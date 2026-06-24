@@ -1,7 +1,7 @@
 # JAG Integrated Business Platform — Claude Session Context
 
 **Owner:** Robert Johnson-Attin | Barataria, Trinidad & Tobago
-**Architecture:** v1.9 | **Current Phase:** ALL PHASES COMPLETE — in production | **Updated:** 2026-06-18 (session 22)
+**Architecture:** v1.9 | **Current Phase:** ALL PHASES COMPLETE — in production | **Updated:** 2026-06-24 (session 26)
 
 ---
 
@@ -157,6 +157,30 @@ No separate mobile app — the React + Tailwind stack handles all screen sizes. 
 - **Table wrappers**: use `overflow-x-auto rounded-lg border border-slate-700` not `overflow-hidden` — the horizontal scroll is the correct mobile behaviour; `overflow-hidden` traps wide tables
 - **Master-detail layouts** (list sidebar + detail panel): use mobile toggle pattern — list is `${selected ? 'hidden md:flex' : 'flex'} w-full md:w-64`, detail is `${!selected ? 'hidden md:block' : 'block'} flex-1`. Add a `md:hidden` back button at top of detail pane using `t('common.back')` (`← Back` / `返回` — key exists in both locale files)
 - **Form grids inside modals**: `grid-cols-2` is fine at modal width (~380px) — do not add breakpoints to modal-internal form field pairs
+
+### Auth-gated streaming assets — cannot be bare `<img src>` / `<a href>` (session 26)
+`requireAuth()` is **header-only** (Authorization: Bearer; no cookie/query fallback). Any backend route that **streams bytes** behind `requireAuth()` (e.g. `GET /ims/items/:id/photos/:photoId/download` via `stream.pipe(res)`, or `/files/download`) **cannot** be used as a bare `<img src="/api/v1/...">` or `<a href>` — the browser-native request carries no Bearer header → **401, asset never loads**.
+- **Images:** use `<AuthedImg path={...} />` (`jag-web/src/components/AuthedImg.tsx`) — fetches via `api.objectUrl()` (Bearer fetch → blob object URL), renders it, revokes on unmount.
+- **Downloads:** use `api.download(path, fileName)` (DocVault, Succession, `filesApi.download()` already do this).
+- Both helpers live in `jag-web/src/api/client.ts`. `path` is **BASE-relative** (no `/api/v1` prefix — the helper prepends it). API helpers returning such URLs (e.g. `imsApi.photoDownloadUrl`) must return the BASE-relative path.
+- **Exception:** MinIO **presigned GET URLs** (`getPresignedGetUrl()`, e.g. property/unit photos) are self-authenticating and DO work as a bare `<img src>` — leave those alone.
+
+### In-app notifications (session 26)
+`notification_queue` (jag_core, user_id RLS) is fed by `enqueueNotification()` in `jag-api/src/lib/notifications.ts` — owner-recipient by default (`NOTIFY_OWNER_USER_ID` env, fallback = Robert's jag_core users.id), **non-blocking** (try/catch + `logger.warn`; always call as `void enqueueNotification(...)`). RLS insert works because `withOwnerRLS(corePool, recipient, ...)` sets `app.current_user_id` = recipient (the `user_isolation` USING clause doubles as the INSERT WITH CHECK under FORCE RLS). **Live producers (4):** expense submit (tier 1), P1/P2 maintenance ticket create (tier 1), maintenance SLA breach in `/check-sla` (tier 1), new tenancy enquiry (tier 2). API: `GET /notifications/unread-count`, `PATCH /notifications/read-all` (plus pre-existing `GET /` + `PATCH /:id/read`). Frontend: `NotificationBell` in AppShell (sidebar desktop + mobile top bar, 60s badge poll). **Deferred producer:** document/bank-statement → REVIEW (set by external Ollama batch `scripts/ollama-batch/index.ts`, no API hook).
+
+### Beneficial-ownership cap table (session 26)
+`fam_ownership_stakes` (jag_family, migration 017, owner RLS) records **who beneficially owns what**, with % shares — covers business entities (e.g. BAR+Club registered solely under Zhanghua) AND personally-held assets. One row = a family member owns N% of a `subject_kind` ∈ `ENTITY|PROPERTY|ITEM`:
+- `ENTITY` → `subject_id` is an `owner_entity_id` UUID (tenant 001-007 or personal finance entity 008-013).
+- `PROPERTY` → `prop_properties.id` (jag_properties, soft ref). `ITEM` → `ims_items.id` (jag_commercial; vehicles are items with `is_asset=true`).
+- `subject_label` is denormalized (cross-DB, no FK per STD-01).
+
+Routes: `routes/family/ownership.ts` (mounted **2nd** at `/api/v1/family`, after familyRouter — order is fine, no path overlap). `/ownership` CRUD, `/ownership/subjects` (picker: entities constant + properties + is_asset items, cross-DB like net-worth), `/ownership/allocation` (Σ% per subject → flag ≠100%), `/members/:id/holdings` (rollup).
+
+**Rollup math:** ENTITY stake value = `ownership_percent × latest fin_net_worth_snapshots.net_worth_ttd` for that `owner_entity_id`. PROPERTY/ITEM stake value = `% × current_valuation`/`unit_value`. **So entity values require a fresh net-worth snapshot** — entities with no snapshot attribute 0 until Finance → Net Worth → Take Snapshot is run.
+
+**CRITICAL — net-worth double-count guard:** `routes/finance/net-worth.ts` reads `fam_ownership_stakes` up front and **excludes** any `prop_properties`/`ims_items` row that has a direct PROPERTY/ITEM stake from its entity's physical/property sum (`AND NOT (id = ANY($1::uuid[]))`). A directly-owned asset is attributed to the person, not the entity. **Do not remove this exclusion** or directly-owned assets get counted twice (once under their entity, once under the person). Consolidated total stays correct.
+
+Frontend: `pages/Ownership.tsx` (nav `/ownership`) — By Entity (cap-table editor) + By Person (estate rollup); `api/ownership.ts`. Family member modal has an Estate section (lazy `/holdings`).
 
 ### Dashboard query limits
 `jag-web/src/pages/Dashboard.tsx` requests properties with `limit: 100` (backend max is 500 per `PropertiesQuerySchema`). Never raise Dashboard limit above 500 without also raising the backend Zod schema.
@@ -402,6 +426,20 @@ All financial documents (loan statements, investment portfolios, insurance polic
 | 11 | JAG Entertainment (BAR + Members Club) | **DONE** |
 | 12 | DragonBridge, remaining modules | **DONE** |
 
+### Frontend gap-audit pages (session 26 — backend existed, UI was missing)
+
+| Page / feature | File | Notes |
+|---|---|---|
+| Accountant Export | `pages/Export.tsx` (nav `/export`) | 7 read-only views (trial balance, GL, expenses, insurance, premiums, claims, intercompany) + per-view CSV (`lib/csv.ts`, RFC-4180 + BOM) |
+| Succession (estate) | `pages/Succession.tsx` (nav `/succession`) | Register over `fam_succession_documents`; upload/edit/download; needs `GET /succession/documents/:id` (added) for storage_path |
+| Family Registry | `pages/Family.tsx` (nav `/family`) + `api/family.ts` | Card grid over `fam_family_members` (relationship, age, 🛡 emergency-designate, 🔑 platform-access, birthday); add/edit; no DELETE (backend has none). **DocVault linkage:** "📄 N" doc count per card + Documents section in member modal (download via `api.download`) |
+| DocVault ↔ Family link | `pages/DocVault.tsx` + `routes/docvault/index.ts` `PATCH /files/:id` | Tag a document to a person: "Belongs to" picker on upload, assign/reassign `<select>` on detail panel, family-member filter in filter bar (backend already filtered/returned `family_member_id`; PATCH added so existing docs can be re-tagged + audit_log) |
+| Lifestyle ↔ Family link | `pages/Lifestyle.tsx` + `routes/lifestyle/index.ts` | Tag loyalty programmes + health metrics to a person. Loyalty PATCH extended to set `family_member_id` (nullable to clear → reassignable); tracker is append-only (assign-on-create). "Belongs to" picker on all 3 modals; member filter + assignee shown in both Lifestyle tabs. Family card shows "✈ N"; member modal has Loyalty programmes + Health metrics sections (`pages/Family.tsx`, tracker lazily fetched per member) |
+| Ownership cap table (succession) | `pages/Ownership.tsx` + `routes/family/ownership.ts` + migration 017 + net-worth guard | Beneficial-ownership of entities + assets with % shares; By Entity / By Person; per-person estate rollup (entity % × net worth + direct assets). Family modal Estate section. See "Beneficial-ownership cap table" rule above |
+| Notification bell | `components/NotificationBell.tsx` + `api/notifications.ts` | Badge (60s poll) + dropdown, mark-read / mark-all-read; mounted in AppShell desktop + mobile |
+| Pending-review → Transactions | `components/finance/TransactionsPanel.tsx` | AI `suggested_category`/`confidence` surfaced in review modal; orphaned `fin_pending_review_queue` row closed on PATCH |
+| IMS photo 401 fix | `components/AuthedImg.tsx` + `api/client.ts` `objectUrl()` | Auth-gated streaming `<img>` now Bearer-fetched → blob (see implementation rule above) |
+
 ### Phase 7 Backend Additions (done during frontend build)
 
 | Addition | File | Notes |
@@ -410,6 +448,14 @@ All financial documents (loan statements, investment portfolios, insurance polic
 | IMS stock takes | `routes/ims/stocktakes.ts` | Full stock take lifecycle |
 | IMS depreciation | `routes/ims/depreciation.ts` | Straight-line + declining balance |
 | IMS vehicle overhaul | `routes/ims/vehicles.ts` | `owner_entity` (flexible), service tracking, STD-13 dual-write |
+| VMS maintenance | `routes/ims/vms-maintenance.ts` | Work orders + work order items CRUD; PM schedules (DAYS/KM/HOURS) with mark-done; status machine OPEN→IN_PROGRESS→COMPLETE; mounts under `/vehicles/:id` |
+| VMS fuel & costs | `routes/ims/vms-costs.ts` | Fuel logs (litres × price → total_cost_ttd); operating costs (TOLL/PARKING etc.); TCO aggregate (`GET /tco` — maintenance + fuel + operating + depreciation) |
+| VMS compliance | `routes/ims/vms-compliance.ts` | Compliance docs vault (MOT/ROADWORTHY/FIRE_EXTINGUISHER etc.); is_expired/is_expiring_soon computed fields; presigned upload/download via MinIO |
+| VMS disposal + GL | `routes/ims/vms-disposal.ts` | `GET /vehicles/:id/disposal`; `POST /vehicles/:id/dispose` — marks vehicle DISPOSED, snapshots TCO, posts Dr/Cr GL entry to `jag_family` non-blocking; SALE/WRITE_OFF/TRANSFER types; `vms_disposals` table with `journal_entry_id` writeback |
+| Asset disposal | `routes/ims/items.ts` | `POST /ims/items/:id/dispose` — validates `is_asset=true` AND not a vehicle; sets `is_active=false`, writes disposal columns, inserts stock movement; non-blocking `postItemDisposalGlEntry()` to jag_family if GL accounts provided; `disposal_gl_entry_id` writeback; `DisposeItemSchema` Zod validation |
+| GL account creation | `routes/finance/gl.ts` | `POST /finance/gl/accounts` already existed; `glApi.createAccount()` added to frontend `api/gl.ts`; `+ Add Account` button + `AddAccountModal` added to `ChartOfAccounts.tsx` |
+| GL new entry | `components/ledger/JournalEntries.tsx` | `+ New Entry` button + `NewEntryModal` — entity/date/description/reference, dynamic line items (account picker per entity, Dr/Cr toggle, amount), running balance indicator, saves as DRAFT; `glApi.createEntry()` added to `api/gl.ts` |
+| Finance credit cards | `routes/finance/credit-cards.ts` | `fin_credit_cards` CRUD; GET/POST/PATCH/DELETE; `is_active` soft-delete; used by mobile expense form card picker |
 | IMS locations POST | `routes/ims/items.ts` | `POST /ims/locations` added |
 | Properties insurance | `routes/properties/insurance.ts` | Policy CRUD |
 | Properties tax | `routes/properties/property-tax.ts` | Tax records + pay |
@@ -458,6 +504,9 @@ All financial documents (loan statements, investment portfolios, insurance polic
 | WA approvals | `routes/properties/wa-approvals.ts` | PENDING approval queue for RENT_FORMAL_DEMAND / RENT_LEGAL_NOTICE / DEPOSIT_RECON; approve-and-send + dismiss endpoints |
 | WA inbox | `routes/properties/wa-inbox.ts` | Unified conversation timeline (WA messages + contact log); `prop_contact_log` entries |
 | MinIO lib | `src/lib/minio.ts` | Added `getPresignedGetUrl()` (1h TTL for web display, 7-day TTL for Facebook photo posts) |
+| Notifications producer (session 26) | `src/lib/notifications.ts` | `enqueueNotification()` — non-blocking owner-recipient insert into `notification_queue` (jag_core); RLS via `withOwnerRLS(corePool, recipient,...)`; `NOTIFY_OWNER_USER_ID` env (fallback = Robert's id). Wired into expenses `/submit`, maintenance create (P1/P2) + `/check-sla`, enquiries create |
+| Notifications endpoints (session 26) | `routes/notifications.ts` | Added `GET /notifications/unread-count` + `PATCH /notifications/read-all` (alongside existing `GET /` + `PATCH /:id/read`) |
+| Succession by-id (session 26) | `routes/succession/index.ts` | `GET /succession/documents/:id` — returns full row incl. `storage_path` for download (list view omits it) |
 
 ### Phase 7 Migrations (jag_commercial)
 
@@ -480,6 +529,12 @@ All financial documents (loan statements, investment portfolios, insurance polic
 | `023_project_closeout_fields.sql` | handover_document_url TEXT on jabco_projects |
 | `028_crm_interaction_calendar_event_id.sql` | `calendar_event_id TEXT` on `crm_interactions` — stores Google Calendar event ID for follow-up date sync |
 | `029_vehicle_calendar_service_log.sql` | `cal_service_event_id`, `cal_insurance_event_id`, `cal_registration_event_id TEXT` on `ims_vehicles`; `ims_vehicle_service_log` append-only table (vehicle_id FK, service_date, mileage_km, service_type, description, cost_ttd, performed_by, next_service_date); RLS tenant policy |
+| `030_vms_vehicle_enhancements.sql` | `status` ENUM (ACTIVE/IN_MAINTENANCE/OFF_ROAD/DISPOSED), `dep_expense_account_code`, `acc_dep_account_code`, `disposal_value` on `ims_vehicles`; RLS tenant policy |
+| `031_vms_work_orders_pm.sql` | `vms_work_orders` (wo_number seq, wo_type, status machine, totals); `vms_work_order_items` (PART/LABOUR/CONSUMABLE/SUBLET, line_total computed); `vms_pm_schedules` (DAYS/KM/HOURS intervals, last/next due tracking); all RLS |
+| `032_vms_fuel_operating_costs.sql` | `vms_fuel_logs` (litres, price_per_litre, total_cost_ttd, full_tank flag); `vms_operating_costs` (TOLL/PARKING/CLEANING/ACCESSORIES/ADMIN/OTHER); both RLS |
+| `033_vms_compliance_docs.sql` | `vms_compliance_docs` (doc_type ENUM, doc_number, expiry_date, file_path for MinIO); RLS |
+| `034_vms_disposal_gl.sql` | `dep_expense_gl_account_id`, `acc_dep_gl_account_id` on `ims_depreciation_schedules`; `journal_entry_id` on `ims_depreciation_entries`; `vms_disposals` table (disposal_type, cost/dep/nbv snapshot, sale_price_ttd, gain_loss_ttd, tco_snapshot JSONB, journal_entry_id); UNIQUE(vehicle_id); RLS |
+| `035_item_disposal_columns.sql` | `disposed_at TIMESTAMPTZ`, `disposal_type VARCHAR(20)` CHECK IN ('SALE','WRITE_OFF','TRANSFER'), `disposal_notes TEXT`, `sale_price_ttd NUMERIC(15,2)`, `buyer_name VARCHAR(200)`, `disposal_gl_entry_id UUID` added to `ims_items`; ran via psql on VM |
 
 ### Phase 7 Migrations (jag_family)
 
@@ -493,6 +548,7 @@ All financial documents (loan statements, investment portfolios, insurance polic
 | `012_credit_cards_categories.sql` | `fin_credit_cards` table (card_name, last_four, card_type, is_active); `card_id UUID` FK column on `fin_expenses`; expense category CHECK constraint expanded; applied via postgres superuser (jag_app not owner of fin_expenses) |
 | `013_debit_card_payment_method.sql` | `ALTER TYPE expense_payment_method ADD VALUE 'DEBIT_CARD'` — enum extension for debit card support |
 | `016_insurance_calendar_event_id.sql` | `calendar_event_id TEXT` on `fin_insurance_policies` — stores Google Calendar event ID for expiry date |
+| `017_ownership_stakes.sql` | `fam_ownership_stakes` beneficial-ownership cap table (family_member_id, subject_kind ENTITY/PROPERTY/ITEM, subject_id, subject_label, ownership_percent CHECK 0-100); owner RLS; unique(member,kind,subject). Owned by postgres, GRANT to jag_app. Applied via psql on VM, registered in `__migrations` |
 
 ### Phase 7 Migrations (jag_properties)
 
@@ -565,7 +621,7 @@ Path 2 local extraction — reads PDFs from local hard drive, Ollama extracts, p
 - **Running KC_PASSWORD at runtime (don't store in file):** `$env:KC_PASSWORD = "xxx"; node dist/extract.js ...`
 
 ### Vehicle Owner Options (VEHICLE_OWNER_OPTIONS const)
-`JAG Holdings`, `JABCO`, `JAG Properties`, `JAG Entertainment`, `JAG Finance`, `Personal — Robert`, `Personal — Brian`, `Other`
+`JAG Holdings`, `JABCO`, `JAG Properties`, `JAG Entertainment`, `JAG Finance`, `Personal — Robert`, `Personal — Brian`, `Personal — Phillip`, `Other`
 
 ---
 
@@ -651,6 +707,14 @@ adb install -r app/build/outputs/apk/release/app-release.apk
 
 ## OPEN ITEMS
 
+- ~~**Frontend gap audit — pending-review consolidation**~~ — **DONE 2026-06-24 (session 26)**: AI `suggested_category`/`confidence` surfaced in TransactionsPanel review modal; orphaned `fin_pending_review_queue` row now closed on category PATCH (was leaking).
+- ~~**Frontend gap audit — Accountant Export UI**~~ — **DONE 2026-06-24 (session 26)**: `pages/Export.tsx` (nav `/export`), 7 read-only finance views + per-view CSV (`lib/csv.ts`).
+- ~~**Frontend gap audit — Succession (estate) UI**~~ — **DONE 2026-06-24 (session 26)**: `pages/Succession.tsx` (nav `/succession`) over `fam_succession_documents`; `GET /succession/documents/:id` added for storage_path/download.
+- ~~**Frontend gap audit — IMS photo 401**~~ — **DONE 2026-06-24 (session 26)**: item/vehicle photos were bare `<img src>` against header-only auth-gated streaming route → 401; new `AuthedImg` + `api.objectUrl()`; `photoDownloadUrl` made BASE-relative (also fixed a double `/api/v1` prefix). See "Auth-gated streaming assets" rule above.
+- ~~**Frontend gap audit — In-app notifications**~~ — **DONE 2026-06-24 (session 26)**: `lib/notifications.ts` `enqueueNotification()` + 4 producers (expense submit, P1/P2 ticket, SLA breach, enquiry); `GET /notifications/unread-count` + `PATCH /notifications/read-all`; `NotificationBell` in AppShell. **Deferred:** document→REVIEW producer (external Ollama batch, no API hook); tier 2/3 scheduled digests. Optional ops: set `NOTIFY_OWNER_USER_ID` in VM `/opt/jag/.env` (fallback works).
+- ~~**Frontend gap audit — Family registry UI**~~ — **DONE 2026-06-24 (session 26)**: `pages/Family.tsx` (nav `/family`) + `api/family.ts` over existing `fam_family_members` CRUD; card grid + add/edit modal.
+- ~~**Registry-as-index — DocVault + loyalty + lifestyle linkage**~~ — **DONE 2026-06-24 (session 26)**: assign documents/loyalty/health-metrics to a person; per-module filters; Family card badges + member-modal sections. DocVault `PATCH /files/:id` + loyalty PATCH `family_member_id` added.
+- ~~**Beneficial-ownership cap table (who owns what — succession)**~~ — **DONE 2026-06-24 (session 26)**: `fam_ownership_stakes` (migration 017) + `routes/family/ownership.ts` + `pages/Ownership.tsx`; % shares over entities/properties/items; per-person estate rollup via net-worth; net-worth double-count guard. Covers business-entity ownership (e.g. BAR+Club → Zhanghua). **Follow-ups:** ownership history table, per-owner liabilities, inline assign from Properties/IMS screens.
 - ~~**WiPay webhook**~~ — **REMOVED**: WiPay does not issue webhooks to individuals; rents paid directly to personal bank accounts
 - ~~**Rent proof workflow**~~ — **DONE**: endpoint `GET /properties/:propertyId/rent-payments/:paymentId/receipt` live in `routes/properties/properties.ts`; frontend copy/WhatsApp share in PropertiesPanel.tsx
 - ~~**Migration 009 collision (jag_properties)**~~ — **FIXED 2026-06-12**: renamed to `009b_prop_properties_audit_cols.sql`; production `__migrations` updated; 010 registered
@@ -709,7 +773,13 @@ adb install -r app/build/outputs/apk/release/app-release.apk
 - ~~**Pipeline list Zod limit cap**~~ — **FIXED 2026-06-18 (session 22)**: `PipelineQuerySchema` also had `limit: max(100)`; `TenderPipelineTab` queries `limit: 200` → 422 → `opps=[]`. Raised to `max(500)`. Commit `6e2dedf`.
 - ~~**Tenants company field hidden for non-company tenants**~~ — **FIXED 2026-06-18 (session 22)**: `company_name` field was only visible when `is_company=true` checkbox was checked — individuals had no way to add a company/employer name. Restructured Add/Edit tenant modals: first/last name always shown, company field always shown (labelled optional unless `is_company` checked). Commit `422cb5c`.
 - ~~**Pipeline advance + delete actions**~~ — **DONE 2026-06-18 (session 22)**: `POST /pipeline/:id/advance` moves PREQUALIFICATION→LEAD; `DELETE /pipeline/:id` removes non-terminal opportunities (WON/LOST/NO_GO protected — part of bid intelligence). `pipelineApi.advance()` + `pipelineApi.delete()` added to frontend client. OppDetail action panel: green "Advance to Lead" button for PREQUALIFICATION; inline "Delete? Yes/No" confirm for editable stages. Commit `4f7b927`.
-- **Credit/debit cards web UI** — PENDING: no web UI tab for managing `fin_credit_cards` yet; cards can be added via mobile app expense form for now
+- ~~**Google Calendar backfill for vehicles, inspections, insurance**~~ — **DONE 2026-06-23 (session 23)**: `POST /api/v1/admin/calendar/backfill` (owner-only) and `POST /internal/calendar/backfill` (Docker-network-only) create calendar events for all records with dates but NULL event IDs. Date columns cast with `::text` to avoid JS Date object coercion (`"Invalid time value"` bug). 6 vehicle events created. UI button on Vehicles tab.
+- ~~**Vehicle consolidation — single edit area**~~ — **DONE 2026-06-23 (session 23)**: Vehicles hidden from Items & Assets tab via `is_vehicle` EXISTS subquery flag on `ims_items` list query. `EditVehicleModal` now has `item_name` field at top (calls both `updateVehicle` + `updateItem` on save). `VehicleManageModal` gains **📷 Photos** tab as first tab — reuses item photo API via `vehicle.item_id`. `Personal — Phillip` added to `VEHICLE_OWNER_OPTIONS`.
+- ~~**VMS frontend (Vehicle Management System full UI)**~~ — **DONE 2026-06-23 (session 24)**: `VehicleManageModal` (max-w-4xl, 90vh) added to Inventory → Vehicles tab via "Manage ›" button per row. 4 tabs: **Maintenance** (work orders list + expandable line items + add WO + advance status OPEN→IN_PROGRESS→COMPLETE + PM schedule CRUD); **Fuel & Costs** (TCO summary cards + fuel log table + operating costs table, all with add/delete); **Compliance** (expiry-aware doc vault with red/orange alerts + add/delete); **Disposal** (shows existing disposal record with gain/loss + GL posted status, or form for ACTIVE vehicles — SALE/WRITE_OFF/TRANSFER). New types in `types/ims.ts`: `WorkOrder`, `WorkOrderItem`, `PMSchedule`, `FuelLog`, `OperatingCost`, `VehicleTCO`, `ComplianceDoc`, `VehicleDisposal`, `VehicleStatus`. New API methods in `api/ims.ts` for all VMS resources.
+- ~~**Asset disposal — all fixed assets (not just vehicles)**~~ — **DONE 2026-06-23 (session 25)**: Migration 035 (`jag_commercial`) adds disposal columns to `ims_items`. `POST /ims/items/:id/dispose` endpoint validates `is_asset=true && !is_vehicle`, sets `is_active=false`, inserts `ims_stock_movements`, posts optional GL entry to `jag_family` via `postItemDisposalGlEntry()` (mirrors VMS pattern). Frontend: `DisposeAssetModal` in `Inventory.tsx` with type/date/notes/sale price/buyer + optional GL account section; "Dispose" button in `ItemDetailPanel` (assets only, not vehicles); "Show disposed" toggle in Items & Assets filter bar; `DISPOSED` badge + disposal banner on disposed items. "Show disposed" toggle also added to Vehicles tab. Disposed vehicles accessible via Manage › → Disposal tab.
+- ~~**Ledger Chart of Accounts — Add Account**~~ — **DONE 2026-06-23 (session 25)**: `+ Add Account` button + `AddAccountModal` in `ChartOfAccounts.tsx`; `glApi.createAccount()` added to `api/gl.ts`. Modal: entity dropdown, code, type, name, auto-derived normal balance (DEBIT for Asset/Expense, CREDIT for Revenue/Liability/Equity/Other Income), optional description, allow-direct-posting checkbox.
+- ~~**Ledger Journal Entries — New Entry**~~ — **DONE 2026-06-23 (session 25)**: `+ New Entry` button + `NewEntryModal` in `JournalEntries.tsx`; `glApi.createEntry()` added to `api/gl.ts`. Modal: entity, date, description, reference, dynamic line items (account picker filtered by entity, Dr/Cr toggle, amount field), running Dr/Cr totals with "Not balanced" indicator. Saves as DRAFT; click Post in entry detail to commit.
+- ~~**Credit/debit cards web UI**~~ — **DONE 2026-06-23 (session 24)**: `CardsPanel.tsx` created (`jag-web/src/components/finance/CardsPanel.tsx`); Finance → Cards tab added (i18n: en "Cards" / zh-CN "银行卡"). Card grid (1→3 col responsive) showing name, masked number, type badge. Add Card modal (card name, type dropdown CREDIT/DEBIT/CHARGE/PREPAID, last-4 digits with `\d{4}` validation). Edit modal. Inline deactivate confirm (soft-delete — existing expenses unaffected). `CreditCard` interface added to `types/finance.ts`; `getCreditCards`/`createCreditCard`/`updateCreditCard`/`deleteCreditCard` added to `api/finance.ts`.
 - **Leases (B3)** — PENDING: all leases expired; need monthly rent amounts per unit from Robert to create new leases (moved from above, still outstanding)
 - **Unit listing content** — PENDING: 25 units all VACANT; photos, descriptions, asking rent, and utilities need to be filled in manually via Properties → Units → Listing button for each unit
 - **Money Manager reconciliation import** — PENDING: `scripts/mm-import/` not yet built; all-source reconciliation (MM Excel + second Excel report + bank PDFs/CSVs) → single clean import into fin_transactions; 54 existing Scotia rows will be enriched not duplicated; RBC eSavings (`ffa985f6`, last4 3841, $53,755.57 TTD opening balance) and RBC Rewards Visa Platinum (`077b8014`, last4 0512) accounts already created in JAG; Cash account still needs creating; second Excel report contents TBD
@@ -771,6 +841,10 @@ Never use a translated string as a React list key. Use a stable English/enum key
 | `placeholder` | Coming soon pages |
 | `tenancy` | Tenancy lifecycle panels (enquiries, viewings, applications, deposits, rent, handover, maintenance, renewals, WhatsApp) |
 | `tender` | JABCO Tender Pipeline tab in CRM page (opportunity stages, Go/No-Go, Win/Loss, bid intelligence) |
+| `notifications` | Notification bell (title, mark-all-read, relative-time) — session 26 |
+| `family` | Family Registry page (relationship + language labels, fields, summary chips) — session 26 |
+| `exportPage` | Accountant Export page (tab/column labels) — session 26 |
+| `ownership` | Ownership cap-table page (By Entity / By Person, stake editor, estate rollup) — session 26 |
 
 ---
 
