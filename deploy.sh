@@ -19,6 +19,7 @@ SKIP_FRONTEND=0
 SKIP_ZAP=0
 API_ONLY=0
 FRONTEND_ONLY=0
+NO_COMMIT=0
 
 for arg in "$@"; do
   case $arg in
@@ -27,6 +28,7 @@ for arg in "$@"; do
     --skip-zap)       SKIP_ZAP=1 ;;
     --api-only)       API_ONLY=1; SKIP_FRONTEND=1 ;;
     --frontend-only)  FRONTEND_ONLY=1 ;;
+    --no-commit)      NO_COMMIT=1 ;;
     *) echo "Unknown argument: $arg"; exit 1 ;;
   esac
 done
@@ -141,6 +143,34 @@ if [[ $SKIP_FRONTEND -eq 0 ]]; then
   info "Frontend deployed to $VM_WEB_DIST."
 else
   info "Step 7/7 — Frontend upload SKIPPED."
+fi
+
+# ── Step 8: Git snapshot ──────────────────────────────────────────────────────
+# Checkpoint the deployed state into git so "deployed" and "saved" always happen
+# together. Runs only after a successful deploy. Non-fatal — a commit problem never
+# fails the deploy. Disable with --no-commit. Binaries/reports are kept out via .gitignore.
+if [[ $NO_COMMIT -eq 0 ]]; then
+  info "Step 8/8 — Committing deployed state to git…"
+  cd "$SCRIPT_DIR"
+  if [[ -n "$(git status --porcelain)" ]]; then
+    TARGETS=""
+    [[ $FRONTEND_ONLY -eq 1 ]] && TARGETS="frontend"
+    [[ $API_ONLY -eq 1 ]]      && TARGETS="api"
+    [[ -z "$TARGETS" ]]        && TARGETS="api + frontend"
+    if git add -A && git commit -q -m "chore(deploy): production deploy $(date +'%Y-%m-%d %H:%M') ($TARGETS)
+
+Auto-committed by deploy.sh after a successful deploy.
+
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"; then
+      info "Saved deploy snapshot: $(git rev-parse --short HEAD)"
+    else
+      warn "git commit failed — deploy succeeded but the snapshot was not saved."
+    fi
+  else
+    info "No changes to commit."
+  fi
+else
+  info "Step 8/8 — Git snapshot SKIPPED (--no-commit)."
 fi
 
 # ── Done ──────────────────────────────────────────────────────────────────────

@@ -28,3 +28,9 @@ security/reports/
 # Master Architecture — classified document; offline only; never commit to any cloud system
 JAG_Master_Architecture*.docx
 JAG_Master_Architecture_generator*.js
+
+# Generated reports & reference exports at repo root (not source — kept local only).
+# Keeps the repo to source + text docs, and keeps deploy.sh's auto-commit from sweeping binaries.
+/*.html
+/*.pdf
+/*.docx
