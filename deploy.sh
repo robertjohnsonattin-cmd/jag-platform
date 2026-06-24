@@ -20,6 +20,7 @@ SKIP_ZAP=0
 API_ONLY=0
 FRONTEND_ONLY=0
 NO_COMMIT=0
+NO_PUSH=0
 
 for arg in "$@"; do
   case $arg in
@@ -29,6 +30,7 @@ for arg in "$@"; do
     --api-only)       API_ONLY=1; SKIP_FRONTEND=1 ;;
     --frontend-only)  FRONTEND_ONLY=1 ;;
     --no-commit)      NO_COMMIT=1 ;;
+    --no-push)        NO_PUSH=1 ;;
     *) echo "Unknown argument: $arg"; exit 1 ;;
   esac
 done
@@ -168,6 +170,19 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"; then
     fi
   else
     info "No changes to commit."
+  fi
+
+  # Push the snapshot off-site so the private GitHub backup stays current. Non-fatal,
+  # fails fast (no interactive auth prompt). Disable with --no-push.
+  if [[ $NO_PUSH -eq 0 ]]; then
+    info "Pushing to off-site backup (origin)…"
+    if GIT_TERMINAL_PROMPT=0 git push -q origin HEAD 2>/dev/null; then
+      info "Off-site backup updated."
+    else
+      warn "git push failed — committed locally but NOT backed up off-site (check auth / network)."
+    fi
+  else
+    info "Off-site push SKIPPED (--no-push)."
   fi
 else
   info "Step 8/8 — Git snapshot SKIPPED (--no-commit)."
