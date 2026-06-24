@@ -24,6 +24,10 @@ buildscript {
 apply plugin: "com.facebook.react.rootproject"
 
 allprojects {
+    configurations.all {
+        resolutionStrategy.force 'androidx.biometric:biometric:1.1.0'
+    }
+
     repositories {
         maven {
             // All of React Native (JS, Obj-C sources, Android binaries) is installed from npm

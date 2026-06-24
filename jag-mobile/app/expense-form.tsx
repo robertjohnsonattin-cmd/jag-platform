@@ -53,7 +53,7 @@ export default function ExpenseForm() {
   const [amount, setAmount]               = useState('')
   const [currency, setCurrency]           = useState<Currency>('TTD')
   const [category, setCategory]           = useState<ExpenseCategory>('PERSONAL_EXPENSE')
-  const [entityId, setEntityId]           = useState(ENTITY_OPTIONS[0].id)
+  const [entityId, setEntityId]           = useState<string>(ENTITY_OPTIONS[0].id)
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('CASH')
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null)
   const [description, setDescription]    = useState('')
@@ -276,9 +276,12 @@ export default function ExpenseForm() {
         setActivePicker(null)
       }
     } else if (activePicker === 'card') {
-      options  = cards.map(c => ({ label: cardLabel(c), value: c.id }))
+      options  = [
+        { label: 'No card', value: '' },
+        ...cards.map(c => ({ label: cardLabel(c), value: c.id })),
+      ]
       current  = selectedCardId ?? ''
-      onSelect = v => { setSelectedCardId(v); setActivePicker(null) }
+      onSelect = v => { setSelectedCardId(v || null); setActivePicker(null) }
       extra = (
         <TouchableOpacity
           style={styles.addCardBtn}
@@ -292,7 +295,7 @@ export default function ExpenseForm() {
     return (
       <View style={styles.pickerOverlay}>
         <View style={styles.pickerSheet}>
-          <ScrollView>
+          <ScrollView keyboardShouldPersistTaps="handled">
             {options.map(opt => (
               <TouchableOpacity
                 key={opt.value}
