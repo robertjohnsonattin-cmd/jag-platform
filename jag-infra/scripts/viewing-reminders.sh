@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# JAG Properties — Viewing reminder sender
+# JAG Properties — Viewing reminder sender (24h and 1h)
 #
-# Runs every hour. Sends WhatsApp reminders to prospects with a SCHEDULED
-# or CONFIRMED viewing in the next 2 hours that haven't yet received a reminder.
-# The reminder_sent_at timestamp is updated server-side to prevent duplicates.
+# Runs every hour. Sends:
+#   - jag_enq_viewing_reminder_24h — when viewing is 23–25h away (first run that falls in window)
+#   - jag_enq_viewing_reminder_1h  — when viewing is 45–90 min away
+# Each reminder uses a separate timestamp column so both can fire for the same viewing.
 #
 # ── SETUP (run once) ──────────────────────────────────────────────────────────
 #   (crontab -l 2>/dev/null; echo "0 * * * * KC_PASSWORD=<pw> bash /opt/jag/jag-infra/scripts/viewing-reminders.sh >> /var/log/jag-viewing-reminders.log 2>&1") | crontab -
@@ -37,22 +38,20 @@ if [[ -z "$TOKEN" || "$TOKEN" == "null" ]]; then
   exit 1
 fi
 
-RESPONSE=$(curl -sf --max-time 30 -X POST "$API_BASE/properties/viewings/send-reminders" \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"hours_ahead":2}') || true
+api_post() {
+  local endpoint="$1"
+  curl -sf --max-time 30 -X POST "$API_BASE/$endpoint" \
+    -H "Authorization: Bearer $TOKEN" \
+    -H "Content-Type: application/json" \
+    -d '{}' || echo '{}'
+}
 
-if [[ -z "$RESPONSE" ]]; then
-  log "api_fail" "ERROR" '"reason":"no response from API"'
-  exit 1
-fi
+R24=$(api_post "properties/viewings/send-reminders")
+SENT24=$(echo "$R24" | jq -r '.data.sent // 0')
+log "24h_complete" "INFO" "\"sent\":$SENT24"
 
-SUCCESS=$(echo "$RESPONSE" | jq -r '.success // false')
-if [[ "$SUCCESS" != "true" ]]; then
-  ERR=$(echo "$RESPONSE" | jq -r '.error // "unknown"')
-  log "send_fail" "ERROR" "\"error\":\"$ERR\""
-  exit 1
-fi
+R1=$(api_post "properties/viewings/send-reminders-1h")
+SENT1=$(echo "$R1" | jq -r '.data.sent // 0')
+log "1h_complete" "INFO" "\"sent\":$SENT1"
 
-SENT=$(echo "$RESPONSE" | jq -r '.data.sent // 0')
-log "complete" "INFO" "\"sent\":$SENT"
+log "complete" "INFO" "\"24h_sent\":$SENT24,\"1h_sent\":$SENT1"

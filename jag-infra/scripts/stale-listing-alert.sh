@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
-# JAG Properties — Rent reminder sender (D-5 and D-1)
+# JAG Properties — Stale listing alert to owner
 #
-# Runs daily at 07:00 UTC (03:00 TT). Sends:
-#   - jag_rent_reminder_d5  — 5 days before due date (UPCOMING periods)
-#   - jag_rent_reminder_d1  — 1 day before due date  (UPCOMING or REMINDER_SENT)
-# Each endpoint deduplicates via timestamp columns so duplicates are never sent.
+# Runs daily at 08:00 UTC (04:00 TT). Finds units that have been LISTED for
+# more than STALE_DAYS (default 14) without a viewing booked and sends
+# jag_adv_stale_alert to the owner's WhatsApp. Re-alerts at most once per
+# 7 days per unit (server-side dedup via stale_alert_sent_at column).
 #
 # ── SETUP (run once) ──────────────────────────────────────────────────────────
-#   (crontab -l 2>/dev/null; echo "0 7 * * * KC_PASSWORD=<pw> bash /opt/jag/jag-infra/scripts/rent-reminders.sh >> /var/log/jag-rent-reminders.log 2>&1") | crontab -
+#   (crontab -l 2>/dev/null; echo "0 8 * * * KC_PASSWORD=<pw> bash /opt/jag/jag-infra/scripts/stale-listing-alert.sh >> /var/log/jag-stale-listings.log 2>&1") | crontab -
 #
 # ── MANUAL RUN ───────────────────────────────────────────────────────────────
-#   KC_PASSWORD=<keycloak-password> bash /opt/jag/jag-infra/scripts/rent-reminders.sh
+#   KC_PASSWORD=<keycloak-password> bash /opt/jag/jag-infra/scripts/stale-listing-alert.sh
 
 set -euo pipefail
 
@@ -20,10 +20,11 @@ KC_CLIENT_SECRET="${KC_CLIENT_SECRET:-FIjMqEPT35gr3TRvh6FDdCTnMAX2FAGMjTVHuljqcB
 KC_USERNAME="${KC_USERNAME:-robertjohnsonattin@gmail.com}"
 KC_PASSWORD="${KC_PASSWORD:?KC_PASSWORD is required}"
 API_BASE="${JAG_API_URL:-https://api.jagcorporate.com/api/v1}"
+STALE_DAYS="${STALE_DAYS:-14}"
 
 log() {
   local action="$1" severity="$2"; shift 2
-  printf '{"timestamp":"%s","entity":"RENT_REMINDERS","action":"%s","severity":"%s"%s}\n' \
+  printf '{"timestamp":"%s","entity":"STALE_LISTING","action":"%s","severity":"%s"%s}\n' \
     "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$action" "$severity" "${*:+,$*}"
 }
 
@@ -40,22 +41,19 @@ if [[ -z "$TOKEN" || "$TOKEN" == "null" ]]; then
   exit 1
 fi
 
-api_post() {
-  local endpoint="$1"
-  curl -sf --max-time 30 -X POST "$API_BASE/$endpoint" \
-    -H "Authorization: Bearer $TOKEN" \
-    -H "Content-Type: application/json" \
-    -d '{}' || echo '{}'
-}
+# Uses /units/:id/alert-stale but there's a global batch endpoint under listingRouter
+# The batch route is POST /properties/units/alert-stale (no :id — matches all owned units)
+RESPONSE=$(curl -sf --max-time 60 -X POST "$API_BASE/properties/units/alert-stale" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "{\"stale_days\":$STALE_DAYS}") || true
 
-# D-5 reminders (jag_rent_reminder_d5)
-R5=$(api_post "properties/rent-schedule/send-reminders")
-SENT5=$(echo "$R5" | jq -r '.data.sent // 0')
-log "d5_complete" "INFO" "\"sent\":$SENT5"
+if [[ -z "$RESPONSE" ]]; then
+  log "api_fail" "ERROR" '"reason":"no response from API"'
+  exit 1
+fi
 
-# D-1 reminders (jag_rent_reminder_d1)
-R1=$(api_post "properties/rent-schedule/send-reminders-d1")
-SENT1=$(echo "$R1" | jq -r '.data.sent // 0')
-log "d1_complete" "INFO" "\"sent\":$SENT1"
-
-log "complete" "INFO" "\"d5_sent\":$SENT5,\"d1_sent\":$SENT1"
+ALERTED=$(echo "$RESPONSE" | jq -r '.data.alerted // 0')
+SEV="INFO"
+[[ "$ALERTED" -gt 0 ]] && SEV="WARN"
+log "complete" "$SEV" "\"alerted\":$ALERTED"
