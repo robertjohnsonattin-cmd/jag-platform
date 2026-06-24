@@ -242,17 +242,17 @@ Any `UPDATE` on an RLS-protected table run on a pool connection **without** firs
 **jag_app MinIO user is a separate IAM user, NOT the root user.** It must be created explicitly after any MinIO data wipe or volume loss:
 ```bash
 MINIO_ROOT_PASSWORD=<pw> MINIO_ROOT_USER=jag_minio_admin \
-  mc admin user add jagadmin aVl4SrRl0YtilT55zCNe <secret>
-mc admin policy attach jagadmin jag-app-buckets --user aVl4SrRl0YtilT55zCNe
+  mc admin user add jagadmin <jag-app-access-key> <secret>
+mc admin policy attach jagadmin jag-app-buckets --user <jag-app-access-key>
 ```
 
 **IAM policy** `jag-app-buckets` restricts jag_app to the 4 authorised buckets only. Recreate with:
 ```bash
-MINIO_ROOT_PASSWORD=<pw> JAG_APP_ACCESS_KEY=aVl4SrRl0YtilT55zCNe \
+MINIO_ROOT_PASSWORD=<pw> JAG_APP_ACCESS_KEY=<jag-app-access-key> \
   bash /opt/jag/jag-infra/scripts/setup-minio-policy.sh
 ```
 
-**SSE-S3 encryption** — all 4 buckets encrypted at rest via `MINIO_KMS_SECRET_KEY` in docker-compose.yml env. Key is `jag-sse-key:Zv/jb8tPW1FkuO6drbKQuKVui0ZxEpTV6zpVYFJ3Zf0=`. If rotated, existing objects cannot be decrypted.
+**SSE-S3 encryption** — all 4 buckets encrypted at rest via `MINIO_KMS_SECRET_KEY` in docker-compose.yml env. Key is ‹SECRETS VAULT›[^secrets] (format `jag-sse-key:<base64>`). If rotated, existing objects cannot be decrypted.
 
 **Audit log** — MinIO sends every file operation (PUT/GET/DELETE) to `http://jag-api:3000/internal/minio-audit` via `audit_webhook:loki`. Secured by `Bearer $MINIO_AUDIT_TOKEN`. Events appear in Grafana/Loki under `entity="MINIO_AUDIT"`. Config survives container restarts (stored in MinIO's internal KV).
 
@@ -353,15 +353,17 @@ All financial documents (loan statements, investment portfolios, insurance polic
 | Resource | Value |
 |---|---|
 | SSH key | `~/.ssh/jag_oracle2` (jag_oracle does NOT work) |
-| Keycloak admin | `admin` / `JU1BbyB13tWV0MPf3bK89cWZ` (via SSH tunnel to localhost:8080) |
-| jag-api client secret | `FIjMqEPT35gr3TRvh6FDdCTnMAX2FAGMjTVHuljqcBU` |
-| PG superuser | `postgres` / `PgSuperAdmin2026` |
-| jag_app PG user | `fz4liKWoRn0a81GluZxI9pIHEacrBN5F` |
-| MinIO root | `jag_minio_admin` / `EsvMOHas4ASnWY9f1M9rTV2rQByRsqAz` (admin only — console + mc) |
-| MinIO jag_app | access key `aVl4SrRl0YtilT55zCNe` / secret `gjdzq9IH8IZM0MSlazE8szxH67kz2VYtbWavQe29` (scoped to 4 JAG buckets via `jag-app-buckets` policy) |
+| Keycloak admin | user `admin` — password ‹SECRETS VAULT›[^secrets] (via SSH tunnel to localhost:8080) |
+| jag-api client secret | ‹SECRETS VAULT›[^secrets] |
+| PG superuser | user `postgres` — password ‹SECRETS VAULT›[^secrets] |
+| jag_app PG user | ‹SECRETS VAULT›[^secrets] |
+| MinIO root | user `jag_minio_admin` — password ‹SECRETS VAULT›[^secrets] (admin only — console + mc) |
+| MinIO jag_app | access key + secret ‹SECRETS VAULT›[^secrets] (scoped to 4 JAG buckets via `jag-app-buckets` policy) |
 | MinIO audit token | stored in VM `.env` as `MINIO_AUDIT_TOKEN` — shared secret for MinIO→jag-api webhook |
 | Gemini API key | stored in VM `.env` as `GEMINI_API_KEY` — used by listing.ts suggest-price endpoint |
 | Gemini model | `GEMINI_MODEL=gemini-3.5-flash` in VM `.env` — change here to upgrade model without code deploy |
+
+[^secrets]: **‹SECRETS VAULT›** — actual credential values are NOT stored in git (scrubbed 2026-06-24). Keep them in a password manager / the VM `/opt/jag/.env` only. Live values for the VM live in `/opt/jag/.env`; for admin creds use your password manager. **Note:** older git history (and several operational scripts) still embed some of these — the only complete remediation is to *rotate* the affected credentials (KC client secret, PG passwords, MinIO keys, keystore password). See OPEN ITEMS → "Secrets hygiene".
 
 ---
 
@@ -669,7 +671,7 @@ Path 2 local extraction — reads PDFs from local hard drive, Ollama extracts, p
 - Keystore: `jag-mobile/android/app/jag-mobile.keystore` (gitignored via `android/.gitignore`)
 - Credentials: `jag-mobile/android/signing.properties` (gitignored) — `MYAPP_UPLOAD_STORE_FILE`, `MYAPP_UPLOAD_KEY_ALIAS`, `MYAPP_UPLOAD_STORE_PASSWORD`, `MYAPP_UPLOAD_KEY_PASSWORD`
 - `build.gradle` reads `signing.properties` via `Properties.load()` — never stores credentials in code
-- Password: `labourday2026` (both store and key password)
+- Password: ‹SECRETS VAULT›[^secrets] (both store and key password)
 
 ### App Icon
 - Square + round variants at all mipmap densities (mdpi through xxxhdpi)
@@ -707,6 +709,7 @@ adb install -r app/build/outputs/apk/release/app-release.apk
 
 ## OPEN ITEMS
 
+- **Secrets hygiene (OPEN — 2026-06-24)**: live credentials were historically committed to git (CLAUDE.md credential table — now scrubbed to ‹SECRETS VAULT› pointers) and are still embedded as **fallback defaults** in operational scripts (`jag-infra/scripts/*.sh`, `migration/*.sh`, `security/zap-*.sh` — e.g. `${KC_CLIENT_SECRET:-FIjMq…}`) and in git **history**. The private GitHub repo `robertjohnsonattin-cmd/jag-platform` already contains them from earlier pushes. **Scrubbing files does not remove them from history.** The only complete fix is to **rotate** the exposed credentials (KC `jag-api` client secret, PG `postgres` + `jag_app` passwords, MinIO root + jag_app keys + KMS key, mobile keystore password, Keycloak admin password), then update `/opt/jag/.env` + scripts to read from env (remove the hardcoded fallbacks) and re-deploy cron. `scripts/stmt-watcher/.env.stmt-watcher` was wrongly tracked — removed from git + gitignored 2026-06-24.
 - ~~**Frontend gap audit — pending-review consolidation**~~ — **DONE 2026-06-24 (session 26)**: AI `suggested_category`/`confidence` surfaced in TransactionsPanel review modal; orphaned `fin_pending_review_queue` row now closed on category PATCH (was leaking).
 - ~~**Frontend gap audit — Accountant Export UI**~~ — **DONE 2026-06-24 (session 26)**: `pages/Export.tsx` (nav `/export`), 7 read-only finance views + per-view CSV (`lib/csv.ts`).
 - ~~**Frontend gap audit — Succession (estate) UI**~~ — **DONE 2026-06-24 (session 26)**: `pages/Succession.tsx` (nav `/succession`) over `fam_succession_documents`; `GET /succession/documents/:id` added for storage_path/download.
@@ -737,7 +740,7 @@ adb install -r app/build/outputs/apk/release/app-release.apk
 - ~~**JAG Finance advanced** — intercompany eliminations UI, insurance UI not yet built~~ **DONE**
 - ~~**Bank Statements UI**~~ — **DONE 2026-06-13**: drag-and-drop batch upload panel in Finance → Bank Statements tab; per-file account assignment; parallel upload; job history with delete; `fin_bank_statement_jobs` table; `routes/finance/bank-statements.ts`
 - ~~**MinIO SSE-S3 encryption**~~ — **DONE 2026-06-12**: all 4 buckets encrypted via `MINIO_KMS_SECRET_KEY`
-- ~~**MinIO jag_app user creation**~~ — **DONE 2026-06-13**: user `aVl4SrRl0YtilT55zCNe` created (was never provisioned despite env vars being set); `jag-app-buckets` policy attached
+- ~~**MinIO jag_app user creation**~~ — **DONE 2026-06-13**: user `<jag-app-access-key>` created (was never provisioned despite env vars being set); `jag-app-buckets` policy attached
 - ~~**MinIO bucket IAM policy**~~ — **DONE 2026-06-13**: `jag-app-buckets` policy limits jag_app to 4 authorised buckets; `jag-infra/scripts/setup-minio-policy.sh` for re-provisioning
 - ~~**MinIO audit log → Loki**~~ — **DONE 2026-06-13**: `audit_webhook:loki` configured in MinIO; `POST /internal/minio-audit` in jag-api logs every file operation to Grafana/Loki under `entity="MINIO_AUDIT"`
 - ~~**Auto-expire stale PENDING jobs**~~ — **DONE 2026-06-13**: `jag-infra/scripts/cleanup-stale-statements.sh` runs daily at 07:00 UTC (03:00 TT) via VM cron; deletes PENDING jobs + MinIO objects older than 7 days

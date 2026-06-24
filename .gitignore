@@ -34,3 +34,6 @@ JAG_Master_Architecture_generator*.js
 /*.html
 /*.pdf
 /*.docx
+
+# Any .env.* variant in any subdir (e.g. .env.stmt-watcher) — secrets, never track
+**/.env.*
