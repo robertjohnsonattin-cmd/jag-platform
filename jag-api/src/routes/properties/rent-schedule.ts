@@ -149,7 +149,7 @@ rentScheduleRouter.post('/send-reminders', async (req: Request, res: Response, n
       try {
         await sendTemplate({
           to: String(row['tenant_phone']),
-          templateName: 'rent_reminder',
+          templateName: 'jag_rent_reminder_d5',
           languageCode: 'en',
           components: [{ type: 'body', parameters: [
             { type: 'text', text: String(row['tenant_name'] ?? '') },
@@ -169,6 +169,179 @@ rentScheduleRouter.post('/send-reminders', async (req: Request, res: Response, n
 
     logger.info({ entity: 'RENT_REMINDERS', action: 'batch_complete', sent: sent.length, user_id: ownerId, severity: 'INFO' });
     res.json(ok({ sent: sent.length }));
+  } catch (e) { next(e); }
+});
+
+// ── Batch: D-1 urgent reminder ────────────────────────────────────────────────
+rentScheduleRouter.post('/send-reminders-d1', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const ownerId = (req as Request & { user?: { jag_user_id?: string } }).user?.jag_user_id;
+    if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
+
+    const bank = process.env.JAG_BANK_NAME ?? 'First Citizens Bank';
+    const acct = process.env.JAG_BANK_ACCOUNT_NO ?? '';
+    const sent: string[] = [];
+
+    const rows = await withOwnerRLS(propertiesPool, ownerId, async client => {
+      const { rows: r } = await client.query<Record<string, unknown>>(
+        `SELECT rs.id, rs.amount_due_ttd, rs.due_date, rs.tenant_name, rs.tenant_phone,
+                u.unit_number, p.name AS property_name
+         FROM prop_rent_schedule rs
+         JOIN prop_units u ON u.id = rs.unit_id
+         LEFT JOIN prop_properties p ON p.id = u.property_id
+         WHERE rs.owner_id = $1
+           AND rs.status IN ('UPCOMING','REMINDER_SENT')
+           AND rs.due_date = CURRENT_DATE + INTERVAL '1 day'
+           AND (rs.d1_reminder_sent_at IS NULL)`,
+        [ownerId],
+      );
+      return r;
+    });
+
+    for (const row of rows) {
+      if (!row['tenant_phone']) continue;
+      try {
+        await sendTemplate({
+          to: String(row['tenant_phone']),
+          templateName: 'jag_rent_reminder_d1',
+          components: [{ type: 'body', parameters: [
+            { type: 'text', text: String(row['tenant_name'] ?? '') },
+            { type: 'text', text: String(row['property_name'] ?? '') },
+            { type: 'text', text: String(row['unit_number'] ?? '') },
+            { type: 'text', text: `TTD $${parseFloat(String(row['amount_due_ttd'] ?? 0)).toFixed(2)}` },
+            { type: 'text', text: String(row['due_date'] ?? '') },
+            { type: 'text', text: bank },
+            { type: 'text', text: acct },
+            { type: 'text', text: String(row['tenant_name'] ?? '') },
+            { type: 'text', text: String(row['unit_number'] ?? '') },
+          ]}],
+        });
+        await withOwnerRLS(propertiesPool, ownerId, async client => {
+          await client.query(
+            `UPDATE prop_rent_schedule SET d1_reminder_sent_at = NOW() WHERE id = $1`, [row['id']],
+          );
+        });
+        sent.push(String(row['id']));
+      } catch { /* skip */ }
+    }
+    res.json(ok({ sent: sent.length }));
+  } catch (e) { next(e); }
+});
+
+// ── Batch: D+1 missed payment notice ─────────────────────────────────────────
+rentScheduleRouter.post('/send-missed-d1', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const ownerId = (req as Request & { user?: { jag_user_id?: string } }).user?.jag_user_id;
+    if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
+
+    const sent: string[] = [];
+    const rows = await withOwnerRLS(propertiesPool, ownerId, async client => {
+      const { rows: r } = await client.query<Record<string, unknown>>(
+        `SELECT rs.id, rs.amount_due_ttd, rs.due_date, rs.tenant_name, rs.tenant_phone,
+                u.unit_number
+         FROM prop_rent_schedule rs
+         JOIN prop_units u ON u.id = rs.unit_id
+         WHERE rs.owner_id = $1
+           AND rs.status IN ('UPCOMING','REMINDER_SENT','LATE')
+           AND rs.due_date = CURRENT_DATE - INTERVAL '1 day'
+           AND rs.missed_d1_sent_at IS NULL`,
+        [ownerId],
+      );
+      return r;
+    });
+
+    for (const row of rows) {
+      if (!row['tenant_phone']) continue;
+      const penalty = parseFloat(String(row['amount_due_ttd'] ?? 0)) * 0.05;
+      try {
+        await sendTemplate({
+          to: String(row['tenant_phone']),
+          templateName: 'jag_rent_missed_d1',
+          components: [{ type: 'body', parameters: [
+            { type: 'text', text: String(row['tenant_name'] ?? '') },
+            { type: 'text', text: String(row['unit_number'] ?? '') },
+            { type: 'text', text: `TTD $${parseFloat(String(row['amount_due_ttd'] ?? 0)).toFixed(2)}` },
+            { type: 'text', text: String(row['due_date'] ?? '') },
+            { type: 'text', text: `TTD $${penalty.toFixed(2)}` },
+            { type: 'text', text: process.env.JAG_MANAGER_PHONE ?? '' },
+          ]}],
+        });
+        await withOwnerRLS(propertiesPool, ownerId, async client => {
+          await client.query(
+            `UPDATE prop_rent_schedule SET missed_d1_sent_at = NOW(), status = 'LATE' WHERE id = $1`, [row['id']],
+          );
+        });
+        sent.push(String(row['id']));
+      } catch { /* skip */ }
+    }
+    res.json(ok({ sent: sent.length }));
+  } catch (e) { next(e); }
+});
+
+// ── Batch: queue D+7 and D+14 arrears escalations for owner approval ──────────
+rentScheduleRouter.post('/queue-arrears-escalation', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const ownerId = (req as Request & { user?: { jag_user_id?: string } }).user?.jag_user_id;
+    if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
+
+    const queued: string[] = [];
+
+    for (const [days, approvalType, templateName] of [
+      [7,  'RENT_FORMAL_DEMAND', 'jag_rent_formal_demand'],
+      [14, 'RENT_LEGAL_NOTICE',  'jag_rent_legal_notice'],
+    ] as [number, string, string][]) {
+      const rows = await withOwnerRLS(propertiesPool, ownerId, async client => {
+        const { rows: r } = await client.query<Record<string, unknown>>(
+          `SELECT rs.id, rs.amount_due_ttd, rs.due_date, rs.tenant_name, rs.tenant_phone,
+                  u.unit_number, p.name AS property_name,
+                  (CURRENT_DATE - rs.due_date)::int AS days_overdue
+           FROM prop_rent_schedule rs
+           JOIN prop_units u ON u.id = rs.unit_id
+           LEFT JOIN prop_properties p ON p.id = u.property_id
+           WHERE rs.owner_id = $1
+             AND rs.status = 'LATE'
+             AND rs.due_date = CURRENT_DATE - INTERVAL '${days} days'
+             AND NOT EXISTS (
+               SELECT 1 FROM prop_wa_pending_approvals pa
+               WHERE pa.related_id = rs.id AND pa.approval_type = $2
+                 AND pa.status IN ('PENDING','SENT')
+             )`,
+          [ownerId, approvalType],
+        );
+        return r;
+      });
+
+      for (const row of rows) {
+        if (!row['tenant_phone']) continue;
+        const balance = parseFloat(String(row['amount_due_ttd'] ?? 0));
+        const penalty = balance * 0.05;
+        const total   = balance + penalty;
+        const label   = `${row['unit_number']} — ${row['tenant_name']} — ${row['days_overdue']} days overdue`;
+
+        await withOwnerRLS(propertiesPool, ownerId, async client => {
+          await client.query(
+            `INSERT INTO prop_wa_pending_approvals
+               (owner_id, approval_type, template_name, to_phone, components, context_label, related_id)
+             VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+            [ownerId, approvalType, templateName, row['tenant_phone'],
+             JSON.stringify([{ type: 'body', parameters: [
+               { type: 'text', text: String(row['tenant_name'] ?? '') },
+               { type: 'text', text: String(row['unit_number'] ?? '') },
+               { type: 'text', text: String(row['property_name'] ?? '') },
+               { type: 'text', text: String(row['days_overdue'] ?? days) },
+               { type: 'text', text: `TTD $${balance.toFixed(2)}` },
+               { type: 'text', text: `TTD $${penalty.toFixed(2)}` },
+               { type: 'text', text: `TTD $${total.toFixed(2)}` },
+               { type: 'text', text: process.env.JAG_MANAGER_PHONE ?? '' },
+             ]}]),
+             label, row['id']],
+          );
+        });
+        queued.push(String(row['id']));
+      }
+    }
+
+    res.json(ok({ queued: queued.length }));
   } catch (e) { next(e); }
 });
 
@@ -229,19 +402,40 @@ rentScheduleRouter.post('/:id/record-payment', async (req: Request, res: Respons
     if (!row) return void res.status(404).json(err('Rent period not found', 'NOT_FOUND'));
 
     if (row.tenant_phone) {
-      try {
-        await sendTemplate({
+      const isPartial = parseFloat(String(row.paid_amount_ttd)) < parseFloat(String(row.amount_due_ttd));
+      const balance   = parseFloat(String(row.amount_due_ttd)) - parseFloat(String(row.paid_amount_ttd));
+      const penalty   = parseFloat(String(row.amount_due_ttd)) * 0.05;
+
+      if (isPartial) {
+        // JAG_RENT_004 — partial payment received
+        sendTemplate({
           to: row.tenant_phone,
-          templateName: 'prop_rent_receipt',
+          templateName: 'jag_rent_partial_payment',
           components: [{ type: 'body', parameters: [
-            { type: 'text', text: row.tenant_name },
+            { type: 'text', text: row.tenant_name ?? '' },
+            { type: 'text', text: row.unit_number ?? '' },
             { type: 'text', text: `TTD $${parseFloat(String(row.paid_amount_ttd)).toFixed(2)}` },
-            { type: 'text', text: `${row.period_year}-${String(row.period_month).padStart(2, '0')}` },
-            { type: 'text', text: row.receipt_number },
+            { type: 'text', text: `TTD $${balance.toFixed(2)}` },
+            { type: 'text', text: row.paid_date },
+            { type: 'text', text: `TTD $${penalty.toFixed(2)}` },
+            { type: 'text', text: process.env.JAG_MANAGER_PHONE ?? '' },
           ]}],
-        });
-      } catch (e) {
-        logger.warn({ entity: 'PROPERTIES', action: 'WA_RECEIPT_FAILED', error_message: (e as Error).message });
+        }).catch(e => logger.warn({ entity: 'PROPERTIES', action: 'WA_PARTIAL_FAILED', error_message: (e as Error).message }));
+      } else {
+        // JAG_RENT_003 — full receipt
+        sendTemplate({
+          to: row.tenant_phone,
+          templateName: 'jag_rent_receipt_full',
+          components: [{ type: 'body', parameters: [
+            { type: 'text', text: row.tenant_name ?? '' },
+            { type: 'text', text: row.receipt_number },
+            { type: 'text', text: row.paid_date },
+            { type: 'text', text: `TTD $${parseFloat(String(row.paid_amount_ttd)).toFixed(2)}` },
+            { type: 'text', text: row.payment_method ?? '' },
+            { type: 'text', text: row.unit_number ?? '' },
+            { type: 'text', text: `${row.period_year}-${String(row.period_month).padStart(2, '0')}` },
+          ]}],
+        }).catch(e => logger.warn({ entity: 'PROPERTIES', action: 'WA_RECEIPT_FAILED', error_message: (e as Error).message }));
       }
     }
     res.json(ok(row));

@@ -63,6 +63,28 @@ successionRouter.get('/documents', async (req: Request, res: Response, next: Nex
   } catch (e) { next(e); }
 });
 
+// ── GET /succession/documents/:id ─────────────────────────────────────────────
+// Returns the full record INCLUDING storage_path. The list view strips storage_path
+// for classified documents, so the download path resolves the MinIO key via this
+// by-id route. RLS scopes to the owner; not-found and not-owned are indistinguishable.
+
+successionRouter.get('/documents/:id', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const idP = UUIDParam.safeParse(req.params);
+    if (!idP.success) { err(res, 422, 'VALIDATION_ERROR', 'ID must be a valid UUID.'); return; }
+
+    const client = await familyPool.connect();
+    try {
+      const rec = await withOwnerRLS(client, req.rlsCtx, (c) =>
+        c.query(`SELECT * FROM fam_succession_documents WHERE id = $1`, [idP.data.id]).then(r => r.rows[0] ?? null),
+      );
+      if (!rec) { err(res, 404, 'DOC_NOT_FOUND', 'Succession document not found.'); return; }
+      logger.info({ entity: 'SUCCESSION', action: 'DOC_GET', user_id: req.rlsCtx.userId, record_id: idP.data.id });
+      ok(res, rec);
+    } finally { client.release(); }
+  } catch (e) { next(e); }
+});
+
 // ── POST /succession/documents ────────────────────────────────────────────────
 
 successionRouter.post('/documents', async (req: Request, res: Response, next: NextFunction): Promise<void> => {

@@ -255,6 +255,55 @@ bankStatementsRouter.get('/:id', async (req: Request, res: Response, next: NextF
   } catch (e) { next(e); }
 });
 
+// ── POST /bank-statements/:id/retry ──────────────────────────────────────────
+// Resets a FAILED job back to PENDING so the next batch run can pick it up.
+// Returns 409 if the MinIO object no longer exists (file must be re-uploaded).
+
+bankStatementsRouter.post('/:id/retry', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const parsed = UUIDParam.safeParse(req.params);
+    if (!parsed.success) { err(res, 422, 'VALIDATION_ERROR', 'Invalid UUID.'); return; }
+    const { ownerId } = req.rlsCtx;
+
+    const client = await familyPool.connect();
+    try {
+      const job = await withOwnerRLS(client, req.rlsCtx, (c) =>
+        c.query(`SELECT * FROM fin_bank_statement_jobs WHERE id = $1`, [parsed.data.id])
+          .then(r => r.rows[0] ?? null),
+      );
+      if (!job) { err(res, 404, 'NOT_FOUND', 'Job not found.'); return; }
+      if (job.status !== 'FAILED' && job.status !== 'PROCESSING') {
+        err(res, 409, 'CONFLICT', `Only FAILED or stuck PROCESSING jobs can be retried. Current status: ${job.status}.`);
+        return;
+      }
+
+      // Confirm the source file still exists in MinIO before resetting
+      try {
+        await minioClient.statObject(BUCKET_STATEMENTS, job.storage_path);
+      } catch {
+        err(res, 409, 'FILE_MISSING', 'The original file is no longer in storage. Please re-upload the statement.');
+        return;
+      }
+
+      const updated = await withOwnerRLS(client, req.rlsCtx, (c) =>
+        c.query(
+          `UPDATE fin_bank_statement_jobs
+           SET status = 'PENDING', error_detail = NULL,
+               started_at = NULL, completed_at = NULL,
+               rows_parsed = NULL, rows_imported = NULL, rows_skipped = NULL,
+               updated_at = now()
+           WHERE id = $1
+           RETURNING *`,
+          [parsed.data.id],
+        ).then(r => r.rows[0]),
+      );
+
+      logger.info({ entity: 'FINANCE', action: 'BANK_STATEMENT_RETRY', user_id: ownerId, record_id: parsed.data.id });
+      ok(res, updated);
+    } finally { client.release(); }
+  } catch (e) { next(e); }
+});
+
 // ── DELETE /bank-statements/:id ───────────────────────────────────────────────
 // Deletes the MinIO object and the job record.
 // Only allowed for terminal states: COMPLETE, PARTIAL, FAILED.

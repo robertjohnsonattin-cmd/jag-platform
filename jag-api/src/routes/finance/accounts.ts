@@ -217,7 +217,7 @@ accountsRouter.delete('/:id', async (req: Request, res: Response, next: NextFunc
         ).then(r => Number(r.rows[0].count));
 
         const stmtCount = await c.query<{ count: string }>(
-          `SELECT count(*) FROM fin_bank_statement_lines WHERE account_id = $1`,
+          `SELECT count(*) FROM fin_bank_statement_jobs WHERE account_id = $1`,
           [parsed.data.id],
         ).then(r => Number(r.rows[0].count));
 

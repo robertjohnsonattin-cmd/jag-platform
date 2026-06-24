@@ -2,15 +2,21 @@
 // POST   /api/v1/properties/tenants
 // PATCH  /api/v1/properties/tenants/:id
 // DELETE /api/v1/properties/tenants/:id  (Owner only — hard delete if no leases)
+// GET    /api/v1/properties/tenants/:id/documents
+// POST   /api/v1/properties/tenants/:id/documents/upload-url
+// POST   /api/v1/properties/tenants/:id/documents
+// DELETE /api/v1/properties/tenants/:id/documents/:docId
 // GET    /api/v1/properties/:propertyId/mortgage
 // POST   /api/v1/properties/:propertyId/mortgage
 
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import { z } from 'zod';
+import multer from 'multer';
 import { withOwnerRLS } from '../../middleware/rls';
 import { propertiesPool, corePool } from '../../db/index';
 import { logger } from '../../lib/logger';
 import { ok, err } from '../../lib/response';
+import { minioClient, getObjectStream, getObjectStat, ensureBucket, mediaObjectKey, deleteObject, BUCKET_DOCUMENTS } from '../../lib/minio';
 
 export const propTenantsRouter  = Router();
 export const propMortgageRouter = Router({ mergeParams: true });
@@ -249,6 +255,125 @@ propTenantsRouter.delete('/:id', async (req: Request, res: Response, next: NextF
     if (ex.status === 409) { res.status(409).json({ success: false, data: null, error: ex.message, code: ex.code, blocking: ex.blocking }); return; }
     next(e);
   }
+});
+
+// ── Tenant document vault ─────────────────────────────────────────────────────
+
+const ALLOWED_DOC_TYPES = [
+  'national_id','passport','drivers_licence','employment_letter','payslip',
+  'company_reg','bank_statement','utility_bill','reference_letter','tenancy_agreement','other',
+] as const;
+
+const DocParam = z.object({ id: z.string().uuid(), docId: z.string().uuid() });
+
+const docUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
+
+// GET /:id/documents — list tenant docs (no presigned URLs; use /:id/documents/:docId/download)
+propTenantsRouter.get('/:id/documents', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const { id } = UUIDParam.parse(req.params);
+    const client = await propertiesPool.connect();
+    try {
+      const rows = await withOwnerRLS(client, req.rlsCtx, (c) =>
+        c.query(
+          `SELECT id, tenant_id, doc_type, label, file_name,
+                  file_size_bytes, mime_type, notes, source, application_id, created_at
+           FROM prop_tenant_documents WHERE tenant_id = $1 ORDER BY created_at ASC`,
+          [id],
+        ).then(r => r.rows),
+      );
+      ok(res, rows);
+    } finally { client.release(); }
+  } catch (e) { next(e); }
+});
+
+// POST /:id/documents — multipart/form-data upload (file + doc_type + optional notes)
+propTenantsRouter.post('/:id/documents', docUpload.single('file'), async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const { id } = UUIDParam.parse(req.params);
+    const file = req.file;
+    if (!file) { err(res, 422, 'VALIDATION_ERROR', 'No file provided.'); return; }
+
+    const docTypeResult = z.enum(ALLOWED_DOC_TYPES).safeParse(req.body['doc_type']);
+    if (!docTypeResult.success) { err(res, 422, 'VALIDATION_ERROR', 'Invalid doc_type.'); return; }
+    const docType = docTypeResult.data;
+    const notes = typeof req.body['notes'] === 'string' ? req.body['notes'].slice(0, 2000) : null;
+    const { userId: ownerId } = req.rlsCtx;
+
+    const key = mediaObjectKey(ownerId, 'tenant-docs', id, `${docType}_${file.originalname}`);
+    await ensureBucket(BUCKET_DOCUMENTS);
+    await minioClient.putObject(BUCKET_DOCUMENTS, key, file.buffer, file.size, { 'Content-Type': file.mimetype });
+
+    const client = await propertiesPool.connect();
+    try {
+      const doc = await withOwnerRLS(client, req.rlsCtx, (c) =>
+        c.query(
+          `INSERT INTO prop_tenant_documents
+             (owner_id, tenant_id, doc_type, label, minio_object_key, file_name, file_size_bytes, mime_type, notes, source)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'MANUAL') RETURNING *`,
+          [ownerId, id, docType, docType.replace(/_/g, ' '), key, file.originalname,
+           file.size, file.mimetype, notes],
+        ).then(r => r.rows[0]),
+      );
+      logger.info({ entity: 'PROPERTIES', action: 'TENANT_DOC_UPLOADED', tenant_id: id, record_id: doc.id, user_id: ownerId });
+      ok(res, doc, 201);
+    } finally { client.release(); }
+  } catch (e) { next(e); }
+});
+
+// GET /:id/documents/:docId/download — stream file from MinIO
+propTenantsRouter.get('/:id/documents/:docId/download', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const { id, docId } = DocParam.parse(req.params);
+
+    const client = await propertiesPool.connect();
+    let doc: { minio_object_key: string; file_name: string; mime_type: string | null } | null = null;
+    try {
+      doc = await withOwnerRLS(client, req.rlsCtx, (c) =>
+        c.query(
+          `SELECT minio_object_key, file_name, mime_type
+           FROM prop_tenant_documents WHERE id = $1 AND tenant_id = $2`,
+          [docId, id],
+        ).then(r => r.rows[0] ?? null),
+      );
+    } finally { client.release(); }
+
+    if (!doc) { err(res, 404, 'NOT_FOUND', 'Document not found.'); return; }
+
+    const [stream, stat] = await Promise.all([
+      getObjectStream(BUCKET_DOCUMENTS, doc.minio_object_key),
+      getObjectStat(BUCKET_DOCUMENTS, doc.minio_object_key),
+    ]);
+
+    res.set({
+      'Content-Type': doc.mime_type ?? stat.contentType,
+      'Content-Disposition': `attachment; filename="${encodeURIComponent(doc.file_name)}"`,
+      'Content-Length': String(stat.size),
+      'Cache-Control': 'private, no-cache',
+    });
+    stream.pipe(res);
+  } catch (e) { next(e); }
+});
+
+propTenantsRouter.delete('/:id/documents/:docId', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const { id, docId } = DocParam.parse(req.params);
+    const { userId: ownerId } = req.rlsCtx;
+
+    const client = await propertiesPool.connect();
+    try {
+      const deleted = await withOwnerRLS(client, req.rlsCtx, (c) =>
+        c.query(
+          `DELETE FROM prop_tenant_documents WHERE id = $1 AND tenant_id = $2 RETURNING minio_object_key`,
+          [docId, id],
+        ).then(r => r.rows[0] ?? null),
+      );
+      if (!deleted) { err(res, 404, 'NOT_FOUND', 'Document not found.'); return; }
+      try { await deleteObject(BUCKET_DOCUMENTS, deleted.minio_object_key); } catch (_) { /* best-effort */ }
+      logger.info({ entity: 'PROPERTIES', action: 'TENANT_DOC_DELETED', tenant_id: id, record_id: docId, user_id: ownerId });
+      ok(res, { deleted: true, id: docId });
+    } finally { client.release(); }
+  } catch (e) { next(e); }
 });
 
 // ── GET /properties/:propertyId/mortgage ──────────────────────────────────────

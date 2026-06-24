@@ -204,7 +204,7 @@ async function processInboundMessage(msg: Record<string, unknown>): Promise<void
 
         await sendTemplate({
           to: from,
-          templateName: 'prop_ticket_ack',
+          templateName: 'jag_mnt_ticket_ack',
           components: [{ type: 'body', parameters: [
             { type: 'text', text: 'Tenant' },
             { type: 'text', text: ticketRef },

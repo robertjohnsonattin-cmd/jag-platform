@@ -15,6 +15,7 @@ import { propertiesPool } from '../../db/index';
 import { logger } from '../../lib/logger';
 import { ok, err } from '../../lib/response';
 import { sendTemplate } from '../../lib/whatsapp';
+import { enqueueNotification } from '../../lib/notifications';
 
 export const maintenanceTicketsRouter = Router();
 export const contractorsRouter        = Router();
@@ -111,10 +112,11 @@ maintenanceTicketsRouter.post('/check-sla', async (req: Request, res: Response, 
 
     const { newlyBreached, totalBreached } = await withOwnerRLS(propertiesPool, ownerId, async client => {
       const { rows: tickets } = await client.query<Record<string, unknown>>(
-        `SELECT id, priority, created_at, sla_breached
-         FROM prop_maintenance_tickets
-         WHERE owner_id = $1 AND status IN ('OPEN','ASSIGNED','IN_PROGRESS','PENDING_PARTS')
-           AND priority IN ('P1','P2','P3')`,
+        `SELECT t.id, t.priority, t.created_at, t.sla_breached, t.ticket_ref, u.unit_number
+         FROM prop_maintenance_tickets t
+         JOIN prop_units u ON u.id = t.unit_id
+         WHERE t.owner_id = $1 AND t.status IN ('OPEN','ASSIGNED','IN_PROGRESS','PENDING_PARTS')
+           AND t.priority IN ('P1','P2','P3')`,
         [ownerId],
       );
 
@@ -134,6 +136,28 @@ maintenanceTicketsRouter.post('/check-sla', async (req: Request, res: Response, 
               `INSERT INTO prop_ticket_updates (ticket_id, owner_id, note) VALUES ($1,$2,'SLA breach auto-detected')`,
               [tk['id'], ownerId],
             );
+            // JAG_MNT_005 — SLA breach owner notification
+            const ownerPhone = process.env.JAG_OWNER_PHONE;
+            if (ownerPhone) {
+              sendTemplate({
+                to: ownerPhone,
+                templateName: 'jag_mnt_sla_breach',
+                components: [{ type: 'body', parameters: [
+                  { type: 'text', text: String(tk['ticket_ref'] ?? tk['id']) },
+                  { type: 'text', text: String(tk['priority'] ?? '') },
+                  { type: 'text', text: `${Math.round(elapsedHours)}h` },
+                  { type: 'text', text: String(SLA_HOURS[String(tk['priority'])] ?? '?') + 'h' },
+                  { type: 'text', text: String(tk['unit_number'] ?? '') },
+                ]}],
+              }).catch(() => { /* non-fatal */ });
+            }
+            // Owner in-app notification — SLA breach (non-blocking).
+            void enqueueNotification({
+              tier: 1,
+              title: 'Maintenance SLA breach',
+              body: `Ticket ${String(tk['ticket_ref'] ?? tk['id'])} (${String(tk['priority'] ?? '')}) at unit ${String(tk['unit_number'] ?? '—')} has breached its SLA.`,
+              payload: { module: 'PROPERTIES', kind: 'MAINTENANCE_SLA', ticket_id: tk['id'] },
+            });
             newlyBreached++;
           }
         }
@@ -216,7 +240,7 @@ maintenanceTicketsRouter.post('/', async (req: Request, res: Response, next: Nex
       try {
         await sendTemplate({
           to: body.reported_by_phone,
-          templateName: 'prop_ticket_ack',
+          templateName: 'jag_mnt_ticket_ack',
           components: [{ type: 'body', parameters: [
             { type: 'text', text: body.reported_by_name ?? 'Tenant' },
             { type: 'text', text: row.ticket_ref },
@@ -236,6 +260,17 @@ maintenanceTicketsRouter.post('/', async (req: Request, res: Response, next: Nex
     }
 
     logger.info({ entity: 'PROPERTIES', action: 'TICKET_CREATED', record_id: row.id, ticket_ref: row.ticket_ref, user_id: ownerId });
+
+    // Owner in-app notification — urgent (P1/P2) tickets only (non-blocking).
+    if (priority === 'P1' || priority === 'P2') {
+      void enqueueNotification({
+        tier: 1,
+        title: 'Urgent maintenance ticket',
+        body: `${priority} — ${body.category}: ${body.description} (${row.ticket_ref})`,
+        payload: { module: 'PROPERTIES', kind: 'MAINTENANCE', ticket_id: row.id },
+      });
+    }
+
     res.status(201).json(ok(row));
   } catch (e) { next(e); }
 });
@@ -276,11 +311,13 @@ maintenanceTicketsRouter.patch('/:id', async (req: Request, res: Response, next:
     const body = PatchTicketSchema.parse(req.body);
     if (Object.keys(body).length === 0) return void res.status(400).json(err('No fields to update', 'VALIDATION_ERROR'));
 
+    let prevStatus: string | undefined;
     const row = await withOwnerRLS(propertiesPool, ownerId, async client => {
       const { rows: [existing] } = await client.query(
         `SELECT status FROM prop_maintenance_tickets WHERE id = $1 AND owner_id = $2`, [id, ownerId],
       );
       if (!existing) return null;
+      prevStatus = String(existing.status);
 
       const sets: string[] = ['last_updated_at = NOW()'];
       const vals: unknown[] = [];
@@ -311,6 +348,63 @@ maintenanceTicketsRouter.patch('/:id', async (req: Request, res: Response, next:
       return updated;
     });
     if (!row) return void res.status(404).json(err('Ticket not found', 'NOT_FOUND'));
+
+    // JAG_MNT_002 — contractor assigned notification to tenant
+    if (body.contractor_id && row.reported_by_phone) {
+      const contractor = await withOwnerRLS(propertiesPool, ownerId, async client => {
+        const { rows: [c] } = await client.query(
+          `SELECT name, phone FROM prop_contractors WHERE id = $1 AND owner_id = $2`, [body.contractor_id, ownerId],
+        );
+        return c ?? null;
+      });
+      if (contractor) {
+        const visitTime = body.estimated_visit_at
+          ? new Date(String(body.estimated_visit_at)).toLocaleString('en-TT')
+          : 'To be confirmed';
+        sendTemplate({
+          to: String(row.reported_by_phone),
+          templateName: 'jag_mnt_contractor_assigned',
+          components: [{ type: 'body', parameters: [
+            { type: 'text', text: String(row.reported_by_name ?? 'Tenant') },
+            { type: 'text', text: String(row.ticket_ref) },
+            { type: 'text', text: String(contractor.name) },
+            { type: 'text', text: visitTime },
+            { type: 'text', text: process.env.JAG_MANAGER_PHONE ?? '' },
+          ]}],
+        }).catch(e => logger.warn({ entity: 'PROPERTIES', action: 'WA_CONTRACTOR_NOTIF_FAILED', error_message: (e as Error).message }));
+      }
+    }
+
+    // JAG_MNT_003 — status update notification to tenant (fires on every status change except RESOLVED, which has its own /resolve endpoint)
+    if (body.status && prevStatus && body.status !== prevStatus && body.status !== 'RESOLVED' && row.reported_by_phone) {
+      const STATUS_MAP: Record<string, [string, string]> = {
+        ASSIGNED:      ['Assigned', 'A technician has been assigned to your request.'],
+        IN_PROGRESS:   ['In Progress', 'Work on your issue is now underway.'],
+        PENDING_PARTS: ['Pending Parts', 'We are waiting on parts or materials and will update you once they arrive.'],
+        ON_HOLD:       ['On Hold', 'Your request is currently on hold. We will contact you shortly.'],
+      };
+      const [statusLabel, updateText] = STATUS_MAP[String(body.status)] ?? [String(body.status).replace(/_/g, ' '), 'Your ticket has been updated.'];
+      const unitNum = await withOwnerRLS(propertiesPool, ownerId, async client => {
+        const { rows: [u] } = await client.query(
+          `SELECT unit_number FROM prop_units WHERE id = $1 AND owner_id = $2`, [row.unit_id, ownerId],
+        );
+        return u?.unit_number ?? '';
+      }).catch(() => '');
+      sendTemplate({
+        to: String(row.reported_by_phone),
+        templateName: 'jag_mnt_status_update',
+        components: [{ type: 'body', parameters: [
+          { type: 'text', text: String(row.reported_by_name ?? 'Tenant') },
+          { type: 'text', text: String(row.ticket_ref) },
+          { type: 'text', text: String(row.category ?? '') },
+          { type: 'text', text: String(unitNum) },
+          { type: 'text', text: statusLabel },
+          { type: 'text', text: updateText },
+          { type: 'text', text: process.env.JAG_MANAGER_PHONE ?? '' },
+        ]}],
+      }).catch(e => logger.warn({ entity: 'PROPERTIES', action: 'WA_STATUS_UPDATE_FAILED', error_message: (e as Error).message }));
+    }
+
     res.json(ok(row));
   } catch (e) { next(e); }
 });
@@ -344,7 +438,7 @@ maintenanceTicketsRouter.post('/:id/resolve', async (req: Request, res: Response
 
     if (row.reported_by_phone) {
       try {
-        await sendTemplate({ to: row.reported_by_phone, templateName: 'prop_ticket_resolved',
+        await sendTemplate({ to: row.reported_by_phone, templateName: 'jag_mnt_resolved_check',
           components: [{ type: 'body', parameters: [
             { type: 'text', text: row.reported_by_name ?? 'Tenant' },
             { type: 'text', text: row.ticket_ref },

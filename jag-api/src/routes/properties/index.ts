@@ -23,7 +23,9 @@ import { handoverRouter }                 from './handover';
 import { maintenanceTicketsRouter, contractorsRouter } from './maintenance-tickets';
 import { renewalsRouter }                 from './renewals';
 import { whatsappSendRouter }             from './whatsapp-send';
-import { listingRouter }                  from './listing';
+import { listingRouter, handleAlertStale } from './listing';
+import { waApprovalsRouter }             from './wa-approvals';
+import { waInboxRouter }                 from './wa-inbox';
 
 export const propertiesRouter = Router();
 
@@ -42,6 +44,8 @@ propertiesRouter.use('/maintenance',    maintenanceTicketsRouter);
 propertiesRouter.use('/contractors',    contractorsRouter);
 propertiesRouter.use('/renewals',       renewalsRouter);
 propertiesRouter.use('/whatsapp',       whatsappSendRouter);
+propertiesRouter.use('/wa-approvals',   waApprovalsRouter);
+propertiesRouter.use('/wa-inbox',       waInboxRouter);
 
 // ── Named sub-paths BEFORE the catch-all /:id routes ─────────────────────────
 propertiesRouter.use('/pipeline',      pipelineRouter);
@@ -63,5 +67,6 @@ propertiesRouter.use('/:propertyId/utility-accounts', utilityAccountsRouter);
 propertiesRouter.use('/:propertyId/units',            unitsRouter);
 
 // ── Unit-level listing actions ────────────────────────────────────────────────
-// Mounted after /units so /:propertyId/units/:id/* does not intercept these.
+// Batch route (no :id) must come before the :id catch-all
+propertiesRouter.post('/units/alert-stale',           handleAlertStale);
 propertiesRouter.use('/units/:id',                    listingRouter);

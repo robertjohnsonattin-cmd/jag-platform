@@ -4,13 +4,14 @@
 // GET    /api/v1/ims/items/:id
 // POST   /api/v1/ims/items
 // PATCH  /api/v1/ims/items/:id
+// POST   /api/v1/ims/items/:id/dispose  (assets only — marks inactive, writes stock movement, optional GL)
 // DELETE /api/v1/ims/items/:id  (Owner only — hard delete if no movements/depreciation)
 
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import multer from 'multer';
 import { z } from 'zod';
-import { withTenantRLS } from '../../middleware/rls';
-import { commercialPool, corePool } from '../../db/index';
+import { withTenantRLS, withOwnerRLS, type RLSContext } from '../../middleware/rls';
+import { commercialPool, corePool, familyPool } from '../../db/index';
 import { logger } from '../../lib/logger';
 import { ok, err } from '../../lib/response';
 import {
@@ -38,7 +39,7 @@ const ItemsQuerySchema = z.object({
   category_id:  z.string().uuid().optional(),
   tag_id:       z.string().uuid().optional(),
   is_asset:     z.enum(['true', 'false']).optional(),
-  is_active:    z.enum(['true', 'false']).default('true'),
+  is_active:    z.enum(['true', 'false', 'all']).default('true'),
   search:       z.string().max(100).optional(),
   page:         z.coerce.number().int().min(1).default(1),
   limit:        z.coerce.number().int().min(1).max(100).default(20),
@@ -162,8 +163,11 @@ imsItemsRouter.get('/items', async (req: Request, res: Response, next: NextFunct
     try {
       const { rows, total } = await withTenantRLS(client, req.rlsCtx, async (c) => {
         // Build WHERE conditions dynamically
-        const conditions: string[] = ['i.is_active = $1'];
-        const params: unknown[] = [is_active === 'true'];
+        const conditions: string[] = [];
+        const params: unknown[] = [];
+        if (is_active !== 'all') {
+          conditions.push(`i.is_active = $${params.push(is_active === 'true')}`);
+        }
 
         if (location_id)  { conditions.push(`i.location_id = $${params.push(location_id)}`); }
         if (category_id)  { conditions.push(`i.category_id = $${params.push(category_id)}`); }
@@ -174,7 +178,7 @@ imsItemsRouter.get('/items', async (req: Request, res: Response, next: NextFunct
           ? `JOIN ims_item_tags it ON it.item_id = i.id AND it.tag_id = $${params.push(tag_id)}`
           : '';
 
-        const where = conditions.join(' AND ');
+        const where = conditions.length > 0 ? conditions.join(' AND ') : 'true';
 
         const countResult = await c.query<{ count: string }>(
           `SELECT count(*) FROM ims_items i ${tagJoin} WHERE ${where}`,
@@ -186,14 +190,17 @@ imsItemsRouter.get('/items', async (req: Request, res: Response, next: NextFunct
           `SELECT i.id, i.name, i.sku, i.description, i.unit_of_measure,
                   i.quantity_on_hand, i.quantity_reserved, i.reorder_point,
                   i.unit_value, i.serial_number, i.condition, i.is_asset,
-                  i.is_active, i.last_modified_at, i.created_at,
+                  i.is_active, i.disposed_at, i.disposal_type, i.disposal_notes,
+                  i.sale_price_ttd, i.buyer_name, i.disposal_gl_entry_id,
+                  i.last_modified_at, i.created_at,
                   l.name  AS location_name,  l.code AS location_code,
                   cat.name AS category_name,
                   COALESCE(
                     json_agg(DISTINCT jsonb_build_object('id', t.id, 'name', t.name, 'color', t.color))
                     FILTER (WHERE t.id IS NOT NULL),
                     '[]'
-                  ) AS tags
+                  ) AS tags,
+                  EXISTS(SELECT 1 FROM ims_vehicles v WHERE v.item_id = i.id) AS is_vehicle
            FROM   ims_items i
            JOIN   ims_locations  l   ON l.id   = i.location_id
            LEFT JOIN ims_categories cat ON cat.id = i.category_id
@@ -690,6 +697,269 @@ imsItemsRouter.patch('/items/:id', async (req: Request, res: Response, next: Nex
     } finally { commClient.release(); }
   } catch (e) { next(e); }
 });
+
+// ── POST /items/:id/dispose ───────────────────────────────────────────────────
+// Marks any is_asset=true (non-vehicle) item as disposed:
+//   • Sets is_active = false + disposal columns on ims_items
+//   • Writes an ims_stock_movements row (SALE or DISPOSAL)
+//   • Optionally posts a balanced GL entry to jag_family (non-blocking)
+
+const DisposeItemSchema = z.object({
+  disposal_type:          z.enum(['SALE', 'WRITE_OFF', 'TRANSFER']),
+  disposal_date:          z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  disposal_notes:         z.string().max(2000).optional(),
+  sale_price_ttd:         z.number().min(0).optional(),
+  buyer_name:             z.string().max(200).optional(),
+  // Optional GL fields — all required together if GL posting is desired
+  owner_entity_id:        z.string().uuid().optional(),
+  asset_gl_account_id:    z.string().uuid().optional(),
+  acc_dep_gl_account_id:  z.string().uuid().optional(),
+  proceeds_gl_account_id: z.string().uuid().optional(),
+  gain_gl_account_id:     z.string().uuid().optional(),
+  loss_gl_account_id:     z.string().uuid().optional(),
+}).strict();
+
+imsItemsRouter.post('/items/:id/dispose', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const idParsed = UUIDParam.safeParse(req.params);
+    if (!idParsed.success) { err(res, 422, 'VALIDATION_ERROR', 'Item ID must be a valid UUID.'); return; }
+    const bodyParsed = DisposeItemSchema.safeParse(req.body);
+    if (!bodyParsed.success) { err(res, 422, 'VALIDATION_ERROR', 'Request body validation failed.'); return; }
+
+    const itemId = idParsed.data.id;
+    const b      = bodyParsed.data;
+    const { tenantId, userId } = req.rlsCtx;
+    const rlsCtx = req.rlsCtx;
+
+    const client = await commercialPool.connect();
+    try {
+      const result = await withTenantRLS(client, req.rlsCtx, async (c) => {
+        // 1. Fetch and validate item
+        const itemRow = await c.query(
+          `SELECT i.id, i.name, i.is_asset, i.is_active, i.unit_value,
+                  i.quantity_on_hand, i.location_id,
+                  EXISTS(SELECT 1 FROM ims_vehicles v WHERE v.item_id = i.id) AS is_vehicle
+           FROM ims_items i WHERE i.id = $1`,
+          [itemId],
+        ).then(r => r.rows[0] as {
+          id: string; name: string; is_asset: boolean; is_active: boolean;
+          unit_value: string | null; quantity_on_hand: number; location_id: string | null;
+          is_vehicle: boolean;
+        } | undefined);
+
+        if (!itemRow)           throw Object.assign(new Error('Item not found.'), { status: 404, code: 'NOT_FOUND' });
+        if (!itemRow.is_asset)  throw Object.assign(new Error('Only capital assets can be disposed through this endpoint.'), { status: 422, code: 'NOT_AN_ASSET' });
+        if (itemRow.is_vehicle) throw Object.assign(new Error('Use the vehicle disposal endpoint for vehicles.'), { status: 422, code: 'USE_VMS_DISPOSE' });
+        if (!itemRow.is_active) throw Object.assign(new Error('Item is already disposed.'), { status: 409, code: 'ALREADY_DISPOSED' });
+
+        // 2. Fetch depreciation schedule if exists (for accumulated dep + acc_dep GL account)
+        const depRow = await c.query(
+          `SELECT id, cost_at_start, accumulated_depreciation, net_book_value, acc_dep_gl_account_id
+           FROM ims_depreciation_schedules WHERE item_id = $1 AND is_active = true LIMIT 1`,
+          [itemId],
+        ).then(r => r.rows[0] as {
+          id: string; cost_at_start: string; accumulated_depreciation: string;
+          net_book_value: string; acc_dep_gl_account_id: string | null;
+        } | undefined);
+
+        const costAtDisposal  = parseFloat(String(depRow?.cost_at_start ?? itemRow.unit_value ?? 0));
+        const accumulatedDep  = parseFloat(String(depRow?.accumulated_depreciation ?? 0));
+        const nbvAtDisposal   = parseFloat(String(depRow?.net_book_value ?? costAtDisposal));
+        const salePrice       = b.sale_price_ttd ?? 0;
+        const gainLoss        = salePrice - nbvAtDisposal;
+
+        // 3. Mark item disposed
+        await c.query(
+          `UPDATE ims_items SET
+             is_active       = false,
+             disposed_at     = now(),
+             disposal_type   = $1,
+             disposal_notes  = $2,
+             sale_price_ttd  = $3,
+             buyer_name      = $4,
+             quantity_on_hand = GREATEST(quantity_on_hand - 1, 0),
+             last_modified_at = now(),
+             last_modified_by = $5
+           WHERE id = $6`,
+          [b.disposal_type, b.disposal_notes ?? null,
+           b.disposal_type === 'SALE' ? salePrice : null,
+           b.buyer_name ?? null, userId, itemId],
+        );
+
+        // 4. Write stock movement
+        const movType = b.disposal_type === 'SALE' ? 'SALE' : 'DISPOSAL';
+        await c.query(
+          `INSERT INTO ims_stock_movements
+             (tenant_id, item_id, from_location_id, quantity, movement_type,
+              reference_type, sale_price, customer_name, notes, performed_by, idempotency_key)
+           VALUES ($1,$2,$3,1,$4,'ASSET_DISPOSAL',$5,$6,$7,$8,gen_random_uuid())`,
+          [tenantId, itemId, itemRow.location_id ?? null, movType,
+           b.disposal_type === 'SALE' ? salePrice : null,
+           b.buyer_name ?? null,
+           b.disposal_notes ?? null,
+           userId],
+        );
+
+        return {
+          itemId, itemName: itemRow.name, costAtDisposal, accumulatedDep,
+          nbvAtDisposal, salePrice, gainLoss,
+          depAccDepAccountId: depRow?.acc_dep_gl_account_id ?? null,
+        };
+      });
+
+      logger.info({ entity: 'IMS', action: 'ASSET_DISPOSED', user_id: userId, tenant_id: tenantId, item_id: itemId, disposal_type: b.disposal_type });
+
+      // 5. Optional non-blocking GL posting
+      const resolvedAccDepAcct = b.acc_dep_gl_account_id ?? result.depAccDepAccountId ?? undefined;
+      const canPostGl = b.owner_entity_id && b.asset_gl_account_id && resolvedAccDepAcct && b.disposal_type !== 'TRANSFER';
+
+      if (canPostGl) {
+        void postItemDisposalGlEntry({
+          itemId,
+          itemName: result.itemName,
+          disposalDate: b.disposal_date,
+          disposalType: b.disposal_type as 'SALE' | 'WRITE_OFF',
+          costAtDisposal: result.costAtDisposal,
+          accumulatedDep: result.accumulatedDep,
+          nbvAtDisposal: result.nbvAtDisposal,
+          salePrice: result.salePrice,
+          gainLoss: result.gainLoss,
+          ownerEntityId: b.owner_entity_id!,
+          rlsCtx,
+          assetAccountId: b.asset_gl_account_id!,
+          accDepAccountId: resolvedAccDepAcct,
+          proceedsAccountId: b.proceeds_gl_account_id,
+          gainAccountId: b.gain_gl_account_id,
+          lossAccountId: b.loss_gl_account_id,
+        });
+      }
+
+      ok(res, { disposed: true, item_id: itemId, ...result }, 200);
+    } finally { client.release(); }
+  } catch (e: unknown) {
+    const ex = e as { status?: number; code?: string; message: string };
+    if (ex.status === 404) { res.status(404).json(err(ex.message, ex.code ?? 'NOT_FOUND')); return; }
+    if (ex.status === 409) { res.status(409).json(err(ex.message, ex.code ?? 'CONFLICT')); return; }
+    if (ex.status === 422) { res.status(422).json(err(ex.message, ex.code ?? 'VALIDATION_ERROR')); return; }
+    next(e);
+  }
+});
+
+// ── Asset disposal GL posting helper ─────────────────────────────────────────
+
+interface ItemDisposalGlArgs {
+  itemId:           string;
+  itemName:         string;
+  disposalDate:     string;
+  disposalType:     'SALE' | 'WRITE_OFF';
+  costAtDisposal:   number;
+  accumulatedDep:   number;
+  nbvAtDisposal:    number;
+  salePrice:        number;
+  gainLoss:         number;
+  ownerEntityId:    string;
+  rlsCtx:           RLSContext;
+  assetAccountId:   string;
+  accDepAccountId:  string;
+  proceedsAccountId?: string;
+  gainAccountId?:   string;
+  lossAccountId?:   string;
+}
+
+async function postItemDisposalGlEntry(args: ItemDisposalGlArgs): Promise<void> {
+  const {
+    itemId, itemName, disposalDate, disposalType,
+    costAtDisposal, accumulatedDep, nbvAtDisposal, salePrice, gainLoss,
+    ownerEntityId, rlsCtx, assetAccountId, accDepAccountId,
+    proceedsAccountId, gainAccountId, lossAccountId,
+  } = args;
+  const { ownerId, userId } = rlsCtx;
+
+  const familyClient = await familyPool.connect();
+  try {
+    const jeId = await withOwnerRLS(familyClient, rlsCtx, async (c) => {
+      const desc = `Asset disposal — ${itemName} — ${disposalType} — ${disposalDate}`;
+      const idempotencyKey = `asset_disposal_${itemId}_${disposalDate}`;
+
+      type Line = { accountId: string; debit: number; credit: number; label: string };
+      const lines: Line[] = [];
+
+      if (disposalType === 'SALE') {
+        if (proceedsAccountId && salePrice > 0)
+          lines.push({ accountId: proceedsAccountId, debit: salePrice, credit: 0, label: 'Sale proceeds' });
+        if (accumulatedDep > 0)
+          lines.push({ accountId: accDepAccountId, debit: accumulatedDep, credit: 0, label: 'Remove accumulated depreciation' });
+        lines.push({ accountId: assetAccountId, debit: 0, credit: costAtDisposal, label: 'Remove asset at cost' });
+        if (gainLoss > 0 && gainAccountId)
+          lines.push({ accountId: gainAccountId, debit: 0, credit: gainLoss, label: 'Gain on disposal' });
+        else if (gainLoss < 0 && lossAccountId)
+          lines.push({ accountId: lossAccountId, debit: Math.abs(gainLoss), credit: 0, label: 'Loss on disposal' });
+      } else {
+        // WRITE_OFF
+        if (accumulatedDep > 0)
+          lines.push({ accountId: accDepAccountId, debit: accumulatedDep, credit: 0, label: 'Remove accumulated depreciation' });
+        if (nbvAtDisposal > 0 && lossAccountId)
+          lines.push({ accountId: lossAccountId, debit: nbvAtDisposal, credit: 0, label: 'Loss on write-off' });
+        lines.push({ accountId: assetAccountId, debit: 0, credit: costAtDisposal, label: 'Remove asset at cost' });
+      }
+
+      if (lines.length < 2) {
+        logger.warn({ entity: 'IMS', action: 'ASSET_DISPOSAL_GL_SKIP', reason: 'insufficient_accounts', item_id: itemId });
+        return null;
+      }
+
+      const totalDebit  = lines.reduce((s, l) => s + l.debit,  0);
+      const totalCredit = lines.reduce((s, l) => s + l.credit, 0);
+      if (Math.round(totalDebit * 100) !== Math.round(totalCredit * 100)) {
+        logger.warn({ entity: 'IMS', action: 'ASSET_DISPOSAL_GL_UNBALANCED', total_debit: totalDebit, total_credit: totalCredit, item_id: itemId });
+        return null;
+      }
+
+      const je = await c.query(
+        `INSERT INTO fin_journal_entries
+           (owner_id, owner_entity_id, entry_date, description,
+            status, source, source_id, currency,
+            total_debit_ttd, total_credit_ttd, idempotency_key, posted_at, posted_by)
+         VALUES ($1,$2,$3,$4,'POSTED','ASSET_DISPOSAL',$5,'TTD',$6,$7,$8,now(),$9)
+         ON CONFLICT (idempotency_key) DO NOTHING RETURNING id`,
+        [ownerId, ownerEntityId, disposalDate, desc,
+         itemId, totalDebit.toFixed(2), totalCredit.toFixed(2), idempotencyKey, userId],
+      );
+      if (je.rows.length === 0) return null;
+
+      const jeId = je.rows[0].id as string;
+      await Promise.all(lines.map((l, i) =>
+        c.query(
+          `INSERT INTO fin_journal_entry_lines
+             (owner_id, journal_entry_id, gl_account_id, line_number,
+              description, debit_ttd, credit_ttd, currency)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,'TTD')`,
+          [ownerId, jeId, l.accountId, i + 1, l.label, l.debit.toFixed(2), l.credit.toFixed(2)],
+        ),
+      ));
+      return jeId;
+    });
+
+    if (!jeId) return;
+
+    // Write JE reference back onto the item (best-effort)
+    const updateClient = await commercialPool.connect();
+    try {
+      await withTenantRLS(updateClient, rlsCtx, (c) =>
+        c.query(
+          `UPDATE ims_items SET disposal_gl_entry_id = $1, last_modified_at = now() WHERE id = $2`,
+          [jeId, itemId],
+        ),
+      );
+    } finally { updateClient.release(); }
+
+    logger.info({ entity: 'IMS', action: 'ASSET_DISPOSAL_GL_POSTED', item_id: itemId, journal_entry_id: jeId });
+  } catch (glErr) {
+    logger.error({ entity: 'IMS', action: 'ASSET_DISPOSAL_GL_FAILED', item_id: itemId, error: String(glErr) });
+  } finally {
+    familyClient.release();
+  }
+}
 
 // ── DELETE /items/:id ─────────────────────────────────────────────────────────
 // Owner only. Hard deletes if no movements, stock-take lines, or depreciation exist.

@@ -49,6 +49,12 @@ const CreateVehicleSchema = z.object({
   service_interval_days:    z.number().int().min(1).max(3650).default(90),
   // GPS tracker SIM (migration 015)
   sim_number:               z.string().max(20).optional(),
+  // VMS Increment 1 (migration 030)
+  ownership_type:       z.enum(['COMPANY', 'PERSONAL']).default('COMPANY'),
+  engine_hours:         z.number().min(0).optional(),
+  status:               z.enum(['ACTIVE', 'IN_MAINTENANCE', 'OFF_ROAD', 'DISPOSED']).default('ACTIVE'),
+  notes:                z.string().max(5000).optional(),
+  assigned_driver_name: z.string().max(200).optional(),
 }).strict();
 
 const PatchVehicleSchema = z.object({
@@ -66,11 +72,20 @@ const PatchVehicleSchema = z.object({
   service_interval_days:   z.number().int().min(1).max(3650).optional(),
   location_id:             z.string().uuid().optional(),
   sim_number:              z.string().max(20).optional(),
+  vin:                     z.string().max(50).optional(),
+  engine_number:           z.string().max(50).optional(),
+  // VMS Increment 1 (migration 030)
+  ownership_type:       z.enum(['COMPANY', 'PERSONAL']).optional(),
+  engine_hours:         z.number().min(0).optional(),
+  status:               z.enum(['ACTIVE', 'IN_MAINTENANCE', 'OFF_ROAD', 'DISPOSED']).optional(),
+  notes:                z.string().max(5000).optional(),
+  assigned_driver_name: z.string().max(200).optional(),
 }).strict().refine(o => Object.keys(o).length > 0, 'No fields to update');
 
 const VehiclesQuerySchema = z.object({
   owner_entity:        z.string().max(100).optional(),
   registration_number: z.string().max(20).optional(),
+  include_disposed:    z.enum(['true', 'false']).optional(),
   page:  z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(100).default(20),
 }).strict();
@@ -96,13 +111,14 @@ imsVehiclesRouter.get('/', async (req: Request, res: Response, next: NextFunctio
     const parsed = VehiclesQuerySchema.safeParse(req.query);
     if (!parsed.success) { err(res, 422, 'VALIDATION_ERROR', 'Invalid query parameters.'); return; }
 
-    const { owner_entity, registration_number, page, limit } = parsed.data;
+    const { owner_entity, registration_number, include_disposed, page, limit } = parsed.data;
     const offset = (page - 1) * limit;
 
     const client = await commercialPool.connect();
     try {
       const { rows, total } = await withTenantRLS(client, req.rlsCtx, async (c) => {
         const conditions: string[] = ['i.is_active = true'];
+        if (include_disposed !== 'true') conditions.push("v.status != 'DISPOSED'");
         const params: unknown[] = [];
         const push = (v: unknown) => { params.push(v); return `$${params.length}`; };
 
@@ -122,11 +138,17 @@ imsVehiclesRouter.get('/', async (req: Request, res: Response, next: NextFunctio
           `SELECT v.id, v.owner_entity, v.fleet_type, v.registration_number, v.make, v.model,
                   v.year, v.colour, v.vehicle_type, v.fuel_type,
                   v.vin, v.engine_number,
-                  v.insurance_policy_number, v.insurance_provider, v.insurance_expiry,
-                  v.registration_expiry, v.purchase_date, v.purchase_price,
+                  v.insurance_policy_number, v.insurance_provider,
+                  v.insurance_expiry::text    AS insurance_expiry,
+                  v.registration_expiry::text AS registration_expiry,
+                  v.purchase_date::text       AS purchase_date,
+                  v.purchase_price,
                   v.current_mileage_km, v.assigned_to_user_id,
-                  v.last_service_date, v.next_service_date, v.service_interval_days,
+                  v.last_service_date::text   AS last_service_date,
+                  v.next_service_date::text   AS next_service_date,
+                  v.service_interval_days,
                   v.sim_number,
+                  v.ownership_type, v.engine_hours, v.status, v.notes, v.assigned_driver_name,
                   v.cal_service_event_id, v.cal_insurance_event_id, v.cal_registration_event_id,
                   v.last_modified_at, v.created_at,
                   i.id          AS item_id,
@@ -195,8 +217,9 @@ imsVehiclesRouter.post('/', async (req: Request, res: Response, next: NextFuncti
               insurance_policy_number, insurance_provider, insurance_expiry,
               registration_expiry, purchase_date, purchase_price, current_mileage_km,
               last_service_date, next_service_date, service_interval_days,
-              sim_number, last_modified_by)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)
+              sim_number, last_modified_by,
+              ownership_type, engine_hours, status, notes, assigned_driver_name)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30)
            RETURNING id`,
           [
             tenantId, itemId,
@@ -210,6 +233,7 @@ imsVehiclesRouter.post('/', async (req: Request, res: Response, next: NextFuncti
             b.purchase_date ?? null, b.purchase_price ?? null, b.current_mileage_km ?? null,
             b.last_service_date ?? null, nextServiceDate, b.service_interval_days,
             b.sim_number ?? null, userId,
+            b.ownership_type, b.engine_hours ?? null, b.status, b.notes ?? null, b.assigned_driver_name ?? null,
           ],
         );
 
@@ -297,7 +321,9 @@ imsVehiclesRouter.patch('/:id', async (req: Request, res: Response, next: NextFu
           cal_registration_event_id: string | null;
         }>(
           `SELECT service_interval_days, item_id, make, model, registration_number, owner_entity,
-                  insurance_expiry, registration_expiry, next_service_date,
+                  insurance_expiry::text   AS insurance_expiry,
+                  registration_expiry::text AS registration_expiry,
+                  next_service_date::text  AS next_service_date,
                   cal_service_event_id, cal_insurance_event_id, cal_registration_event_id
            FROM ims_vehicles WHERE id = $1`,
           [vehicleId],
@@ -323,7 +349,14 @@ imsVehiclesRouter.patch('/:id', async (req: Request, res: Response, next: NextFu
           vCols.push(`last_service_date = ${vPush(b.last_service_date)}`);
           vCols.push(`next_service_date = ${vPush(computeNextService(b.last_service_date, intervalDays))}`);
         }
-        if (b.sim_number !== undefined) vCols.push(`sim_number = ${vPush(b.sim_number)}`);
+        if (b.sim_number          !== undefined) vCols.push(`sim_number = ${vPush(b.sim_number)}`);
+        if (b.vin                 !== undefined) vCols.push(`vin = ${vPush(b.vin)}`);
+        if (b.engine_number       !== undefined) vCols.push(`engine_number = ${vPush(b.engine_number)}`);
+        if (b.ownership_type      !== undefined) vCols.push(`ownership_type = ${vPush(b.ownership_type)}`);
+        if (b.engine_hours        !== undefined) vCols.push(`engine_hours = ${vPush(b.engine_hours)}`);
+        if (b.status              !== undefined) vCols.push(`status = ${vPush(b.status)}`);
+        if (b.notes               !== undefined) vCols.push(`notes = ${vPush(b.notes)}`);
+        if (b.assigned_driver_name !== undefined) vCols.push(`assigned_driver_name = ${vPush(b.assigned_driver_name)}`);
 
         vParams.push(vehicleId);
         await c.query(

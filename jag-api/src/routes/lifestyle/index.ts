@@ -34,7 +34,7 @@ const CreateProgrammeSchema = z.object({
   points_balance:   z.number().min(0).default(0),
   miles_balance:    z.number().min(0).default(0),
   expiry_date:      z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-  family_member_id: z.string().uuid().optional(),
+  family_member_id: z.string().uuid().nullable().optional(),
   notes:            z.string().max(2000).optional(),
 }).strict();
 
@@ -131,6 +131,7 @@ lifestyleRouter.patch('/loyalty/:id', async (req: Request, res: Response, next: 
     if (body.miles_balance   !== undefined) setCols.push(`miles_balance   = ${push(body.miles_balance)}`);
     if (body.expiry_date     !== undefined) setCols.push(`expiry_date     = ${push(body.expiry_date)}`);
     if (body.membership_number !== undefined) setCols.push(`membership_number = ${push(body.membership_number)}`);
+    if (body.family_member_id !== undefined) setCols.push(`family_member_id = ${push(body.family_member_id)}`);
     if (body.notes           !== undefined) setCols.push(`notes           = ${push(body.notes)}`);
     params.push(idP.data.id);
     const client = await familyPool.connect();

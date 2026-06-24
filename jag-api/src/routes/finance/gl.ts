@@ -31,7 +31,7 @@ const UUIDParam = z.object({ id: z.string().uuid() });
 const ACCOUNT_TYPES = ['ASSET','LIABILITY','EQUITY','REVENUE','EXPENSE','OTHER_INCOME','OTHER_EXPENSE'] as const;
 const NORMAL_BALANCES = ['DEBIT','CREDIT'] as const;
 const ENTRY_STATUSES  = ['DRAFT','POSTED','VOID'] as const;
-const ENTRY_SOURCES   = ['MANUAL','BANK_IMPORT','TRANSACTION_SYNC','INTERCOMPANY','PERIOD_CLOSE','ADJUSTMENT'] as const;
+const ENTRY_SOURCES   = ['MANUAL','BANK_IMPORT','TRANSACTION_SYNC','INTERCOMPANY','PERIOD_CLOSE','ADJUSTMENT','VEHICLE_DEPRECIATION','VEHICLE_DISPOSAL'] as const;
 
 // ── Chart of Accounts ──────────────────────────────────────────────────────────
 

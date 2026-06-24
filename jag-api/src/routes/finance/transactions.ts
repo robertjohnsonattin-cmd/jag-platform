@@ -18,6 +18,7 @@ const CATEGORIES = [
   'INVESTMENT_PURCHASE','INVESTMENT_SALE','TRANSFER_OUT',
   'PERSONAL_EXPENSE','UTILITIES','INSURANCE','ENTERTAINMENT',
   'TRAVEL','MEDICAL','EDUCATION','CHARITY',
+  'GROCERIES','FUEL','DINING','HARDWARE','LOAN_PAYMENT',
   'UNCLASSIFIED',
 ] as const;
 
@@ -30,6 +31,12 @@ const TxnQuerySchema = z.object({
   is_pending_review:z.enum(['true','false']).optional(),
   date_from:        z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   date_to:          z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  entity_id:        z.string().uuid().optional(),
+  cost_centre:      z.string().max(100).optional(),
+  billable:         z.enum(['true','false']).optional(),
+  project_ref:      z.string().max(200).optional(),
+  property_ref:     z.string().max(200).optional(),
+  tag:              z.string().max(100).optional(),
   limit:            z.coerce.number().int().min(1).max(500).default(100),
   offset:           z.coerce.number().int().min(0).default(0),
 }).strict();
@@ -55,6 +62,14 @@ const PatchTxnSchema = z.object({
   is_reconciled:    z.boolean().optional(),
   merchant_name:    z.string().max(200).optional(),
   reference_number: z.string().max(100).optional(),
+  subcategory:      z.string().max(100).nullable().optional(),
+  entity_id:        z.string().uuid().nullable().optional(),
+  project_ref:      z.string().max(200).nullable().optional(),
+  property_ref:     z.string().max(200).nullable().optional(),
+  cost_centre:      z.string().max(100).nullable().optional(),
+  billable:         z.boolean().optional(),
+  notes:            z.string().max(1000).nullable().optional(),
+  tags:             z.array(z.string().max(50)).optional(),
 }).strict().refine(d => Object.keys(d).length > 0, { message: 'At least one field required.' });
 
 // ── GET /transactions ─────────────────────────────────────────────────────────
@@ -63,7 +78,8 @@ transactionsRouter.get('/', async (req: Request, res: Response, next: NextFuncti
   try {
     const parsed = TxnQuerySchema.safeParse(req.query);
     if (!parsed.success) { err(res, 422, 'VALIDATION_ERROR', 'Invalid query parameters.'); return; }
-    const { account_id, category, is_reconciled, is_pending_review, date_from, date_to, limit, offset } = parsed.data;
+    const { account_id, category, is_reconciled, is_pending_review, date_from, date_to,
+            entity_id, cost_centre, billable, project_ref, property_ref, tag, limit, offset } = parsed.data;
 
     const client = await familyPool.connect();
     try {
@@ -71,20 +87,32 @@ transactionsRouter.get('/', async (req: Request, res: Response, next: NextFuncti
         const params: unknown[] = [];
         const push = (v: unknown) => { params.push(v); return `$${params.length}`; };
         const where: string[] = [];
-        if (account_id)        where.push(`account_id = ${push(account_id)}`);
-        if (category)          where.push(`category = ${push(category)}`);
+        if (account_id)                      where.push(`account_id = ${push(account_id)}`);
+        if (category)                        where.push(`category = ${push(category)}`);
         if (is_reconciled !== undefined)     where.push(`is_reconciled = ${push(is_reconciled === 'true')}`);
         if (is_pending_review !== undefined) where.push(`is_pending_review = ${push(is_pending_review === 'true')}`);
-        if (date_from)         where.push(`transaction_date >= ${push(date_from)}`);
-        if (date_to)           where.push(`transaction_date <= ${push(date_to)}`);
+        if (date_from)                       where.push(`transaction_date >= ${push(date_from)}`);
+        if (date_to)                         where.push(`transaction_date <= ${push(date_to)}`);
+        if (entity_id)                       where.push(`entity_id = ${push(entity_id)}`);
+        if (cost_centre)                     where.push(`cost_centre ILIKE ${push('%' + cost_centre + '%')}`);
+        if (billable !== undefined)          where.push(`billable = ${push(billable === 'true')}`);
+        if (project_ref)                     where.push(`project_ref ILIKE ${push('%' + project_ref + '%')}`);
+        if (property_ref)                    where.push(`property_ref ILIKE ${push('%' + property_ref + '%')}`);
+        if (tag)                             where.push(`${push(tag)} = ANY(tags)`);
         const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
         return c.query(
-          `SELECT id, account_id, transaction_date, posted_date, amount, currency,
-                  amount_ttd, fx_rate_used, description, merchant_name, category,
-                  is_reconciled, is_pending_review, reference_number, transfer_pair_id,
-                  created_at, updated_at
-           FROM   fin_transactions ${clause}
-           ORDER  BY transaction_date DESC, created_at DESC
+          `SELECT t.id, t.account_id, t.transaction_date, t.posted_date, t.amount, t.currency,
+                  t.amount_ttd, t.fx_rate_used, t.description, t.merchant_name, t.category,
+                  t.subcategory, t.entity_id, t.project_ref, t.property_ref, t.cost_centre,
+                  t.billable, t.notes, t.tags,
+                  t.is_reconciled, t.is_pending_review, t.reference_number, t.transfer_pair_id,
+                  t.created_at, t.updated_at,
+                  q.suggested_category, q.confidence
+           FROM   fin_transactions t
+           LEFT JOIN fin_pending_review_queue q
+                  ON q.transaction_id = t.id AND q.resolved_at IS NULL
+           ${clause}
+           ORDER  BY t.transaction_date DESC, t.created_at DESC
            LIMIT  ${push(limit)} OFFSET ${push(offset)}`,
           params,
         ).then(r => r.rows);
@@ -186,7 +214,7 @@ transactionsRouter.patch('/:id', async (req: Request, res: Response, next: NextF
 
     const client = await familyPool.connect();
     try {
-      const rec = await withOwnerRLS(client, req.rlsCtx, (c) => {
+      const rec = await withOwnerRLS(client, req.rlsCtx, async (c) => {
         const params: unknown[] = [];
         const push = (v: unknown) => { params.push(v); return `$${params.length}`; };
         const sets = ['updated_at = now()'];
@@ -194,13 +222,36 @@ transactionsRouter.patch('/:id', async (req: Request, res: Response, next: NextF
         if (b.is_reconciled    !== undefined) sets.push(`is_reconciled = ${push(b.is_reconciled)}`);
         if (b.merchant_name    !== undefined) sets.push(`merchant_name = ${push(b.merchant_name)}`);
         if (b.reference_number !== undefined) sets.push(`reference_number = ${push(b.reference_number)}`);
+        if (b.subcategory      !== undefined) sets.push(`subcategory = ${push(b.subcategory)}`);
+        if (b.entity_id        !== undefined) sets.push(`entity_id = ${push(b.entity_id)}`);
+        if (b.project_ref      !== undefined) sets.push(`project_ref = ${push(b.project_ref)}`);
+        if (b.property_ref     !== undefined) sets.push(`property_ref = ${push(b.property_ref)}`);
+        if (b.cost_centre      !== undefined) sets.push(`cost_centre = ${push(b.cost_centre)}`);
+        if (b.billable         !== undefined) sets.push(`billable = ${push(b.billable)}`);
+        if (b.notes            !== undefined) sets.push(`notes = ${push(b.notes)}`);
+        if (b.tags             !== undefined) sets.push(`tags = ${push(b.tags)}`);
         // Clear pending review flag when category is explicitly set
         if (b.category !== undefined) sets.push(`is_pending_review = false`);
         params.push(id);
-        return c.query(
+        const updated = await c.query(
           `UPDATE fin_transactions SET ${sets.join(', ')} WHERE id = $${params.length} RETURNING *`,
           params,
         ).then(r => r.rows[0] ?? null);
+
+        // Consolidated review: setting a category resolves any open AI-review queue row
+        // for this transaction, keeping fin_pending_review_queue and is_pending_review in
+        // sync regardless of which path categorised it. Idempotent — touches 0 rows for
+        // manually-entered transactions that were never queued.
+        if (updated && b.category !== undefined) {
+          await c.query(
+            `UPDATE fin_pending_review_queue
+             SET    resolved_at = now(), reviewer_notes = COALESCE(reviewer_notes, $1)
+             WHERE  transaction_id = $2 AND resolved_at IS NULL`,
+            [b.notes ?? null, id],
+          );
+        }
+
+        return updated;
       });
       if (!rec) { err(res, 404, 'TRANSACTION_NOT_FOUND', 'Transaction not found.'); return; }
       logger.info({ entity: 'FINANCE', action: 'TRANSACTION_UPDATED', user_id: ownerId, record_id: id });

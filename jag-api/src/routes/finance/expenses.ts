@@ -16,6 +16,7 @@ import { withOwnerRLS } from '../../middleware/rls';
 import { familyPool, corePool } from '../../db/index';
 import { logger } from '../../lib/logger';
 import { ok, err } from '../../lib/response';
+import { enqueueNotification } from '../../lib/notifications';
 import { minioClient, ensureBucket, mediaObjectKey, BUCKET_RECEIPTS } from '../../lib/minio';
 
 export const expensesRouter = Router();
@@ -294,6 +295,16 @@ expensesRouter.post('/:id/submit', async (req: Request, res: Response, next: Nex
         ).then(r => r.rows[0]);
       });
       logger.info({ entity: 'EXPENSE', action: 'SUBMITTED', user_id: ownerId, record_id: parsed.data.id });
+
+      // Owner notification — expense awaiting approval (non-blocking).
+      const amt = parseFloat(String(rec?.amount_ttd ?? 0));
+      void enqueueNotification({
+        tier: 1,
+        title: 'Expense awaiting approval',
+        body: `${rec?.payee_name ? `${rec.payee_name} — ` : ''}${rec?.description ?? 'Expense'} (TTD ${amt.toLocaleString('en-TT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}) submitted for approval.`,
+        payload: { module: 'FINANCE', kind: 'EXPENSE_APPROVAL', expense_id: parsed.data.id },
+      });
+
       ok(res, rec);
     } catch (e: unknown) {
       if (e instanceof Error) {

@@ -13,6 +13,7 @@ import { propertiesPool } from '../../db/index';
 import { logger } from '../../lib/logger';
 import { ok, err } from '../../lib/response';
 import { sendText, sendTemplate } from '../../lib/whatsapp';
+import { enqueueNotification } from '../../lib/notifications';
 
 export const enquiriesRouter = Router();
 
@@ -96,6 +97,46 @@ enquiriesRouter.post('/', async (req: Request, res: Response, next: NextFunction
       return rows[0];
     });
     logger.info({ entity: 'PROPERTIES', action: 'ENQUIRY_CREATED', record_id: row.id, user_id: ownerId });
+
+    // Owner in-app notification — new tenancy lead (non-blocking).
+    void enqueueNotification({
+      tier: 2,
+      title: 'New tenancy enquiry',
+      body: `${row.prospect_name ?? 'A prospect'}${row.prospect_phone ? ` (${row.prospect_phone})` : ''} enquired via ${String(body.channel).toLowerCase()}.`,
+      payload: { module: 'PROPERTIES', kind: 'ENQUIRY', enquiry_id: row.id },
+    });
+
+    // JAG_ENQ_001 — auto-reply when a WhatsApp enquiry is manually logged with a known property/unit
+    if (body.channel === 'WHATSAPP' && body.prospect_phone && (body.unit_id || body.property_id)) {
+      const ctx = await withOwnerRLS(propertiesPool, ownerId, async client => {
+        const { rows: [r] } = await client.query(
+          `SELECT u.unit_number, p.name AS property_name, u.booking_slug
+           FROM prop_units u
+           LEFT JOIN prop_properties p ON p.id = u.property_id
+           WHERE u.id = $1`,
+          [body.unit_id ?? '00000000-0000-0000-0000-000000000000'],
+        );
+        return r ?? null;
+      });
+      if (ctx) {
+        const bookingBase = process.env.PUBLIC_BOOKING_BASE_URL ?? 'https://jagcorporate.com/book';
+        sendTemplate({
+          to: body.prospect_phone,
+          templateName: 'jag_enq_auto_reply',
+          components: [
+            { type: 'body', parameters: [
+              { type: 'text', text: body.prospect_name ?? 'there' },
+              { type: 'text', text: ctx.property_name ?? '' },
+              { type: 'text', text: ctx.unit_number ?? '' },
+            ]},
+            ...(ctx.booking_slug ? [{ type: 'button' as const, sub_type: 'url', index: '0', parameters: [
+              { type: 'text', text: `${bookingBase}/${ctx.booking_slug}` },
+            ]}] : []),
+          ],
+        }).catch(e => logger.warn({ entity: 'PROPERTIES', action: 'WA_AUTO_REPLY_FAILED', error_message: (e as Error).message }));
+      }
+    }
+
     res.status(201).json(ok(row));
   } catch (e) { next(e); }
 });
@@ -216,7 +257,7 @@ enquiriesRouter.post('/:id/send-app-link', async (req: Request, res: Response, n
     const name = enquiry.prospect_name ?? 'there';
     await sendTemplate({
       to: enquiry.prospect_phone,
-      templateName: 'prop_app_link',
+      templateName: 'jag_enq_post_viewing',
       components: [{ type: 'body', parameters: [{ type: 'text', text: name }, { type: 'text', text: application_link }] }],
     });
     await withOwnerRLS(propertiesPool, ownerId, async client => {

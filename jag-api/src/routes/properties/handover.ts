@@ -8,6 +8,9 @@ import { z } from 'zod';
 import { withOwnerRLS } from '../../middleware/rls';
 import { propertiesPool } from '../../db/index';
 import { ok, err } from '../../lib/response';
+import { logger } from '../../lib/logger';
+import { sendTemplate } from '../../lib/whatsapp';
+import { triggerAutoListing } from './listing';
 
 export const handoverRouter = Router();
 
@@ -143,6 +146,51 @@ handoverRouter.patch('/:id', async (req: Request, res: Response, next: NextFunct
       return rows[0] ?? null;
     });
     if (!row) return void res.status(404).json(err('Checklist not found', 'NOT_FOUND'));
+
+    // Auto-list unit when EXIT handover is signed off — fires jag_adv_new_listing to past enquirers
+    if (body.completed_at && row.type === 'EXIT') {
+      triggerAutoListing(ownerId, String(row.unit_id)).catch(e =>
+        logger.warn({ entity: 'PROPERTIES', action: 'AUTO_LIST_FAILED', unit_id: row.unit_id, error_message: (e as Error).message }),
+      );
+    }
+
+    // JAG_ONB_003 — welcome pack on ENTRY handover completion
+    if (body.completed_at && row.type === 'ENTRY') {
+      const lease = await withOwnerRLS(propertiesPool, ownerId, async client => {
+        const { rows: [la] } = await client.query(
+          `SELECT la.tenant_phone, la.tenant_name, la.rent_amount_ttd,
+                  u.unit_number, p.name AS property_name
+           FROM prop_lease_agreements la
+           JOIN prop_units u ON u.id = la.unit_id
+           LEFT JOIN prop_properties p ON p.id = u.property_id
+           WHERE la.unit_id = $1 AND la.status = 'ACTIVE' LIMIT 1`,
+          [row.unit_id],
+        );
+        return la ?? null;
+      });
+      if (lease?.tenant_phone) {
+        const mgr   = process.env.JAG_MANAGER_NAME ?? 'Robert';
+        const phone = process.env.JAG_MANAGER_PHONE ?? process.env.JAG_OWNER_PHONE ?? '';
+        const bank  = process.env.JAG_BANK_NAME ?? 'First Citizens Bank';
+        const acct  = process.env.JAG_BANK_ACCOUNT_NO ?? '';
+        sendTemplate({
+          to: lease.tenant_phone,
+          templateName: 'jag_onb_welcome_pack',
+          components: [{ type: 'body', parameters: [
+            { type: 'text', text: lease.tenant_name ?? 'Tenant' },
+            { type: 'text', text: lease.property_name ?? '' },
+            { type: 'text', text: lease.unit_number ?? '' },
+            { type: 'text', text: `TTD $${parseFloat(String(lease.rent_amount_ttd ?? 0)).toFixed(2)}` },
+            { type: 'text', text: bank },
+            { type: 'text', text: acct },
+            { type: 'text', text: lease.unit_number ?? '' },
+            { type: 'text', text: mgr },
+            { type: 'text', text: phone },
+          ]}],
+        }).catch(e => logger.warn({ entity: 'PROPERTIES', action: 'WA_WELCOME_PACK_FAILED', error_message: (e as Error).message }));
+      }
+    }
+
     res.json(ok(row));
   } catch (e) { next(e); }
 });

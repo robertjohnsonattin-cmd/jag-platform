@@ -112,6 +112,74 @@ router.get('/', async (req: Request, res: Response, next: NextFunction): Promise
   }
 });
 
+// ── GET /api/v1/notifications/unread-count ───────────────────────────────────
+//
+// Cheap badge query — count of the authenticated user's unread notifications.
+// RLS (user_id) scopes this to the caller automatically.
+
+router.get('/unread-count', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const client = await corePool.connect();
+    try {
+      const count = await withTenantRLS(client, req.rlsCtx, async (c) => {
+        const result = await c.query<{ count: string }>(
+          `SELECT count(*) FROM notification_queue WHERE is_read = false`,
+        );
+        return Number(result.rows[0].count);
+      });
+      ok(res, { count });
+    } finally {
+      client.release();
+    }
+  } catch (e) {
+    next(e);
+  }
+});
+
+// ── PATCH /api/v1/notifications/read-all ─────────────────────────────────────
+//
+// Marks every unread notification for the authenticated user as read in one
+// RLS-scoped UPDATE. Writes a single audit_log entry within the same tx.
+
+router.patch('/read-all', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const { userId, tenantId } = req.rlsCtx;
+    const client = await corePool.connect();
+    try {
+      const updated = await withTenantRLS(client, req.rlsCtx, async (c) => {
+        const result = await c.query(
+          `UPDATE notification_queue
+           SET    is_read = true, updated_at = now()
+           WHERE  is_read = false`,
+        );
+        const n = result.rowCount ?? 0;
+        if (n > 0) {
+          await c.query(
+            `INSERT INTO audit_log (tenant_id, user_id, entity, action, source)
+             VALUES ($1, $2, 'Notification', 'MARK_ALL_READ', 'API')`,
+            [tenantId, userId],
+          );
+        }
+        return n;
+      });
+
+      logger.info({
+        entity:    'NOTIFICATIONS',
+        action:    'MARK_ALL_READ',
+        user_id:   userId,
+        tenant_id: tenantId,
+        count:     updated,
+      });
+
+      ok(res, { updated });
+    } finally {
+      client.release();
+    }
+  } catch (e) {
+    next(e);
+  }
+});
+
 // ── PATCH /api/v1/notifications/:id/read ─────────────────────────────────────
 //
 // Marks a single notification as read. Returns 404 if the notification does not

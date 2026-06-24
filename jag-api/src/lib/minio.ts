@@ -92,6 +92,10 @@ export async function getPresignedPutUrl(bucket: string, key: string, expirySeco
   return minioClient.presignedPutObject(bucket, key, expirySeconds);
 }
 
+export async function getPresignedGetUrl(bucket: string, key: string, expirySeconds = 3600): Promise<string> {
+  return minioClient.presignedGetObject(bucket, key, expirySeconds);
+}
+
 export async function deleteObject(bucket: string, key: string): Promise<void> {
   try {
     await minioClient.removeObject(bucket, key);

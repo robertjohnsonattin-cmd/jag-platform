@@ -87,6 +87,12 @@ app.get('/health/ready', async (_req: Request, res: Response) => {
 import { minioAuditRouter } from './routes/internal/minio-audit';
 app.use('/internal/minio-audit', minioAuditRouter);
 
+import { crmCalendarBackfillRouter } from './routes/internal/crm-calendar-backfill';
+app.use('/internal/crm/backfill-calendar', crmCalendarBackfillRouter);
+
+import { calendarBackfillRouter } from './routes/internal/calendar-backfill';
+app.use('/internal/calendar/backfill', calendarBackfillRouter);
+
 // ── WhatsApp webhook — raw body needed for X-Hub-Signature-256 verification ──
 // Exposed publicly via Caddy (not Docker-network-only) so Meta can reach it.
 // Security is enforced by HMAC signature check inside the route handler.
@@ -109,6 +115,7 @@ import { jabcoRouter }         from './routes/jabco/index';
 import { propertiesRouter }    from './routes/properties/index';
 import { crmRouter }           from './routes/crm/index';
 import { familyRouter }        from './routes/family/index';
+import { ownershipRouter }     from './routes/family/ownership';
 import { docvaultRouter }      from './routes/docvault/index';
 import { successionRouter }    from './routes/succession/index';
 import { lifestyleRouter }     from './routes/lifestyle/index';
@@ -130,6 +137,7 @@ app.use('/api/v1/jabco',         jabcoRouter);
 app.use('/api/v1/properties',    propertiesRouter);
 app.use('/api/v1/crm',           crmRouter);
 app.use('/api/v1/family',        familyRouter);
+app.use('/api/v1/family',        ownershipRouter);
 app.use('/api/v1/docvault',      docvaultRouter);
 app.use('/api/v1/succession',    successionRouter);
 app.use('/api/v1/lifestyle',     lifestyleRouter);
@@ -141,6 +149,9 @@ app.use('/api/v1/dragonbridge',   dragonbridgeRouter);
 app.use('/api/v1/entertainment', entertainmentRouter);
 app.use('/api/v1/finance',       financeRouter);
 app.use('/api/v1/files',         filesRouter);
+
+import { adminCalendarBackfillRouter } from './routes/admin/calendar-backfill';
+app.use('/api/v1/admin/calendar', adminCalendarBackfillRouter);
 
 // ── Global error handler ───────────────────────────────────────────────────────
 // Must be defined after all routes. Four-argument signature required by Express.

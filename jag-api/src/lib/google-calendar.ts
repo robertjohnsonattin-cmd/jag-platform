@@ -20,8 +20,20 @@ function getEnv() {
 
 async function getAccessToken(): Promise<string> {
   const env = getEnv();
-  if (!env.saKeyB64 || !env.saEmail) throw new Error('Google service account not configured');
-  const keyJson = JSON.parse(Buffer.from(env.saKeyB64, 'base64').toString('utf-8'));
+  if (!env.saEmail) throw new Error('Google service account not configured');
+
+  // Prefer reading the key file directly (avoids base64 env var encoding issues).
+  // Falls back to base64-encoded env var if file not present.
+  let keyJson: Record<string, string>;
+  const keyFilePath = '/opt/jag/jag-api/google-calendar-key.json';
+  try {
+    const { readFileSync } = await import('fs');
+    keyJson = JSON.parse(readFileSync(keyFilePath, 'utf-8'));
+  } catch {
+    if (!env.saKeyB64) throw new Error('Google service account not configured');
+    keyJson = JSON.parse(Buffer.from(env.saKeyB64, 'base64').toString('utf-8'));
+  }
+
   const { GoogleAuth } = await import('google-auth-library');
   const auth = new GoogleAuth({
     credentials: keyJson,
@@ -112,6 +124,35 @@ export async function createCalendarEvent(event: CalendarEventInput): Promise<st
       end: { dateTime: event.end, timeZone: env.timezone },
       attendees: event.attendeeEmails.map(email => ({ email })),
       sendUpdates: 'all',
+    }),
+  });
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`Calendar Events API error ${res.status}: ${body}`);
+  }
+  const data = (await res.json()) as { id: string };
+  return data.id;
+}
+
+export async function createAllDayCalendarEvent(params: {
+  title: string;
+  description: string;
+  date: string; // YYYY-MM-DD
+}): Promise<string> {
+  const env = getEnv();
+  const token = await getAccessToken();
+  // All-day events use 'date' not 'dateTime'; end must be the following day
+  const end = new Date(params.date + 'T00:00:00Z');
+  end.setUTCDate(end.getUTCDate() + 1);
+  const endDate = end.toISOString().slice(0, 10);
+  const res = await fetch(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(env.calendarId)}/events`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({
+      summary: params.title,
+      description: params.description,
+      start: { date: params.date },
+      end:   { date: endDate },
     }),
   });
   if (!res.ok) {

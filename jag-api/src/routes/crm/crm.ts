@@ -13,6 +13,7 @@ import { withTenantRLS } from '../../middleware/rls';
 import { commercialPool, corePool } from '../../db/index';
 import { logger } from '../../lib/logger';
 import { ok, err } from '../../lib/response';
+import { createAllDayCalendarEvent } from '../../lib/google-calendar';
 
 export const crmRouter = Router();
 
@@ -79,7 +80,7 @@ const CreateContactSchema = z.object({
   birthday:           z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
 }).strict();
 
-const InteractionTypeEnum = z.enum(['CALL', 'EMAIL', 'MEETING', 'SITE_VISIT', 'OTHER']);
+const InteractionTypeEnum = z.enum(['CALL', 'WHATSAPP_CALL', 'WHATSAPP_MESSAGE', 'EMAIL', 'MEETING', 'SITE_VISIT', 'OTHER']);
 
 const CreateInteractionSchema = z.object({
   contact_id:       z.string().uuid(),
@@ -301,14 +302,15 @@ crmRouter.post('/interactions', async (req: Request, res: Response, next: NextFu
 
     const client = await commercialPool.connect();
     try {
+      let contactName = '';
       const newInteraction = await withTenantRLS(client, req.rlsCtx, async (c) => {
-        // Verify contact exists and belongs to this tenant.
-        const contact = await c.query<{ id: string }>(
-          `SELECT id FROM crm_contacts WHERE id = $1`, [body.contact_id],
+        const contact = await c.query<{ id: string; first_name: string; last_name: string }>(
+          `SELECT id, first_name, last_name FROM crm_contacts WHERE id = $1`, [body.contact_id],
         );
         if (contact.rows.length === 0) {
           throw Object.assign(new Error('CONTACT_NOT_FOUND'), { httpStatus: 404 });
         }
+        contactName = `${contact.rows[0].first_name} ${contact.rows[0].last_name}`.trim();
 
         return c.query(
           `INSERT INTO crm_interactions
@@ -325,6 +327,26 @@ crmRouter.post('/interactions', async (req: Request, res: Response, next: NextFu
       logger.info({ entity: 'CRM', action: 'INTERACTION_LOGGED', user_id: userId, tenant_id: tenantId, record_id: newInteraction.id });
       await auditLog(tenantId, userId, 'CrmInteraction', 'CREATE', newInteraction.id, body);
       ok(res, newInteraction, 201);
+
+      // Create Google Calendar all-day event for follow-up — non-blocking
+      if (body.follow_up_date) {
+        const rlsCtx = req.rlsCtx;
+        createAllDayCalendarEvent({
+          title: `Follow-up: ${contactName} — ${body.subject}`,
+          description: [`Type: ${body.interaction_type}`, body.notes ? `Notes: ${body.notes}` : ''].filter(Boolean).join('\n'),
+          date: body.follow_up_date,
+        }).then(async (eventId) => {
+          const c2 = await commercialPool.connect();
+          try {
+            await withTenantRLS(c2, rlsCtx, (c) =>
+              c.query(`UPDATE crm_interactions SET calendar_event_id = $1 WHERE id = $2`, [eventId, newInteraction.id]),
+            );
+            logger.info({ entity: 'CRM', action: 'CALENDAR_EVENT_CREATED', record_id: newInteraction.id, event_id: eventId });
+          } finally { c2.release(); }
+        }).catch((calErr: Error) => {
+          logger.error({ entity: 'CRM', action: 'CALENDAR_EVENT_ERROR', record_id: newInteraction.id, error_message: calErr.message });
+        });
+      }
     } finally { client.release(); }
   } catch (e) {
     if ((e as { httpStatus?: number }).httpStatus === 404) { err(res, 404, 'CONTACT_NOT_FOUND', 'Contact not found.'); return; }
@@ -532,7 +554,7 @@ crmRouter.get('/contacts/:id', async (req: Request, res: Response, next: NextFun
 
       const interactions = await withTenantRLS(client, req.rlsCtx, (c) =>
         c.query(
-          `SELECT id, interaction_type, subject, notes, occurred_at, follow_up_date, created_at
+          `SELECT id, interaction_type, subject, notes, occurred_at, follow_up_date, calendar_event_id, created_at
            FROM   crm_interactions
            WHERE  contact_id = $1
            ORDER  BY occurred_at DESC

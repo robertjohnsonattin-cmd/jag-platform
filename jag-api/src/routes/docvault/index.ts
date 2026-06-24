@@ -114,6 +114,63 @@ docvaultRouter.post('/files', async (req: Request, res: Response, next: NextFunc
   } catch (e) { next(e); }
 });
 
+// ── PATCH /docvault/files/:id ─────────────────────────────────────────────────
+// Edit metadata — primarily to assign/clear family_member_id (tag a document to a
+// person). family_member_id accepts null to clear the link.
+
+const PatchFileSchema = z.object({
+  family_member_id: z.string().uuid().nullable().optional(),
+  title:            z.string().min(1).max(200).optional(),
+  document_type:    z.enum(['NATIONAL_ID','PASSPORT','BIRTH_CERTIFICATE','MARRIAGE_CERTIFICATE','DEATH_CERTIFICATE','MEDICAL_RECORD','ACADEMIC_CERTIFICATE','PROFESSIONAL_LICENCE','FINANCIAL_STATEMENT','TAX_RETURN','INSURANCE_POLICY','PROPERTY_TITLE','LEGAL_AGREEMENT','OTHER']).optional(),
+  expires_date:     z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+  notes:            z.string().max(2000).nullable().optional(),
+}).strict().refine(o => Object.keys(o).length > 0, { message: 'At least one field required.' });
+
+docvaultRouter.patch('/files/:id', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const idP = UUIDParam.safeParse(req.params);
+    if (!idP.success) { err(res, 422, 'VALIDATION_ERROR', 'ID must be a valid UUID.'); return; }
+    const bodyP = PatchFileSchema.safeParse(req.body);
+    if (!bodyP.success) { err(res, 422, 'VALIDATION_ERROR', 'Request body validation failed.'); return; }
+    const body = bodyP.data;
+    const { userId: ownerId } = req.rlsCtx;
+
+    const setCols: string[] = ['last_modified_at = now()'];
+    const params: unknown[] = [];
+    const push = (v: unknown) => { params.push(v); return `$${params.length}`; };
+    if (body.family_member_id !== undefined) setCols.push(`family_member_id = ${push(body.family_member_id)}`);
+    if (body.title            !== undefined) setCols.push(`title            = ${push(body.title)}`);
+    if (body.document_type    !== undefined) setCols.push(`document_type    = ${push(body.document_type)}`);
+    if (body.expires_date     !== undefined) setCols.push(`expires_date     = ${push(body.expires_date)}`);
+    if (body.notes            !== undefined) setCols.push(`notes            = ${push(body.notes)}`);
+    params.push(idP.data.id);
+
+    const client = await familyPool.connect();
+    try {
+      const rec = await withOwnerRLS(client, req.rlsCtx, (c) =>
+        c.query(`UPDATE fam_docvault_files SET ${setCols.join(', ')} WHERE id = $${params.length} RETURNING *`, params)
+          .then(r => r.rows[0] ?? null),
+      );
+      if (!rec) { err(res, 404, 'FILE_NOT_FOUND', 'Document not found.'); return; }
+      logger.info({ entity: 'DOCVAULT', action: 'FILE_UPDATED', user_id: ownerId, record_id: idP.data.id });
+
+      // Audit — record the changed fields (mirrors the REGISTER audit on POST).
+      const coreClient = await corePool.connect();
+      try {
+        await coreClient.query('BEGIN');
+        await coreClient.query('SELECT set_config($1, $2, true)', ['app.current_user_id', ownerId]);
+        await coreClient.query(
+          `INSERT INTO audit_log (user_id, entity, action, record_id, new_values, source) VALUES ($1,'DocVaultFile','UPDATE',$2,$3,'API')`,
+          [ownerId, idP.data.id, JSON.stringify(body)],
+        );
+        await coreClient.query('COMMIT');
+      } catch { await coreClient.query('ROLLBACK').catch(() => {}); } finally { coreClient.release(); }
+
+      ok(res, rec);
+    } finally { client.release(); }
+  } catch (e) { next(e); }
+});
+
 // ── GET /docvault/files/:id ───────────────────────────────────────────────────
 
 docvaultRouter.get('/files/:id', async (req: Request, res: Response, next: NextFunction): Promise<void> => {

@@ -132,6 +132,15 @@ netWorthRouter.post('/snapshot', async (req: Request, res: Response, next: NextF
           GROUP  BY owner_entity_id
         `);
 
+        // Assets owned directly by an individual (fam_ownership_stakes) are attributed to
+        // that person, NOT to the holding entity — exclude them here to avoid double counting.
+        const { rows: stakeRows } = await c.query<{ subject_kind: string; subject_id: string }>(
+          `SELECT DISTINCT subject_kind, subject_id FROM fam_ownership_stakes
+           WHERE subject_kind IN ('PROPERTY','ITEM')`,
+        );
+        const ownedPropertyIds = stakeRows.filter(r => r.subject_kind === 'PROPERTY').map(r => r.subject_id);
+        const ownedItemIds     = stakeRows.filter(r => r.subject_kind === 'ITEM').map(r => r.subject_id);
+
         // Merge into a per-entity map
         const entities = new Map<string, {
           liquid: number; investment: number; credit_liab: number; loan_liab: number; physical: number;
@@ -161,7 +170,10 @@ netWorthRouter.post('/snapshot', async (req: Request, res: Response, next: NextF
             const total = await withTenantRLS(commClient, synCtx, async (cc) => {
               const { rows } = await cc.query<{ total: string }>(
                 `SELECT COALESCE(SUM(unit_value), 0) AS total
-                 FROM ims_items WHERE is_asset = true AND is_active = true`);
+                 FROM ims_items
+                 WHERE is_asset = true AND is_active = true
+                   AND NOT (id = ANY($1::uuid[]))`,
+                [ownedItemIds]);
               return Number(rows[0].total);
             });
             if (total > 0) getEnt(tenantId).physical += total;
@@ -213,7 +225,10 @@ netWorthRouter.post('/snapshot', async (req: Request, res: Response, next: NextF
           const propertyTotal = await withOwnerRLS(propClient, req.rlsCtx, async (pc) => {
             const { rows } = await pc.query<{ total: string }>(
               `SELECT COALESCE(SUM(current_valuation), 0) AS total
-               FROM prop_properties WHERE is_active = true`);
+               FROM prop_properties
+               WHERE is_active = true
+                 AND NOT (id = ANY($1::uuid[]))`,
+              [ownedPropertyIds]);
             return Number(rows[0].total);
           });
           if (propertyTotal > 0) getEnt(JAG_PROPERTIES_TENANT).physical += propertyTotal;

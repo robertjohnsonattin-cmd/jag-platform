@@ -95,7 +95,7 @@ renewalsRouter.post('/send-notices', async (req: Request, res: Response, next: N
         try {
           await sendTemplate({
             to: String(row['tenant_phone']),
-            templateName: 'lease_renewal_notice',
+            templateName: 'jag_ren_renewal_enquiry',
             languageCode: 'en',
             components: [{ type: 'body', parameters: [
               { type: 'text', text: String(row['tenant_name'] ?? '') },
@@ -226,6 +226,33 @@ renewalsRouter.post('/:id/vacate', async (req: Request, res: Response, next: Nex
       return rows[0] ?? null;
     });
     if (!row) return void res.status(404).json(err('Renewal notice not found', 'NOT_FOUND'));
+
+    // JAG_REN_003 — vacating confirmation to tenant
+    const tenantRow = await withOwnerRLS(propertiesPool, ownerId, async client => {
+      const { rows: [la] } = await client.query(
+        `SELECT la.tenant_phone, la.tenant_name, u.unit_number, p.name AS property_name
+         FROM prop_lease_agreements la
+         JOIN prop_units u ON u.id = la.unit_id
+         LEFT JOIN prop_properties p ON p.id = u.property_id
+         WHERE la.id = $1 AND la.owner_id = $2`,
+        [row.lease_id, ownerId],
+      );
+      return la ?? null;
+    });
+    if (tenantRow?.tenant_phone) {
+      sendTemplate({
+        to: tenantRow.tenant_phone,
+        templateName: 'jag_ren_vacating_confirm',
+        components: [{ type: 'body', parameters: [
+          { type: 'text', text: tenantRow.tenant_name ?? 'Tenant' },
+          { type: 'text', text: tenantRow.unit_number ?? '' },
+          { type: 'text', text: tenantRow.property_name ?? '' },
+          { type: 'text', text: String(body.vacating_date) },
+          { type: 'text', text: process.env.JAG_MANAGER_PHONE ?? '' },
+        ]}],
+      }).catch(e => logger.warn({ entity: 'PROPERTIES', action: 'WA_VACATING_CONFIRM_FAILED', error_message: (e as Error).message }));
+    }
+
     res.json(ok(row));
   } catch (e) { next(e); }
 });

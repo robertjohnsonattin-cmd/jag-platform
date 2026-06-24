@@ -10,6 +10,7 @@ import { withOwnerRLS } from '../../middleware/rls';
 import { propertiesPool } from '../../db/index';
 import { logger } from '../../lib/logger';
 import { ok, err } from '../../lib/response';
+import { sendTemplate } from '../../lib/whatsapp';
 
 export const depositsRouter = Router();
 
@@ -92,6 +93,33 @@ depositsRouter.post('/', async (req: Request, res: Response, next: NextFunction)
       return rows[0];
     });
     logger.info({ entity: 'PROPERTIES', action: 'DEPOSIT_RECORDED', record_id: row.id, user_id: ownerId });
+
+    // JAG_ONB_001 — deposit receipt to tenant
+    if (body.payment_method) {
+      const phone = await withOwnerRLS(propertiesPool, ownerId, async client => {
+        const { rows: [la] } = await client.query(
+          `SELECT la.tenant_phone, la.tenant_name FROM prop_lease_agreements la
+           WHERE la.unit_id = $1 AND la.status = 'ACTIVE' LIMIT 1`,
+          [body.unit_id],
+        );
+        return la ?? null;
+      });
+      if (phone?.tenant_phone) {
+        sendTemplate({
+          to: phone.tenant_phone,
+          templateName: 'jag_onb_deposit_receipt',
+          components: [{ type: 'body', parameters: [
+            { type: 'text', text: phone.tenant_name ?? body.tenant_name },
+            { type: 'text', text: `TTD $${body.amount_ttd.toFixed(2)}` },
+            { type: 'text', text: body.received_date },
+            { type: 'text', text: body.payment_method ?? 'BANK_TRANSFER' },
+            { type: 'text', text: row.unit_number ?? body.unit_id.slice(0, 8) },
+            { type: 'text', text: row.receipt_number },
+          ]}],
+        }).catch(e => logger.warn({ entity: 'PROPERTIES', action: 'WA_DEPOSIT_RECEIPT_FAILED', error_message: (e as Error).message }));
+      }
+    }
+
     res.status(201).json(ok(row));
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code === '23505') {
@@ -143,6 +171,44 @@ depositsRouter.patch('/:id/reconcile', async (req: Request, res: Response, next:
       return rows[0] ?? null;
     });
     if (!row) return void res.status(404).json(err('Deposit not found or not in HELD status', 'NOT_FOUND'));
+
+    // JAG_REN_002 — queue deposit recon for owner approval before sending to tenant
+    const phone = await withOwnerRLS(propertiesPool, ownerId, async client => {
+      const { rows: [la] } = await client.query(
+        `SELECT la.tenant_phone, la.tenant_name, u.unit_number
+         FROM prop_lease_agreements la
+         JOIN prop_units u ON u.id = la.unit_id
+         WHERE la.unit_id = $1 ORDER BY la.created_at DESC LIMIT 1`,
+        [row.unit_id],
+      );
+      return la ?? null;
+    });
+    if (phone?.tenant_phone) {
+      const deductions = parseFloat(String(body.deductions_ttd));
+      const deposit    = parseFloat(String(row.amount_ttd));
+      const refund     = parseFloat(String(body.refund_amount_ttd));
+      const label = `Deposit reconciliation — ${phone.unit_number ?? ''} — ${phone.tenant_name ?? ''} — refund TTD $${refund.toFixed(2)}`;
+      withOwnerRLS(propertiesPool, ownerId, async client => {
+        await client.query(
+          `INSERT INTO prop_wa_pending_approvals
+             (owner_id, approval_type, template_name, to_phone, components, context_label, related_id)
+           VALUES ($1,'DEPOSIT_RECON','jag_ren_deposit_recon',$2,$3,$4,$5)`,
+          [ownerId, phone.tenant_phone,
+           JSON.stringify([{ type: 'body', parameters: [
+             { type: 'text', text: phone.tenant_name ?? '' },
+             { type: 'text', text: phone.unit_number ?? '' },
+             { type: 'text', text: `TTD $${deposit.toFixed(2)}` },
+             { type: 'text', text: `TTD $${deductions.toFixed(2)}` },
+             { type: 'text', text: body.deduction_notes ?? 'N/A' },
+             { type: 'text', text: `TTD $${refund.toFixed(2)}` },
+             { type: 'text', text: body.refund_date ?? 'within 14 days' },
+             { type: 'text', text: process.env.JAG_MANAGER_PHONE ?? '' },
+           ]}]),
+           label, row.id],
+        );
+      }).catch(e => logger.warn({ entity: 'PROPERTIES', action: 'WA_DEPOSIT_RECON_QUEUE_FAILED', error_message: (e as Error).message }));
+    }
+
     res.json(ok(row));
   } catch (e) { next(e); }
 });

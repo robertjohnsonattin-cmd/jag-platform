@@ -12,6 +12,7 @@ import { logger } from '../../lib/logger';
 import { ok, err } from '../../lib/response';
 import { getAvailableSlots, createCalendarEvent } from '../../lib/google-calendar';
 import { sendTemplate } from '../../lib/whatsapp';
+import { BUCKET_PHOTOS, getPresignedGetUrl } from '../../lib/minio';
 
 export const viewingsRouter = Router();
 export const publicBookingRouter = Router();
@@ -79,25 +80,27 @@ viewingsRouter.get('/', async (req: Request, res: Response, next: NextFunction) 
   } catch (e) { next(e); }
 });
 
-// ── Batch: send viewing reminders ─────────────────────────────────────────────
+// ── Batch: send 24h viewing reminders ────────────────────────────────────────
 viewingsRouter.post('/send-reminders', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const ownerId = (req as Request & { user?: { jag_user_id?: string } }).user?.jag_user_id;
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
-    const hoursAhead = z.object({ hours_ahead: z.number().int().min(1).max(48).default(2) }).parse(req.body).hours_ahead;
 
     const rows = await withOwnerRLS(propertiesPool, ownerId, async client => {
-      const { rows } = await client.query<Record<string, unknown>>(
-        `SELECT v.id, v.scheduled_at, e.prospect_phone, e.prospect_name
+      const { rows: r } = await client.query<Record<string, unknown>>(
+        `SELECT v.id, v.scheduled_at, e.prospect_phone, e.prospect_name,
+                u.unit_number, p.name AS property_name, p.address_line1
          FROM prop_viewings v
          JOIN prop_enquiries e ON e.id = v.enquiry_id
+         JOIN prop_units u ON u.id = v.unit_id
+         LEFT JOIN prop_properties p ON p.id = u.property_id
          WHERE v.owner_id = $1
            AND v.status IN ('SCHEDULED','CONFIRMED')
-           AND v.scheduled_at BETWEEN NOW() AND NOW() + ($2 || ' hours')::INTERVAL
+           AND v.scheduled_at BETWEEN NOW() + INTERVAL '23 hours' AND NOW() + INTERVAL '25 hours'
            AND v.reminder_sent_at IS NULL`,
-        [ownerId, hoursAhead],
+        [ownerId],
       );
-      return rows;
+      return r;
     });
 
     const sent: string[] = [];
@@ -106,15 +109,68 @@ viewingsRouter.post('/send-reminders', async (req: Request, res: Response, next:
       try {
         await sendTemplate({
           to: String(row['prospect_phone']),
-          templateName: 'viewing_reminder',
+          templateName: 'jag_enq_viewing_reminder_24h',
           languageCode: 'en',
           components: [{ type: 'body', parameters: [
             { type: 'text', text: String(row['prospect_name'] ?? '') },
-            { type: 'text', text: new Date(String(row['scheduled_at'])).toLocaleString('en-TT') },
+            { type: 'text', text: String(row['property_name'] ?? '') },
+            { type: 'text', text: String(row['unit_number'] ?? '') },
+            { type: 'text', text: new Date(String(row['scheduled_at'])).toLocaleDateString('en-TT') },
+            { type: 'text', text: new Date(String(row['scheduled_at'])).toLocaleTimeString('en-TT', { hour: '2-digit', minute: '2-digit' }) },
+            { type: 'text', text: String(row['address_line1'] ?? '') },
           ]}],
         });
         await withOwnerRLS(propertiesPool, ownerId, async client => {
           await client.query(`UPDATE prop_viewings SET reminder_sent_at = NOW() WHERE id = $1`, [row['id']]);
+        });
+        sent.push(String(row['id']));
+      } catch { /* skip on WA error */ }
+    }
+    res.json(ok({ sent: sent.length }));
+  } catch (e) { next(e); }
+});
+
+// ── Batch: send 1h viewing reminders ─────────────────────────────────────────
+viewingsRouter.post('/send-reminders-1h', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const ownerId = (req as Request & { user?: { jag_user_id?: string } }).user?.jag_user_id;
+    if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
+
+    const rows = await withOwnerRLS(propertiesPool, ownerId, async client => {
+      const { rows: r } = await client.query<Record<string, unknown>>(
+        `SELECT v.id, v.scheduled_at, e.prospect_phone, e.prospect_name,
+                u.unit_number, p.name AS property_name, p.address_line1
+         FROM prop_viewings v
+         JOIN prop_enquiries e ON e.id = v.enquiry_id
+         JOIN prop_units u ON u.id = v.unit_id
+         LEFT JOIN prop_properties p ON p.id = u.property_id
+         WHERE v.owner_id = $1
+           AND v.status IN ('SCHEDULED','CONFIRMED')
+           AND v.scheduled_at BETWEEN NOW() + INTERVAL '45 minutes' AND NOW() + INTERVAL '90 minutes'
+           AND v.reminder_1h_sent_at IS NULL`,
+        [ownerId],
+      );
+      return r;
+    });
+
+    const sent: string[] = [];
+    for (const row of rows) {
+      if (!row['prospect_phone']) continue;
+      try {
+        await sendTemplate({
+          to: String(row['prospect_phone']),
+          templateName: 'jag_enq_viewing_reminder_1h',
+          languageCode: 'en',
+          components: [{ type: 'body', parameters: [
+            { type: 'text', text: String(row['prospect_name'] ?? '') },
+            { type: 'text', text: String(row['unit_number'] ?? '') },
+            { type: 'text', text: new Date(String(row['scheduled_at'])).toLocaleTimeString('en-TT', { hour: '2-digit', minute: '2-digit' }) },
+            { type: 'text', text: String(row['address_line1'] ?? '') },
+            { type: 'text', text: process.env.JAG_MANAGER_PHONE ?? '' },
+          ]}],
+        });
+        await withOwnerRLS(propertiesPool, ownerId, async client => {
+          await client.query(`UPDATE prop_viewings SET reminder_1h_sent_at = NOW() WHERE id = $1`, [row['id']]);
         });
         sent.push(String(row['id']));
       } catch { /* skip on WA error */ }
@@ -149,7 +205,7 @@ viewingsRouter.post('/send-post-viewing-links', async (req: Request, res: Respon
       try {
         await sendTemplate({
           to: String(row['prospect_phone']),
-          templateName: 'prop_app_link',
+          templateName: 'jag_enq_post_viewing',
           languageCode: 'en',
           components: [{ type: 'body', parameters: [{ type: 'text', text: String(row['prospect_name'] ?? '') }] }],
         });
@@ -217,12 +273,31 @@ publicBookingRouter.get('/:slug', async (req: Request, res: Response, next: Next
 
     if (!unit) return void res.status(404).json(err('Unit not found or not currently listed', 'NOT_FOUND'));
 
+    // Fetch unit photos (presigned GET, 1-hour TTL — public booking page is ephemeral)
+    const photoRows = await propertiesPool.connect().then(async client => {
+      try {
+        const { rows } = await client.query(
+          `SELECT object_key, caption, display_order FROM prop_unit_photos
+           WHERE unit_id = $1 ORDER BY display_order, created_at`,
+          [unit.id],
+        );
+        return rows as Array<{ object_key: string; caption: string | null; display_order: number }>;
+      } finally { client.release(); }
+    });
+    const photos = await Promise.all(
+      photoRows.map(async p => ({
+        url: await getPresignedGetUrl(BUCKET_PHOTOS, p.object_key, 3600).catch(() => null),
+        caption: p.caption,
+        display_order: p.display_order,
+      })),
+    ).then(arr => arr.filter(p => p.url !== null));
+
     let slots: unknown[] = [];
     try { slots = await getAvailableSlots(from, to); } catch (e) {
       logger.warn({ entity: 'PUBLIC_BOOKING', action: 'SLOTS_UNAVAILABLE', error_message: (e as Error).message });
     }
 
-    res.json(ok({ unit, available_slots: slots }));
+    res.json(ok({ unit, photos, available_slots: slots }));
   } catch (e) { next(e); }
 });
 
@@ -281,7 +356,7 @@ publicBookingRouter.post('/:slug', async (req: Request, res: Response, next: Nex
     try {
       await sendTemplate({
         to: body.prospect_phone,
-        templateName: 'prop_viewing_confirmation',
+        templateName: 'jag_enq_viewing_confirm',
         components: [{
           type: 'body',
           parameters: [
