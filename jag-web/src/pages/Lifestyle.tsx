@@ -14,6 +14,22 @@ import {
   type ProgType, type TxType, type MetricType,
   type LoyaltyProgramme, type TrackerEntry,
 } from '../api/lifestyle'
+import { familyApi, type FamilyMember } from '../api/family'
+
+// Shared family-member directory (cached by query key — deduped across components).
+function useFamilyMembers() {
+  const { data: members = [] } = useQuery<FamilyMember[]>({
+    queryKey: ['family-members'],
+    queryFn: () => familyApi.list(),
+    staleTime: 60_000,
+  })
+  const nameOf = (id: string | null | undefined): string | null => {
+    if (!id) return null
+    const m = members.find(x => x.id === id)
+    return m ? `${m.first_name} ${m.last_name}` : null
+  }
+  return { members, nameOf }
+}
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -71,6 +87,7 @@ const fmtNum = (n: number) => n.toLocaleString()
 
 function AddProgrammeModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
   const { t } = useTranslation()
+  const { members } = useFamilyMembers()
   const [form, setForm] = useState({
     programme_type: 'AIRLINE' as ProgType,
     provider_name: '',
@@ -79,6 +96,7 @@ function AddProgrammeModal({ onClose, onSaved }: { onClose: () => void; onSaved:
     points_balance: '',
     miles_balance: '',
     expiry_date: '',
+    family_member_id: '',
     notes: '',
   })
   const [saving, setSaving] = useState(false)
@@ -98,6 +116,7 @@ function AddProgrammeModal({ onClose, onSaved }: { onClose: () => void; onSaved:
         points_balance: form.points_balance ? Number(form.points_balance) : undefined,
         miles_balance: form.miles_balance ? Number(form.miles_balance) : undefined,
         expiry_date: form.expiry_date || undefined,
+        family_member_id: form.family_member_id || undefined,
         notes: form.notes || undefined,
       })
       onSaved()
@@ -162,6 +181,14 @@ function AddProgrammeModal({ onClose, onSaved }: { onClose: () => void; onSaved:
             </div>
           </div>
           <div>
+            <label className="block text-xs text-slate-400 mb-1">{t('lifestyle.belongsTo')}</label>
+            <select value={form.family_member_id} onChange={e => set('family_member_id', e.target.value)}
+              className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-sm">
+              <option value="">{t('lifestyle.unassigned')}</option>
+              {members.map(m => <option key={m.id} value={m.id}>{m.first_name} {m.last_name}</option>)}
+            </select>
+          </div>
+          <div>
             <label className="block text-xs text-slate-400 mb-1">{t('common.notes')}</label>
             <textarea value={form.notes} onChange={e => set('notes', e.target.value)} rows={2}
               className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-sm resize-none" />
@@ -184,12 +211,14 @@ function AddProgrammeModal({ onClose, onSaved }: { onClose: () => void; onSaved:
 
 function EditProgrammeModal({ prog, onClose, onSaved }: { prog: LoyaltyProgramme; onClose: () => void; onSaved: () => void }) {
   const { t } = useTranslation()
+  const { members } = useFamilyMembers()
   const [form, setForm] = useState({
     tier: prog.tier ?? '',
     membership_number: prog.membership_number ?? '',
     points_balance: String(prog.points_balance),
     miles_balance: String(prog.miles_balance),
-    expiry_date: prog.expiry_date ?? '',
+    expiry_date: prog.expiry_date ? prog.expiry_date.slice(0, 10) : '',
+    family_member_id: prog.family_member_id ?? '',
   })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -205,6 +234,7 @@ function EditProgrammeModal({ prog, onClose, onSaved }: { prog: LoyaltyProgramme
         points_balance: Number(form.points_balance),
         miles_balance: Number(form.miles_balance),
         expiry_date: form.expiry_date || undefined,
+        family_member_id: form.family_member_id || null,
       })
       onSaved()
     } catch (e) { setError((e as Error).message); setSaving(false) }
@@ -246,6 +276,14 @@ function EditProgrammeModal({ prog, onClose, onSaved }: { prog: LoyaltyProgramme
               <input type="date" value={form.expiry_date} onChange={e => set('expiry_date', e.target.value)}
                 className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-sm" />
             </div>
+          </div>
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">{t('lifestyle.belongsTo')}</label>
+            <select value={form.family_member_id} onChange={e => set('family_member_id', e.target.value)}
+              className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-sm">
+              <option value="">{t('lifestyle.unassigned')}</option>
+              {members.map(m => <option key={m.id} value={m.id}>{m.first_name} {m.last_name}</option>)}
+            </select>
           </div>
           {error && <p className="text-red-400 text-sm">{error}</p>}
         </div>
@@ -474,16 +512,21 @@ function ProgrammeDetail({ prog, onClose }: { prog: LoyaltyProgramme; onClose: (
 function LoyaltyTab() {
   const { t } = useTranslation()
   const qc = useQueryClient()
+  const { members, nameOf } = useFamilyMembers()
   const [showAdd, setShowAdd] = useState(false)
   const [selected, setSelected] = useState<LoyaltyProgramme | null>(null)
   const [filterType, setFilterType] = useState<ProgType | 'ALL'>('ALL')
+  const [memberFilter, setMemberFilter] = useState('')
 
   const { data: programmes = [], isLoading } = useQuery({
     queryKey: ['lifestyle-programmes'],
     queryFn: () => lifestyleApi.getProgrammes(),
   })
 
-  const filtered = filterType === 'ALL' ? programmes : programmes.filter(p => p.programme_type === filterType)
+  const filtered = programmes.filter(p =>
+    (filterType === 'ALL' || p.programme_type === filterType) &&
+    (!memberFilter || p.family_member_id === memberFilter),
+  )
 
   const totalPoints = programmes.reduce((s, p) => s + p.points_balance, 0)
   const totalMiles = programmes.reduce((s, p) => s + p.miles_balance, 0)
@@ -529,10 +572,19 @@ function LoyaltyTab() {
             </button>
           ))}
         </div>
-        <button onClick={() => setShowAdd(true)}
-          className="text-sm px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg font-medium">
-          {t('lifestyle.addProgrammeShort')}
-        </button>
+        <div className="flex items-center gap-2">
+          {members.length > 0 && (
+            <select value={memberFilter} onChange={e => setMemberFilter(e.target.value)}
+              className="text-xs bg-slate-700 border border-slate-600 rounded-lg px-3 py-1.5 text-slate-200">
+              <option value="">{t('lifestyle.allMembers')}</option>
+              {members.map(m => <option key={m.id} value={m.id}>{m.first_name} {m.last_name}</option>)}
+            </select>
+          )}
+          <button onClick={() => setShowAdd(true)}
+            className="text-sm px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg font-medium">
+            {t('lifestyle.addProgrammeShort')}
+          </button>
+        </div>
       </div>
 
       {isLoading ? (
@@ -559,6 +611,7 @@ function LoyaltyTab() {
                     </div>
                     <div className="font-semibold">{p.provider_name}</div>
                     {p.membership_number && <div className="text-xs text-slate-400">#{p.membership_number}</div>}
+                    {nameOf(p.family_member_id) && <div className="text-xs text-slate-500 mt-0.5">👤 {nameOf(p.family_member_id)}</div>}
                   </div>
                   <div className="text-right">
                     {expired && <div className="text-xs text-red-400 mb-1">{t('lifestyle.expiredBadge')}</div>}
@@ -605,11 +658,13 @@ function isExpiringSoonFn(date: string) {
 
 function AddTrackerModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
   const { t } = useTranslation()
+  const { members } = useFamilyMembers()
   const [form, setForm] = useState({
     entry_date: today(),
     metric_type: 'WEIGHT_KG' as MetricType,
     value: '',
     unit: METRIC_DEFAULT_UNIT['WEIGHT_KG'],
+    family_member_id: '',
     source: '',
     notes: '',
   })
@@ -631,6 +686,7 @@ function AddTrackerModal({ onClose, onSaved }: { onClose: () => void; onSaved: (
         metric_type: form.metric_type,
         value: Number(form.value),
         unit: form.unit,
+        family_member_id: form.family_member_id || undefined,
         source: form.source || undefined,
         notes: form.notes || undefined,
       })
@@ -674,11 +730,21 @@ function AddTrackerModal({ onClose, onSaved }: { onClose: () => void; onSaved: (
                 className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-sm" />
             </div>
           </div>
-          <div>
-            <label className="block text-xs text-slate-400 mb-1">{t('lifestyle.sourceLabel')}</label>
-            <input value={form.source} onChange={e => set('source', e.target.value)}
-              placeholder="e.g. Fitbit, Manual, Doctor"
-              className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-sm" />
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">{t('lifestyle.sourceLabel')}</label>
+              <input value={form.source} onChange={e => set('source', e.target.value)}
+                placeholder="e.g. Fitbit, Manual, Doctor"
+                className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-sm" />
+            </div>
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">{t('lifestyle.belongsTo')}</label>
+              <select value={form.family_member_id} onChange={e => set('family_member_id', e.target.value)}
+                className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-sm">
+                <option value="">{t('lifestyle.unassigned')}</option>
+                {members.map(m => <option key={m.id} value={m.id}>{m.first_name} {m.last_name}</option>)}
+              </select>
+            </div>
           </div>
           <div>
             <label className="block text-xs text-slate-400 mb-1">{t('common.notes')}</label>
@@ -704,15 +770,18 @@ function AddTrackerModal({ onClose, onSaved }: { onClose: () => void; onSaved: (
 function TrackerTab() {
   const { t } = useTranslation()
   const qc = useQueryClient()
+  const { members } = useFamilyMembers()
   const [showAdd, setShowAdd] = useState(false)
   const [filterMetric, setFilterMetric] = useState<MetricType | 'ALL'>('ALL')
+  const [memberFilter, setMemberFilter] = useState('')
   const [fromDate, setFromDate] = useState('')
   const [toDate, setToDate] = useState('')
 
   const { data: entries = [], isLoading } = useQuery({
-    queryKey: ['lifestyle-tracker', filterMetric, fromDate, toDate],
+    queryKey: ['lifestyle-tracker', filterMetric, memberFilter, fromDate, toDate],
     queryFn: () => lifestyleApi.getTrackerEntries({
       metric_type: filterMetric !== 'ALL' ? filterMetric : undefined,
+      family_member_id: memberFilter || undefined,
       from_date: fromDate || undefined,
       to_date: toDate || undefined,
     }),
@@ -762,6 +831,13 @@ function TrackerTab() {
           ))}
         </div>
         <div className="flex items-center gap-3">
+          {members.length > 0 && (
+            <select value={memberFilter} onChange={e => setMemberFilter(e.target.value)}
+              className="text-xs bg-slate-700 border border-slate-600 rounded-lg px-3 py-1.5 text-slate-200">
+              <option value="">{t('lifestyle.allMembers')}</option>
+              {members.map(m => <option key={m.id} value={m.id}>{m.first_name} {m.last_name}</option>)}
+            </select>
+          )}
           <div className="flex items-center gap-2">
             <label className="text-xs text-slate-400">{t('common.from')}</label>
             <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)}

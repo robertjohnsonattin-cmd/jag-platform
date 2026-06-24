@@ -1,4 +1,4 @@
-export type InteractionType = 'CALL' | 'EMAIL' | 'MEETING' | 'SITE_VISIT' | 'OTHER'
+export type InteractionType = 'CALL' | 'WHATSAPP_CALL' | 'WHATSAPP_MESSAGE' | 'EMAIL' | 'MEETING' | 'SITE_VISIT' | 'OTHER'
 
 export interface Company {
   id: string
@@ -30,6 +30,7 @@ export interface ContactInteraction {
   notes: string | null
   occurred_at: string
   follow_up_date: string | null
+  calendar_event_id: string | null
   created_at: string
 }
 

@@ -15,10 +15,14 @@ import Entertainment from './pages/Entertainment'
 import DragonBridge from './pages/DragonBridge'
 import NLCB from './pages/NLCB'
 import DocVault from './pages/DocVault'
+import Succession from './pages/Succession'
+import Family from './pages/Family'
+import Ownership from './pages/Ownership'
 import BrianAdmin from './pages/BrianAdmin'
 import BrianPortal from './pages/BrianPortal'
 import Lifestyle from './pages/Lifestyle'
 import Reports from './pages/Reports'
+import Export from './pages/Export'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -47,6 +51,7 @@ function AppRoutes() {
           <Route path="finance" element={<Finance />} />
           <Route path="ledger" element={<Ledger />} />
           <Route path="reports" element={<Reports />} />
+          <Route path="export" element={<Export />} />
           <Route path="expenses" element={<Expenses />} />
           <Route path="properties" element={<Properties />} />
           <Route path="jabco" element={<Jabco />} />
@@ -57,6 +62,9 @@ function AppRoutes() {
           <Route path="dragonbridge" element={<DragonBridge />} />
           <Route path="nlcb" element={<NLCB />} />
           <Route path="docvault" element={<DocVault />} />
+          <Route path="succession" element={<Succession />} />
+          <Route path="family" element={<Family />} />
+          <Route path="ownership" element={<Ownership />} />
           <Route path="lifestyle" element={<Lifestyle />} />
           <Route path="brian-admin" element={<BrianAdmin />} />
         </Route>

@@ -61,6 +61,12 @@ export default function PropertiesMaintenancePanel() {
 
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => setForm(f => ({ ...f, [k]: e.target.value }))
 
+  const { data: contractors = [] } = useQuery({
+    queryKey: ['contractors'],
+    queryFn: () => tenancyApi.getContractors(),
+    staleTime: 5 * 60_000,
+  })
+
   return (
     <div className="flex gap-4 h-[700px]">
       <div className="flex-1 overflow-y-auto">
@@ -122,6 +128,30 @@ export default function PropertiesMaintenancePanel() {
                 </button>
               )}
             </div>
+            {/* Contractor assignment */}
+            <div className="space-y-2 border-t border-slate-700 pt-3">
+              <p className="text-xs font-medium text-slate-400">{t('tenancy.contractorAssign', 'Contractor Assignment')}</p>
+              <div>
+                <label className="block text-xs text-slate-500 mb-1">{t('tenancy.contractor', 'Contractor')}</label>
+                <select className="w-full bg-slate-700 border border-slate-600 rounded px-2 py-1.5 text-xs text-slate-100"
+                  value={String(detail['contractor_id'] ?? '')}
+                  onChange={e => patchMut.mutate({ contractor_id: e.target.value || null })}>
+                  <option value="">{t('tenancy.noContractor', '— Not assigned —')}</option>
+                  {contractors.map((c: Record<string, unknown>) => (
+                    <option key={String(c['id'])} value={String(c['id'])}>
+                      {String(c['name'])} · {String(c['trade'])} {c['phone'] ? `· ${c['phone']}` : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs text-slate-500 mb-1">{t('tenancy.scheduledVisit', 'Scheduled Visit')}</label>
+                <input type="datetime-local" className="w-full bg-slate-700 border border-slate-600 rounded px-2 py-1.5 text-xs text-slate-100"
+                  value={detail['estimated_visit_at'] ? String(detail['estimated_visit_at']).slice(0, 16) : ''}
+                  onChange={e => patchMut.mutate({ estimated_visit_at: e.target.value || null })} />
+              </div>
+            </div>
+
             <div>
               <p className="text-xs text-slate-500 mb-1">{t('tenancy.updates','Updates')}</p>
               {((detail['updates'] as unknown[]) ?? []).map((upd: unknown) => {

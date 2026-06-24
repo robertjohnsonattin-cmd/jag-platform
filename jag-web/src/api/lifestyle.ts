@@ -66,6 +66,7 @@ export const lifestyleApi = {
     miles_balance: number
     expiry_date: string
     membership_number: string
+    family_member_id: string | null
     notes: string
   }>) => api.patch<LoyaltyProgramme>(`/lifestyle/loyalty/${id}`, data),
 

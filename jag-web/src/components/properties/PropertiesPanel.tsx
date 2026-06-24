@@ -11,7 +11,7 @@ import type {
   Property, MaintenanceRequest, VendorInvoice,
   InsurancePolicy, PropertyTaxRecord, Inspection,
   Lease, PropertyDocument,
-  UtilityAccount, Unit, RentPayment, RentReceipt,
+  UtilityAccount, Unit, UnitPhoto, RentPayment, RentReceipt,
   PropertyValuationHistory,
 } from '../../types/properties'
 
@@ -2342,6 +2342,7 @@ function PropertyDetail({ property, onDeleted }: { property: Property; onDeleted
   const [showAddDocument, setShowAddDocument] = useState(false)
   const [showAddUnit, setShowAddUnit] = useState(false)
   const [editingUnit, setEditingUnit] = useState<Unit | null>(null)
+  const [managingListingUnit, setManagingListingUnit] = useState<Unit | null>(null)
   const [showAddUtilityAccount, setShowAddUtilityAccount] = useState(false)
   const [editingUtilityAccount, setEditingUtilityAccount] = useState<UtilityAccount | null>(null)
   const [editingInsurance, setEditingInsurance] = useState<InsurancePolicy | null>(null)
@@ -2997,6 +2998,9 @@ function PropertyDetail({ property, onDeleted }: { property: Property; onDeleted
                           <span className={`text-xs px-1.5 py-0.5 rounded border ${u.is_rented ? 'border-green-700 text-green-400' : 'border-slate-600 text-slate-500'}`}>
                             {u.is_rented ? t('propertiesPanel.rented') : t('propertiesPanel.vacant')}
                           </span>
+                          {u.listing_status === 'LISTED' && (
+                            <span className="text-xs px-1.5 py-0.5 rounded border border-emerald-700 text-emerald-400">Listed</span>
+                          )}
                         </div>
                         <div className="flex gap-3 text-xs text-slate-400 mt-1">
                           {u.bedrooms != null && <span>{u.bedrooms}BR</span>}
@@ -3011,7 +3015,7 @@ function PropertyDetail({ property, onDeleted }: { property: Property; onDeleted
                           </p>
                         )}
                       </div>
-                      <div className="flex gap-1.5 ml-3 shrink-0">
+                      <div className="flex gap-1.5 ml-3 shrink-0 flex-wrap justify-end">
                         <button
                           onClick={() => setEditingUnit(u)}
                           className="text-xs px-2 py-0.5 bg-slate-700 hover:bg-slate-600 text-slate-400 rounded border border-slate-600 transition-colors"
@@ -3023,6 +3027,12 @@ function PropertyDetail({ property, onDeleted }: { property: Property; onDeleted
                           className="text-xs px-2 py-0.5 bg-slate-700 hover:bg-slate-600 text-slate-400 rounded border border-slate-600 transition-colors"
                         >
                           {u.is_rented ? t('propertiesPanel.markVacant') : t('propertiesPanel.markRented')}
+                        </button>
+                        <button
+                          onClick={() => setManagingListingUnit(u)}
+                          className="text-xs px-2 py-0.5 bg-emerald-800 hover:bg-emerald-700 text-emerald-300 rounded border border-emerald-700 transition-colors"
+                        >
+                          🏷 Listing
                         </button>
                       </div>
                     </div>
@@ -3194,6 +3204,17 @@ function PropertyDetail({ property, onDeleted }: { property: Property; onDeleted
         onSaved={() => void qc.invalidateQueries({ queryKey: ['properties', property.id, 'leases'] })} />}
       {showAddDocument  && <AddDocumentModal propertyId={property.id} leases={leases} onClose={() => setShowAddDocument(false)}
         onCreated={() => void qc.invalidateQueries({ queryKey: ['properties', property.id, 'documents'] })} />}
+      {managingListingUnit && (
+        <ManageListingModal
+          unit={managingListingUnit}
+          propertyId={property.id}
+          onClose={() => setManagingListingUnit(null)}
+          onChanged={() => {
+            void qc.invalidateQueries({ queryKey: ['properties', property.id, 'units'] })
+            setManagingListingUnit(null)
+          }}
+        />
+      )}
       {showAddUnit      && <AddUnitModal propertyId={property.id} onClose={() => setShowAddUnit(false)}
         onCreated={() => void qc.invalidateQueries({ queryKey: ['properties', property.id, 'units'] })} />}
       {showAddUtilityAccount && <AddUtilityAccountModal propertyId={property.id} onClose={() => setShowAddUtilityAccount(false)}
@@ -3295,6 +3316,210 @@ export default function PropertiesPanel() {
           }}
         />
       )}
+    </div>
+  )
+}
+
+// ─── Manage Listing Modal ─────────────────────────────────────────────────────
+function ManageListingModal({ unit, propertyId, onClose, onChanged }: {
+  unit: Unit; propertyId: string; onClose: () => void; onChanged: () => void
+}) {
+  const qc = useQueryClient()
+  const [desc, setDesc]   = useState(unit.listing_description ?? '')
+  const [wasa, setWasa]   = useState(unit.wasa_included ?? false)
+  const [elec, setElec]   = useState(unit.electricity_included ?? false)
+  const [inet, setInet]   = useState(unit.internet_included ?? false)
+  const [rent, setRent]   = useState(unit.rent_amount ? parseFloat(String(unit.rent_amount)).toFixed(2) : '')
+  const [uploading, setUploading] = useState(false)
+  const [savingInfo, setSavingInfo] = useState(false)
+  const [msg, setMsg]     = useState<string | null>(null)
+
+  const bookingBase = import.meta.env['VITE_BOOKING_BASE_URL'] as string ?? 'https://jagcorporate.com/book'
+  const bookingUrl = unit.booking_slug ? `${bookingBase}/${unit.booking_slug}` : null
+
+  const { data: photos = [], refetch: refetchPhotos } = useQuery({
+    queryKey: ['unit-photos', unit.id],
+    queryFn: () => propertiesApi.getUnitPhotos(unit.id),
+  })
+
+  const { mutate: doList, isPending: listing } = useMutation({
+    mutationFn: () => propertiesApi.listUnit(unit.id),
+    onSuccess: () => { setMsg('Unit listed — WA broadcast sent to past enquirers.'); onChanged() },
+    onError: (e: Error) => setMsg('Error: ' + e.message),
+  })
+  const { mutate: doUnlist, isPending: unlisting } = useMutation({
+    mutationFn: () => propertiesApi.unlistUnit(unit.id),
+    onSuccess: () => { setMsg('Unit unlisted.'); onChanged() },
+    onError: (e: Error) => setMsg('Error: ' + e.message),
+  })
+  const { mutate: doSuggest, isPending: suggesting } = useMutation({
+    mutationFn: () => propertiesApi.suggestUnitPrice(unit.id),
+    onSuccess: (r) => setMsg('AI suggestion: TTD $' + r.recommended + '/mo (range $' + r.min + String.fromCharCode(8211) + '$' + r.max + ')'),
+    onError: (e: Error) => setMsg('Suggest error: ' + e.message),
+  })
+  const { mutate: deletePhoto } = useMutation({
+    mutationFn: (photoId: string) => propertiesApi.deleteUnitPhoto(unit.id, photoId),
+    onSuccess: () => void refetchPhotos(),
+  })
+
+  async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setUploading(true)
+    setMsg(null)
+    try {
+      const { upload_url, object_key } = await propertiesApi.getPhotoUploadUrl(unit.id, file.name)
+      await fetch(upload_url, { method: 'PUT', body: file, headers: { 'Content-Type': file.type } })
+      await propertiesApi.confirmUnitPhoto(unit.id, { object_key, display_order: (photos as UnitPhoto[]).length })
+      await refetchPhotos()
+      setMsg('Photo uploaded.')
+    } catch (err) {
+      setMsg('Upload failed: ' + (err as Error).message)
+    } finally {
+      setUploading(false)
+      e.target.value = ''
+    }
+  }
+
+  async function saveInfo() {
+    setSavingInfo(true)
+    setMsg(null)
+    try {
+      await propertiesApi.updateListingInfo(unit.id, {
+        listing_description: desc || null,
+        wasa_included: wasa,
+        electricity_included: elec,
+        internet_included: inet,
+        ...(rent ? { rent_amount: parseFloat(rent) } : {}),
+      })
+      void qc.invalidateQueries({ queryKey: ['properties', propertyId, 'units'] })
+      setMsg('Listing info saved.')
+    } catch (err) {
+      setMsg('Save failed: ' + (err as Error).message)
+    } finally {
+      setSavingInfo(false)
+    }
+  }
+
+  const isBusy = listing || unlisting || suggesting || uploading || savingInfo
+  const isListed = unit.listing_status === 'LISTED'
+  const inputCls = 'w-full bg-slate-700 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500'
+  const utilityOpts: Array<[string, string, boolean, (v: boolean) => void]> = [
+    ['wasa', 'WASA', wasa, setWasa],
+    ['elec', 'Electricity', elec, setElec],
+    ['inet', 'Internet', inet, setInet],
+  ]
+
+  return (
+    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+      <div className="bg-slate-800 border border-slate-700 rounded-xl w-full max-w-lg max-h-[90vh] overflow-y-auto shadow-2xl">
+        <div className="flex items-center justify-between px-5 pt-5 pb-3 border-b border-slate-700">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-100">Manage Listing &mdash; Unit {unit.unit_number}</h2>
+            <span className={`text-xs px-2 py-0.5 rounded mt-1 inline-block ${isListed ? 'bg-emerald-900/40 text-emerald-300 border border-emerald-700' : 'bg-slate-700 text-slate-400 border border-slate-600'}`}>
+              {unit.listing_status ?? 'VACANT'}
+            </span>
+          </div>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-200 text-lg leading-none">&#x2715;</button>
+        </div>
+
+        <div className="p-5 space-y-5">
+          <div className="flex gap-2 flex-wrap">
+            {!isListed ? (
+              <button onClick={() => doList()} disabled={isBusy}
+                className="text-xs px-3 py-1.5 bg-emerald-700 hover:bg-emerald-600 text-white rounded-lg disabled:opacity-50 transition-colors">
+                {listing ? 'Listing...' : 'List Unit + Broadcast'}
+              </button>
+            ) : (
+              <button onClick={() => doUnlist()} disabled={isBusy}
+                className="text-xs px-3 py-1.5 bg-red-800 hover:bg-red-700 text-red-200 rounded-lg disabled:opacity-50 transition-colors">
+                {unlisting ? 'Unlisting...' : 'Unlist'}
+              </button>
+            )}
+            <button onClick={() => doSuggest()} disabled={isBusy}
+              className="text-xs px-3 py-1.5 bg-blue-800 hover:bg-blue-700 text-blue-200 rounded-lg disabled:opacity-50 transition-colors">
+              {suggesting ? 'Thinking...' : 'AI Suggest Price'}
+            </button>
+          </div>
+
+          {bookingUrl && (
+            <div>
+              <p className="text-xs text-slate-400 mb-1">Public booking link</p>
+              <div className="flex gap-2">
+                <input readOnly value={bookingUrl}
+                  className="flex-1 bg-slate-700/50 border border-slate-600 rounded px-2 py-1 text-xs text-slate-300 font-mono" />
+                <button onClick={() => { void navigator.clipboard.writeText(bookingUrl); setMsg('Link copied!') }}
+                  className="text-xs px-2 py-1 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded border border-slate-600">
+                  Copy
+                </button>
+              </div>
+            </div>
+          )}
+
+          <div>
+            <p className="text-xs font-semibold text-slate-300 mb-2">Photos ({(photos as UnitPhoto[]).length})</p>
+            {(photos as UnitPhoto[]).length > 0 && (
+              <div className="grid grid-cols-3 gap-2 mb-3">
+                {(photos as UnitPhoto[]).map((p: UnitPhoto, idx: number) => (
+                  <div key={p.id} className="relative group rounded overflow-hidden border border-slate-700 bg-slate-900">
+                    <img src={p.url} alt={p.caption ?? ('Photo ' + (idx + 1))} className="w-full aspect-square object-cover" />
+                    <button onClick={() => deletePhoto(p.id)}
+                      className="absolute top-1 right-1 bg-red-900/80 hover:bg-red-700 text-white text-xs w-5 h-5 flex items-center justify-center rounded opacity-0 group-hover:opacity-100 transition-opacity">
+                      &#x2715;
+                    </button>
+                    {p.caption && <p className="text-xs text-slate-400 truncate px-1 py-0.5 bg-black/40">{p.caption}</p>}
+                  </div>
+                ))}
+              </div>
+            )}
+            <label className={`text-xs px-3 py-1.5 rounded-lg border border-dashed border-slate-600 text-slate-400 hover:border-blue-500 hover:text-blue-400 cursor-pointer transition-colors inline-block ${isBusy ? 'opacity-50 pointer-events-none' : ''}`}>
+              {uploading ? 'Uploading...' : '+ Add Photo'}
+              <input type="file" accept="image/*" className="hidden" onChange={ev => void handleFileChange(ev)} disabled={isBusy} />
+            </label>
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-300 mb-1">Listing Description</label>
+            <textarea value={desc} onChange={ev => setDesc(ev.target.value)} rows={4}
+              className={inputCls} placeholder="Describe the unit, features, nearby amenities, etc." />
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-300 mb-1">Asking Rent (TTD/month)</label>
+            <input type="number" value={rent} onChange={ev => setRent(ev.target.value)}
+              className={inputCls} placeholder="e.g. 4500" min="0" step="100" />
+          </div>
+
+          <div>
+            <p className="text-xs font-semibold text-slate-300 mb-2">Utilities Included</p>
+            <div className="flex gap-5 flex-wrap">
+              {utilityOpts.map(([key, label, val, setter]) => (
+                <label key={key} className="flex items-center gap-1.5 text-xs text-slate-300 cursor-pointer">
+                  <input type="checkbox" checked={val} onChange={ev => setter(ev.target.checked)}
+                    className="rounded border-slate-600 bg-slate-700 text-blue-500" />
+                  {label}
+                </label>
+              ))}
+            </div>
+          </div>
+
+          {msg && (
+            <p className={`text-xs px-3 py-2 rounded-lg border ${msg.startsWith('Error') || msg.startsWith('Upload failed') || msg.startsWith('Save failed') ? 'border-red-700 bg-red-900/20 text-red-300' : 'border-green-700 bg-green-900/20 text-green-300'}`}>
+              {msg}
+            </p>
+          )}
+        </div>
+
+        <div className="flex justify-end gap-2 px-5 pb-5 border-t border-slate-700 pt-4">
+          <button onClick={onClose} className="text-xs px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-lg border border-slate-600">
+            Close
+          </button>
+          <button onClick={() => void saveInfo()} disabled={isBusy}
+            className="text-xs px-3 py-1.5 bg-blue-700 hover:bg-blue-600 text-white rounded-lg disabled:opacity-50">
+            {savingInfo ? 'Saving...' : 'Save Info'}
+          </button>
+        </div>
+      </div>
     </div>
   )
 }

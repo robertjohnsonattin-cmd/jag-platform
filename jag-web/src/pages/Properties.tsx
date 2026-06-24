@@ -13,6 +13,7 @@ import PropertiesContractorsPanel from '../components/properties/PropertiesContr
 import PropertiesHandoverPanel from '../components/properties/PropertiesHandoverPanel'
 import PropertiesRenewalsPanel from '../components/properties/PropertiesRenewalsPanel'
 import PropertiesWhatsAppPanel from '../components/properties/PropertiesWhatsAppPanel'
+import PropertiesWaApprovalsPanel from '../components/properties/PropertiesWaApprovalsPanel'
 
 const TABS = [
   { id: 'properties',  key: 'properties.tabs.properties' },
@@ -28,6 +29,7 @@ const TABS = [
   { id: 'handover',    key: 'tenancy.tabs.handover' },
   { id: 'renewals',    key: 'tenancy.tabs.renewals' },
   { id: 'whatsapp',    key: 'tenancy.tabs.whatsapp' },
+  { id: 'approvals',   key: 'tenancy.tabs.approvals' },
 ] as const
 
 type TabId = (typeof TABS)[number]['id']
@@ -69,6 +71,7 @@ export default function Properties() {
       {tab === 'handover'     && <PropertiesHandoverPanel />}
       {tab === 'renewals'     && <PropertiesRenewalsPanel />}
       {tab === 'whatsapp'     && <PropertiesWhatsAppPanel />}
+      {tab === 'approvals'    && <PropertiesWaApprovalsPanel />}
     </div>
   )
 }

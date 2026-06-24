@@ -39,6 +39,32 @@ export const api = {
     request<T>(path, { method: 'DELETE', body: JSON.stringify(data) }),
   postForm: <T>(path: string, form: FormData) =>
     request<T>(path, { method: 'POST', body: form }, true),
+
+  download: async (path: string, fileName: string): Promise<void> => {
+    await keycloak.updateToken(30).catch(() => {})
+    const res = await fetch(`${BASE}${path}`, { headers: { Authorization: `Bearer ${keycloak.token ?? ''}` } })
+    if (!res.ok) throw new Error(`Download failed: HTTP ${res.status}`)
+    const blob = await res.blob()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = fileName
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  },
+
+  // Authenticated fetch of a binary resource → blob object URL, for use as an
+  // <img src> / <a href>. A browser-native fetch (img/anchor) can't carry the
+  // Authorization header, and requireAuth is header-only — so streaming endpoints
+  // must be loaded this way. Caller is responsible for URL.revokeObjectURL().
+  objectUrl: async (path: string): Promise<string> => {
+    await keycloak.updateToken(30).catch(() => {})
+    const res = await fetch(`${BASE}${path}`, { headers: { Authorization: `Bearer ${keycloak.token ?? ''}` } })
+    if (!res.ok) throw new Error(`Fetch failed: HTTP ${res.status}`)
+    return URL.createObjectURL(await res.blob())
+  },
 }
 
 export function tenantApi(tenantId: string) {

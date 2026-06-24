@@ -27,10 +27,22 @@ export interface FinTransaction {
   description: string
   merchant_name: string | null
   category: string
+  subcategory: string | null
+  entity_id: string | null
+  project_ref: string | null
+  property_ref: string | null
+  cost_centre: string | null
+  billable: boolean
+  notes: string | null
+  tags: string[]
   is_reconciled: boolean
   is_pending_review: boolean
   reference_number: string | null
   created_at: string
+  // AI categorisation suggestion — populated from fin_pending_review_queue on the
+  // transactions list endpoint when an unresolved review row exists (bank imports).
+  suggested_category?: string | null
+  confidence?: string | null
 }
 
 export interface NetWorthSnapshot {
@@ -307,6 +319,15 @@ export interface IntercompanyElimination {
   created_at: string
 }
 
+export interface CreditCard {
+  id: string
+  card_name: string
+  last_four: string | null
+  card_type: string | null
+  is_active: boolean
+  created_at: string
+}
+
 export type BankStatementJobStatus = 'PENDING' | 'PROCESSING' | 'COMPLETE' | 'PARTIAL' | 'FAILED'
 
 export type DocumentJobStatus = 'PENDING' | 'PROCESSING' | 'REVIEW' | 'APPROVED' | 'FAILED'
@@ -343,4 +364,140 @@ export interface BankStatementJob {
   completed_at: string | null
   created_at: string
   updated_at: string
+}
+
+// ── Accountant export rows (GET /finance/export/*) ──────────────────────────────
+// Field shapes mirror the SELECT lists in jag-api routes/finance/export.ts.
+// pg numeric columns arrive as strings; COUNT(...)::int columns arrive as numbers.
+
+export interface ExportTrialBalanceAccount {
+  account_code: string
+  account_name: string
+  account_type: string
+  normal_balance: string
+  owner_entity_id: string
+  total_debit_ttd: string
+  total_credit_ttd: string
+  net_ttd: string
+  entry_count: number
+}
+
+export interface ExportGlLine {
+  id: string
+  account_code: string
+  account_name: string
+  account_type: string
+  debit_amount: string | null
+  credit_amount: string | null
+  debit_ttd: string | null
+  credit_ttd: string | null
+  description: string | null
+}
+
+export interface ExportGlEntry {
+  id: string
+  entry_date: string
+  period_year: number
+  period_month: number
+  description: string | null
+  status: string
+  entry_source: string | null
+  owner_entity_id: string
+  currency: string
+  total_debit_ttd: string
+  total_credit_ttd: string
+  created_at: string
+  posted_at: string | null
+  reference_number: string | null
+  lines: ExportGlLine[]
+}
+
+export interface ExportExpense {
+  id: string
+  expense_date: string
+  description: string | null
+  category: string
+  status: string
+  amount: string
+  currency: string
+  amount_ttd: string | null
+  fx_rate_used: string | null
+  payment_method: string | null
+  owner_entity_id: string
+  submitted_at: string | null
+  approved_at: string | null
+  rejection_reason: string | null
+  journal_entry_id: string | null
+  created_at: string
+  debit_account_code: string | null
+  debit_account_name: string | null
+}
+
+export interface ExportInsurancePolicy {
+  id: string
+  policy_number: string
+  insurer_name: string
+  broker_name: string | null
+  policy_type: string
+  insured_asset_type: string | null
+  coverage_amount_ttd: string
+  premium_amount_ttd: string
+  premium_frequency: string
+  start_date: string | null
+  expiry_date: string | null
+  renewal_alert_days: number | null
+  is_active: boolean
+  owner_entity_id: string
+  total_premiums: number
+  due_premiums: number
+  overdue_premiums: number
+  total_paid_ttd: string
+  total_claims: number
+  open_claims: number
+  total_claimed_ttd: string
+  total_settled_ttd: string
+}
+
+export interface ExportPremium {
+  id: string
+  due_date: string
+  paid_date: string | null
+  amount_ttd: string
+  status: string
+  payment_method: string | null
+  policy_number: string
+  insurer_name: string
+  policy_type: string
+  owner_entity_id: string
+}
+
+export interface ExportClaim {
+  id: string
+  claim_reference: string
+  incident_date: string | null
+  claim_date: string
+  description: string | null
+  claimed_amount_ttd: string
+  settled_amount_ttd: string | null
+  status: string
+  settlement_date: string | null
+  policy_number: string
+  insurer_name: string
+  policy_type: string
+  owner_entity_id: string
+}
+
+export interface ExportIntercompany {
+  id: string
+  charge_date: string
+  description: string | null
+  charge_type: string
+  amount_ttd: string
+  currency: string
+  status: string
+  from_entity_id: string
+  to_entity_id: string
+  from_gl_entry_id: string | null
+  to_gl_entry_id: string | null
+  created_at: string
 }

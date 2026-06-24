@@ -3,12 +3,14 @@ import { NavLink, Outlet } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '../auth/AuthProvider'
 import i18n from '../i18n'
+import NotificationBell from '../components/NotificationBell'
 
 const NAV = [
   { to: '/dashboard',     key: 'nav.dashboard' },
   { to: '/finance',       key: 'nav.finance' },
   { to: '/ledger',        key: 'nav.ledger' },
   { to: '/reports',       key: 'nav.reports' },
+  { to: '/export',        key: 'nav.export' },
   { to: '/expenses',      key: 'nav.expenses' },
   { to: '/properties',    key: 'nav.properties' },
   { to: '/jabco',         key: 'nav.jabco' },
@@ -19,6 +21,9 @@ const NAV = [
   { to: '/dragonbridge',  key: 'nav.dragonbridge' },
   { to: '/nlcb',          key: 'nav.nlcb' },
   { to: '/docvault',      key: 'nav.docvault' },
+  { to: '/succession',    key: 'nav.succession' },
+  { to: '/family',        key: 'nav.family' },
+  { to: '/ownership',     key: 'nav.ownership' },
   { to: '/lifestyle',     key: 'nav.lifestyle' },
   { to: '/brian-admin',   key: 'nav.brianPortal' },
 ]
@@ -64,15 +69,21 @@ export default function AppShell() {
           <span className="text-sm font-semibold tracking-widest text-slate-400 uppercase">
             {t('nav.jagHoldings')}
           </span>
-          <button
-            className="md:hidden text-slate-400 hover:text-white p-1"
-            onClick={() => setSidebarOpen(false)}
-            aria-label={t('nav.closeNav')}
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
+          <div className="flex items-center gap-2">
+            {/* Desktop notification bell — mobile uses the top bar instance */}
+            <div className="hidden md:block">
+              <NotificationBell />
+            </div>
+            <button
+              className="md:hidden text-slate-400 hover:text-white p-1"
+              onClick={() => setSidebarOpen(false)}
+              aria-label={t('nav.closeNav')}
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
         </div>
         <nav className="flex-1 py-4 space-y-0.5 overflow-y-auto">
           {NAV.map(({ to, key }) => (
@@ -119,6 +130,7 @@ export default function AppShell() {
           <span className="text-sm font-semibold tracking-widest text-slate-400 uppercase flex-1">
             {t('nav.jagHoldings')}
           </span>
+          <NotificationBell />
           <LangToggle />
         </header>
 

@@ -130,6 +130,34 @@ export interface PropertyTenant {
   created_at: string
 }
 
+export type TenantDocType =
+  | 'national_id' | 'passport' | 'drivers_licence' | 'employment_letter' | 'payslip'
+  | 'company_reg' | 'bank_statement' | 'utility_bill' | 'reference_letter'
+  | 'tenancy_agreement' | 'other'
+
+export interface TenantDocument {
+  id: string
+  tenant_id: string
+  doc_type: TenantDocType
+  label: string
+  file_name: string
+  file_size_bytes: number | null
+  mime_type: string | null
+  notes: string | null
+  source: 'MANUAL' | 'APPLICATION'
+  application_id: string | null
+  created_at: string
+}
+
+export interface ApplicationDocument {
+  id: string
+  application_id: string
+  doc_type: string
+  label: string
+  file_name: string
+  created_at: string
+}
+
 export interface MaintenanceRequest {
   id: string
   category: string
@@ -281,6 +309,15 @@ export interface Unit {
   is_rented: boolean
   notes: string | null
   created_at: string
+  listing_status: 'VACANT' | 'LISTED' | 'OCCUPIED' | 'MAINTENANCE' | null
+  listing_description: string | null
+  wasa_included: boolean | null
+  electricity_included: boolean | null
+  internet_included: boolean | null
+  rent_amount: string | null
+  suggested_rent_recommended_ttd: string | null
+  booking_slug: string | null
+  listed_at: string | null
   // from join
   lease_id: string | null
   monthly_rent: string | null
@@ -290,6 +327,15 @@ export interface Unit {
   company_name: string | null
   is_company: boolean | null
   tenant_phone: string | null
+}
+
+export interface UnitPhoto {
+  id: string
+  object_key: string
+  url: string
+  caption: string | null
+  display_order: number
+  created_at: string
 }
 
 export interface FinancialSummary {

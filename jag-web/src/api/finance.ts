@@ -8,8 +8,17 @@ import type {
   IntercompanyCharge, IntercompanyElimination,
   InsurancePolicyType, InsuranceAssetType, PremiumFrequency,
   IntercompanyChargeType,
-  BankStatementJob, DocumentJob,
+  BankStatementJob, DocumentJob, CreditCard,
+  ExportTrialBalanceAccount, ExportGlEntry, ExportExpense,
+  ExportInsurancePolicy, ExportPremium, ExportClaim, ExportIntercompany,
 } from '../types/finance'
+
+// Query-string builder for the export endpoints — drops undefined/empty values.
+function exportQs(params: Record<string, string | number | undefined>): string {
+  const entries = Object.entries(params).filter(([, v]) => v !== undefined && v !== '')
+  if (entries.length === 0) return ''
+  return '?' + new URLSearchParams(entries.map(([k, v]) => [k, String(v)])).toString()
+}
 
 export const financeApi = {
   getAccounts: (params?: { owner_entity_id?: string; is_active?: 'true' | 'false' }) => {
@@ -24,6 +33,7 @@ export const financeApi = {
     category?: string
     date_from?: string
     date_to?: string
+    entity_id?: string
     limit?: number
     offset?: number
   }) => {
@@ -57,6 +67,14 @@ export const financeApi = {
 
   reconcileTransaction: (id: string, data: { is_reconciled: boolean }) =>
     api.patch<FinTransaction>(`/finance/transactions/${id}`, data),
+
+  patchTransaction: (id: string, data: {
+    category?: string; merchant_name?: string; is_reconciled?: boolean;
+    subcategory?: string | null; entity_id?: string | null;
+    project_ref?: string | null; property_ref?: string | null;
+    cost_centre?: string | null; billable?: boolean;
+    notes?: string | null; tags?: string[];
+  }) => api.patch<FinTransaction>(`/finance/transactions/${id}`, data),
 
   getInvestments: (params?: { owner_entity_id?: string; investment_type?: InvestmentType; currency?: string }) => {
     const qs = params
@@ -315,4 +333,51 @@ export const financeApi = {
       total_eliminated_ttd: string
     }>(`/finance/intercompany/consolidated${qs}`)
   },
+
+  // ── Credit / Debit Cards ──────────────────────────────────────────────────────
+
+  getCreditCards: (): Promise<CreditCard[]> =>
+    api.get('/finance/credit-cards'),
+
+  createCreditCard: (data: { card_name: string; last_four?: string; card_type?: string }): Promise<CreditCard> =>
+    api.post('/finance/credit-cards', data),
+
+  updateCreditCard: (id: string, data: { card_name?: string; last_four?: string; card_type?: string }): Promise<CreditCard> =>
+    api.patch(`/finance/credit-cards/${id}`, data),
+
+  deleteCreditCard: (id: string): Promise<{ deactivated: boolean }> =>
+    api.delete(`/finance/credit-cards/${id}`),
+
+  // ── Accountant exports (GET /finance/export/*) ────────────────────────────────
+  // Each method normalises its endpoint's envelope (wrapped object / paginated /
+  // bare array) to a flat row array (or { rows, total } for paginated views).
+
+  getExportTrialBalance: (params: { entity_id?: string; period_year?: number; period_month?: number }) =>
+    api.get<{ accounts: ExportTrialBalanceAccount[]; generated_at: string }>(
+      `/finance/export/trial-balance${exportQs(params)}`,
+    ).then(r => r.accounts),
+
+  getExportGlEntries: (params: { entity_id?: string; from?: string; to?: string; status?: string }) =>
+    api.get<{ entries: ExportGlEntry[]; total: number }>(
+      `/finance/export/gl-entries${exportQs({ ...params, limit: 500 })}`,
+    ).then(r => ({ rows: r.entries, total: r.total })),
+
+  getExportExpenses: (params: { from?: string; to?: string; status?: string }) =>
+    api.get<{ expenses: ExportExpense[]; total: number }>(
+      `/finance/export/expenses${exportQs({ ...params, limit: 500 })}`,
+    ).then(r => ({ rows: r.expenses, total: r.total })),
+
+  getExportInsurance: () =>
+    api.get<{ policies: ExportInsurancePolicy[]; generated_at: string }>(
+      '/finance/export/insurance',
+    ).then(r => r.policies),
+
+  getExportPremiums: (params: { from?: string; to?: string; status?: string }) =>
+    api.get<ExportPremium[]>(`/finance/export/insurance/premiums${exportQs(params)}`),
+
+  getExportClaims: (params: { status?: string }) =>
+    api.get<ExportClaim[]>(`/finance/export/insurance/claims${exportQs(params)}`),
+
+  getExportIntercompany: (params: { from?: string; to?: string; status?: string }) =>
+    api.get<ExportIntercompany[]>(`/finance/export/intercompany${exportQs(params)}`),
 }

@@ -3,7 +3,8 @@ import type {
   Property, PropertyTenant, PipelineItem, MaintenanceRequest,
   RentPayment, RentReceipt, UtilityBill, VendorInvoice, Lease, Mortgage,
   InsurancePolicy, PropertyTaxRecord, Inspection, ArrearsRecord, LeaseExpiryRecord,
-  FinancialSummary, PropertyDocument, UtilityAccount, Unit, PropertyValuationHistory,
+  FinancialSummary, PropertyDocument, UtilityAccount, Unit, UnitPhoto, PropertyValuationHistory,
+  TenantDocument, TenantDocType,
 } from '../types/properties'
 
 function qs(params?: Record<string, string | number | undefined>): string {
@@ -103,6 +104,23 @@ export const propertiesApi = {
 
   updateTenant: (id: string, body: Record<string, unknown>) =>
     api.patch<PropertyTenant>(`/properties/tenants/${id}`, body),
+
+  getTenantDocuments: (tenantId: string) =>
+    api.get<TenantDocument[]>(`/properties/tenants/${tenantId}/documents`),
+
+  uploadTenantDocument: (tenantId: string, docType: TenantDocType, file: File, notes?: string) => {
+    const form = new FormData()
+    form.append('file', file)
+    form.append('doc_type', docType)
+    if (notes) form.append('notes', notes)
+    return api.postForm<TenantDocument>(`/properties/tenants/${tenantId}/documents`, form)
+  },
+
+  downloadTenantDocument: (tenantId: string, docId: string, fileName: string) =>
+    api.download(`/properties/tenants/${tenantId}/documents/${docId}/download`, fileName),
+
+  deleteTenantDocument: (tenantId: string, docId: string) =>
+    api.delete<{ deleted: boolean; id: string }>(`/properties/tenants/${tenantId}/documents/${docId}`),
 
   getPipeline: (params?: { stage?: string; page?: number; limit?: number }) =>
     api.get<{ pipeline: PipelineItem[]; pagination: { page: number; limit: number; total: number; pages: number } }>(
@@ -206,6 +224,22 @@ export const propertiesApi = {
 
   patchUnit: (propertyId: string, id: string, body: Record<string, unknown>) =>
     api.patch<Unit>(`/properties/${propertyId}/units/${id}`, body),
+
+  // ── Unit listing actions (mounted at /properties/units/:id/) ─────────────────
+  listUnit:   (unitId: string) => api.post<Unit>(`/properties/units/${unitId}/list`, {}),
+  unlistUnit: (unitId: string) => api.post<Unit>(`/properties/units/${unitId}/unlist`, {}),
+  suggestUnitPrice: (unitId: string) => api.post<{ min: number; max: number; recommended: number }>(`/properties/units/${unitId}/suggest-price`, {}),
+  updateListingInfo: (unitId: string, body: { listing_description?: string | null; wasa_included?: boolean; electricity_included?: boolean; internet_included?: boolean; rent_amount?: number }) =>
+    api.patch<Unit>(`/properties/units/${unitId}/listing-info`, body),
+
+  // ── Unit photos ──────────────────────────────────────────────────────────────
+  getUnitPhotos: (unitId: string) => api.get<UnitPhoto[]>(`/properties/units/${unitId}/photos`),
+  getPhotoUploadUrl: (unitId: string, filename: string) =>
+    api.post<{ upload_url: string; object_key: string }>(`/properties/units/${unitId}/photos/upload-url`, { filename }),
+  confirmUnitPhoto: (unitId: string, body: { object_key: string; caption?: string; display_order?: number }) =>
+    api.post<UnitPhoto>(`/properties/units/${unitId}/photos`, body),
+  deleteUnitPhoto: (unitId: string, photoId: string) =>
+    api.delete<{ deleted: boolean }>(`/properties/units/${unitId}/photos/${photoId}`),
 
   // ── Late Fee ─────────────────────────────────────────────────────────────────
   chargeLateFee: (propertyId: string, paymentId: string, amount: number) =>

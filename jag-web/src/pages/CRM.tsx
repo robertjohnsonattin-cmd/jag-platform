@@ -9,8 +9,31 @@ import ConfirmDeleteModal from '../components/ui/ConfirmDeleteModal'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+const TT_TZ = 'America/Port_of_Spain'
+
 const fmtDate = (d: string) =>
-  new Date(d).toLocaleDateString('en-TT', { day: '2-digit', month: 'short', year: 'numeric' })
+  new Date(d).toLocaleDateString('en-TT', { day: '2-digit', month: 'short', year: 'numeric', timeZone: TT_TZ })
+
+const fmtDateTime = (d: string) =>
+  new Date(d).toLocaleString('en-TT', {
+    day: '2-digit', month: 'short', year: 'numeric',
+    hour: '2-digit', minute: '2-digit',
+    timeZone: TT_TZ,
+  })
+
+// Return current TT time formatted for a datetime-local input
+const nowTT = () => {
+  const parts = new Intl.DateTimeFormat('sv-SE', {
+    timeZone: TT_TZ,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', hour12: false,
+  }).formatToParts(new Date())
+  const get = (type: string) => parts.find(p => p.type === type)?.value ?? ''
+  return `${get('year')}-${get('month')}-${get('day')}T${get('hour')}:${get('minute')}`
+}
+
+// Treat a datetime-local value as TT time (UTC-4, no DST) → UTC ISO string
+const ttLocalToISO = (local: string) => new Date(`${local}:00-04:00`).toISOString()
 
 
 // ── Log Interaction Modal ─────────────────────────────────────────────────────
@@ -27,9 +50,7 @@ function LogInteractionModal({
   const [type, setType] = useState<InteractionType>('CALL')
   const [subject, setSubject] = useState('')
   const [notes, setNotes] = useState('')
-  const [occurredAt, setOccurredAt] = useState(() =>
-    new Date().toISOString().slice(0, 16)
-  )
+  const [occurredAt, setOccurredAt] = useState(() => nowTT())
   const [followUpDate, setFollowUpDate] = useState('')
   const [error, setError] = useState<string | null>(null)
 
@@ -40,7 +61,7 @@ function LogInteractionModal({
         interaction_type: type,
         subject,
         notes: notes || undefined,
-        occurred_at: new Date(occurredAt).toISOString(),
+        occurred_at: ttLocalToISO(occurredAt),
         follow_up_date: followUpDate || undefined,
       }),
     onSuccess: () => {
@@ -70,7 +91,7 @@ function LogInteractionModal({
               onChange={e => setType(e.target.value as InteractionType)}
               className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-white text-sm"
             >
-              {(['CALL', 'EMAIL', 'MEETING', 'SITE_VISIT', 'OTHER'] as InteractionType[]).map(tp => (
+              {(['CALL', 'WHATSAPP_CALL', 'WHATSAPP_MESSAGE', 'EMAIL', 'MEETING', 'SITE_VISIT', 'OTHER'] as InteractionType[]).map(tp => (
                 <option key={tp} value={tp}>{tp.replace('_', ' ')}</option>
               ))}
             </select>
@@ -975,9 +996,18 @@ function ContactPanel({ contactId, onClose }: { contactId: string; onClose: () =
             <div key={ix.id} className="border border-slate-700 rounded p-3 mb-2 space-y-0.5">
               <div className="flex items-center justify-between">
                 <span className="text-slate-300 text-sm font-medium">{ix.subject}</span>
-                <span className="text-slate-500 text-xs">{fmtDate(ix.occurred_at)}</span>
+                <span className="text-slate-500 text-xs">{fmtDateTime(ix.occurred_at)}</span>
               </div>
               <p className="text-slate-500 text-xs">{ix.interaction_type}</p>
+              {ix.follow_up_date && (
+                <p className="text-xs mt-1 flex items-center gap-1">
+                  <span className="text-slate-400">Follow-up: {fmtDate(ix.follow_up_date)}</span>
+                  {ix.calendar_event_id
+                    ? <span className="text-green-500" title="Synced to Google Calendar">&#10003;</span>
+                    : <span className="text-amber-400" title="Calendar sync failed — not in Google Calendar">&#9888;</span>
+                  }
+                </p>
+              )}
               {ix.notes && <p className="text-slate-400 text-xs mt-1">{ix.notes}</p>}
             </div>
           ))}

@@ -1,14 +1,21 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { propertiesApi } from '../../api/properties'
-import type { PropertyTenant } from '../../types/properties'
+import type { PropertyTenant, TenantDocument, TenantDocType } from '../../types/properties'
 import { fmtDate } from '../../lib/entities'
 import ConfirmDeleteModal from '../ui/ConfirmDeleteModal'
 
 const cls = 'w-full bg-slate-700 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500'
 
 const ID_TYPES = ['TT_NIC', 'PASSPORT', 'COMPANY_REG', 'DRIVERS_LICENCE', 'OTHER'] as const
+
+const TENANT_DOC_TYPES: TenantDocType[] = [
+  'national_id','passport','drivers_licence','employment_letter','payslip',
+  'company_reg','bank_statement','utility_bill','reference_letter','tenancy_agreement','other',
+]
+
+// ── Add Tenant Modal ──────────────────────────────────────────────────────────
 
 function AddTenantModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
   const { t } = useTranslation()
@@ -124,6 +131,8 @@ function AddTenantModal({ onClose, onCreated }: { onClose: () => void; onCreated
     </div>
   )
 }
+
+// ── Edit Tenant Modal ─────────────────────────────────────────────────────────
 
 function EditTenantModal({ tenant, onClose, onSaved }: { tenant: PropertyTenant; onClose: () => void; onSaved: () => void }) {
   const { t } = useTranslation()
@@ -247,6 +256,165 @@ function EditTenantModal({ tenant, onClose, onSaved }: { tenant: PropertyTenant;
   )
 }
 
+// ── Tenant Documents Modal ────────────────────────────────────────────────────
+
+const DOC_TYPE_LABELS: Record<string, string> = {
+  national_id: 'National ID', passport: 'Passport', drivers_licence: "Driver's Licence",
+  employment_letter: 'Employment Letter', payslip: 'Payslip', company_reg: 'Company Registration',
+  bank_statement: 'Bank Statement', utility_bill: 'Utility Bill', reference_letter: 'Reference Letter',
+  tenancy_agreement: 'Tenancy Agreement', other: 'Other',
+}
+
+function TenantDocsModal({ tenant, onClose }: { tenant: PropertyTenant; onClose: () => void }) {
+  const { t } = useTranslation()
+  const qc = useQueryClient()
+  const fileRef = useRef<HTMLInputElement>(null)
+  const [docType, setDocType] = useState<TenantDocType>('national_id')
+  const [uploading, setUploading] = useState(false)
+  const [uploadError, setUploadError] = useState<string | null>(null)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
+
+  const tenantName = tenant.is_company
+    ? (tenant.company_name ?? 'Tenant')
+    : `${tenant.first_name}${tenant.last_name ? ` ${tenant.last_name}` : ''}`
+
+  const { data: docs = [], isLoading } = useQuery({
+    queryKey: ['tenant-docs', tenant.id],
+    queryFn: () => propertiesApi.getTenantDocuments(tenant.id),
+  })
+
+  const deleteMut = useMutation({
+    mutationFn: (docId: string) => propertiesApi.deleteTenantDocument(tenant.id, docId),
+    onSuccess: () => {
+      setDeletingId(null)
+      void qc.invalidateQueries({ queryKey: ['tenant-docs', tenant.id] })
+    },
+  })
+
+  async function handleUpload(file: File) {
+    setUploading(true)
+    setUploadError(null)
+    try {
+      await propertiesApi.uploadTenantDocument(tenant.id, docType, file)
+      void qc.invalidateQueries({ queryKey: ['tenant-docs', tenant.id] })
+    } catch {
+      setUploadError(t('tenants.docs.uploadError', 'Upload failed. Please try again.'))
+    } finally {
+      setUploading(false)
+      if (fileRef.current) fileRef.current.value = ''
+    }
+  }
+
+  const [downloading, setDownloading] = useState<string | null>(null)
+  async function handleDownload(doc: TenantDocument) {
+    setDownloading(doc.id)
+    try { await propertiesApi.downloadTenantDocument(tenant.id, doc.id, doc.file_name) }
+    catch { /* silent — browser will show network error if needed */ }
+    finally { setDownloading(null) }
+  }
+
+  const sourceTag = (doc: TenantDocument) =>
+    doc.source === 'APPLICATION'
+      ? <span className="ml-1.5 text-xs bg-blue-900/50 text-blue-300 border border-blue-700 px-1.5 py-0.5 rounded">{t('tenants.docs.fromApp', 'from app')}</span>
+      : null
+
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
+      <div className="bg-slate-800 border border-slate-700 rounded-xl w-full max-w-2xl p-6 shadow-2xl max-h-[90vh] flex flex-col">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h2 className="text-lg font-semibold text-white">{t('tenants.docs.title', 'Documents')}</h2>
+            <p className="text-xs text-slate-400 mt-0.5">{tenantName}</p>
+          </div>
+          <button onClick={onClose} className="text-slate-500 hover:text-slate-300 text-xl leading-none">×</button>
+        </div>
+
+        {/* Upload row */}
+        <div className="flex gap-2 mb-4 flex-wrap">
+          <select
+            value={docType}
+            onChange={e => setDocType(e.target.value as TenantDocType)}
+            className="bg-slate-700 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          >
+            {TENANT_DOC_TYPES.map(dt => (
+              <option key={dt} value={dt}>{t(`tenants.docs.types.${dt}`, DOC_TYPE_LABELS[dt])}</option>
+            ))}
+          </select>
+          <input
+            ref={fileRef}
+            type="file"
+            accept=".pdf,.jpg,.jpeg,.png"
+            className="hidden"
+            onChange={e => { const f = e.target.files?.[0]; if (f) void handleUpload(f) }}
+          />
+          <button
+            onClick={() => fileRef.current?.click()}
+            disabled={uploading}
+            className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-sm rounded-lg transition-colors"
+          >
+            {uploading ? t('common.uploading', 'Uploading…') : t('tenants.docs.uploadBtn', '+ Upload')}
+          </button>
+          {uploadError && <p className="text-red-400 text-xs self-center">{uploadError}</p>}
+        </div>
+
+        {/* Doc list */}
+        <div className="flex-1 overflow-y-auto">
+          {isLoading && <p className="text-slate-400 text-sm">{t('common.loading')}</p>}
+          {!isLoading && docs.length === 0 && (
+            <p className="text-slate-500 text-sm text-center py-8">{t('tenants.docs.none', 'No documents uploaded yet.')}</p>
+          )}
+          {docs.length > 0 && (
+            <div className="space-y-2">
+              {docs.map((doc: TenantDocument) => (
+                <div key={doc.id} className="flex items-center gap-3 bg-slate-700/50 rounded-lg px-3 py-2.5 border border-slate-700">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1 flex-wrap">
+                      <span className="text-xs font-medium text-slate-300 bg-slate-600 px-1.5 py-0.5 rounded">
+                        {t(`tenants.docs.types.${doc.doc_type}`, DOC_TYPE_LABELS[doc.doc_type] ?? doc.doc_type)}
+                      </span>
+                      {sourceTag(doc)}
+                    </div>
+                    <p className="text-sm text-slate-200 mt-1 truncate">{doc.file_name}</p>
+                    <p className="text-xs text-slate-500">{fmtDate(doc.created_at)}</p>
+                  </div>
+                  <div className="flex gap-2 flex-shrink-0">
+                    <button
+                      onClick={() => void handleDownload(doc)}
+                      disabled={downloading === doc.id}
+                      className="text-xs text-blue-400 hover:text-blue-300 disabled:opacity-50 transition-colors"
+                    >
+                      {downloading === doc.id ? '…' : t('common.download', 'Download')}
+                    </button>
+                    {deletingId === doc.id ? (
+                      <span className="text-xs text-red-400">
+                        <button onClick={() => deleteMut.mutate(doc.id)} className="hover:text-red-300">{t('common.yes', 'Yes')}</button>
+                        {' / '}
+                        <button onClick={() => setDeletingId(null)} className="hover:text-slate-200">{t('common.no', 'No')}</button>
+                      </span>
+                    ) : (
+                      <button
+                        onClick={() => setDeletingId(doc.id)}
+                        className="text-xs text-slate-600 hover:text-red-400 transition-colors"
+                        title={t('tenants.docs.delete', 'Delete document')}
+                      >&#x1F5D1;</button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="mt-4 pt-4 border-t border-slate-700 flex justify-end">
+          <button onClick={onClose} className="px-4 py-2 text-sm text-slate-400 hover:text-white transition-colors">{t('common.close', 'Close')}</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Main Panel ────────────────────────────────────────────────────────────────
+
 export default function TenantsPanel() {
   const { t } = useTranslation()
   const [search, setSearch] = useState('')
@@ -254,6 +422,7 @@ export default function TenantsPanel() {
   const [showAdd, setShowAdd] = useState(false)
   const [editingTenant, setEditingTenant] = useState<PropertyTenant | null>(null)
   const [deletingTenant, setDeletingTenant] = useState<PropertyTenant | null>(null)
+  const [docsForTenant, setDocsForTenant] = useState<PropertyTenant | null>(null)
   const qc = useQueryClient()
 
   const handleSearch = (val: string) => {
@@ -316,6 +485,11 @@ export default function TenantsPanel() {
                   <td className="px-4 py-3 text-xs text-slate-500">{fmtDate(tn.created_at)}</td>
                   <td className="px-4 py-3 text-right flex gap-3 justify-end items-center">
                     <button
+                      onClick={() => setDocsForTenant(tn)}
+                      className="text-xs text-slate-500 hover:text-green-400 transition-colors"
+                      title={t('tenants.docs.title', 'Documents')}
+                    >{t('tenants.docsBtn', 'Docs')}</button>
+                    <button
                       onClick={() => setEditingTenant(tn)}
                       className="text-xs text-slate-500 hover:text-blue-400 transition-colors"
                     >{t('tenants.editBtn')}</button>
@@ -333,6 +507,7 @@ export default function TenantsPanel() {
       )}
 
       {showAdd && <AddTenantModal onClose={() => setShowAdd(false)} onCreated={refresh} />}
+      {docsForTenant && <TenantDocsModal tenant={docsForTenant} onClose={() => setDocsForTenant(null)} />}
       {deletingTenant && (
         <ConfirmDeleteModal
           label={deletingTenant.is_company ? (deletingTenant.company_name ?? 'Tenant') : `${deletingTenant.first_name}${deletingTenant.last_name ? ` ${deletingTenant.last_name}` : ''}`}

@@ -10,6 +10,7 @@ import InsurancePanel from '../components/finance/InsurancePanel'
 import IntercompanyPanel from '../components/finance/IntercompanyPanel'
 import BankStatementsPanel from '../components/finance/BankStatementsPanel'
 import DocumentsPanel from '../components/finance/DocumentsPanel'
+import CardsPanel from '../components/finance/CardsPanel'
 
 const TABS = [
   { id: 'accounts',        key: 'finance.tabs.accounts' },
@@ -22,6 +23,7 @@ const TABS = [
   { id: 'intercompany',    key: 'finance.tabs.intercompany' },
   { id: 'net-worth',       key: 'finance.tabs.netWorth' },
   { id: 'fx-rates',        key: 'finance.tabs.fxRates' },
+  { id: 'cards',           key: 'finance.tabs.cards' },
 ] as const
 
 type TabId = (typeof TABS)[number]['id']
@@ -60,6 +62,7 @@ export default function Finance() {
       {tab === 'intercompany' && <IntercompanyPanel />}
       {tab === 'net-worth'    && <NetWorthPanel />}
       {tab === 'fx-rates'     && <FxRatesPanel />}
+      {tab === 'cards'        && <CardsPanel />}
     </div>
   )
 }

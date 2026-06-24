@@ -2,6 +2,7 @@ import { useState, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { api } from '../api/client'
+import { familyApi, type FamilyMember } from '../api/family'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -106,15 +107,32 @@ function mimeIcon(mime: string): string {
   return '📄'
 }
 
+// Shared family-member directory (cached by query key — deduped across components).
+function useFamilyMembers() {
+  const { data: members = [] } = useQuery<FamilyMember[]>({
+    queryKey: ['family-members'],
+    queryFn: () => familyApi.list(),
+    staleTime: 60_000,
+  })
+  const nameOf = (id: string | null | undefined): string | null => {
+    if (!id) return null
+    const m = members.find(x => x.id === id)
+    return m ? `${m.first_name} ${m.last_name}` : null
+  }
+  return { members, nameOf }
+}
+
 // ── Upload Modal ──────────────────────────────────────────────────────────────
 
 function UploadModal({ onClose }: { onClose: () => void }) {
   const { t } = useTranslation()
   const qc = useQueryClient()
   const fileRef = useRef<HTMLInputElement>(null)
+  const { members } = useFamilyMembers()
   const [file, setFile] = useState<File | null>(null)
   const [form, setForm] = useState({
     title: '', document_type: '' as DocType | '',
+    family_member_id: '',
     expires_date: '', is_data_room: false,
     data_room_entity: '', notes: '',
   })
@@ -157,6 +175,7 @@ function UploadModal({ onClose }: { onClose: () => void }) {
         storage_path:     uploaded.key,
         mime_type:        uploaded.content_type,
         file_size_bytes:  uploaded.size,
+        family_member_id: form.family_member_id || undefined,
         expires_date:     form.expires_date || undefined,
         is_data_room:     form.is_data_room,
         data_room_entity: form.is_data_room && form.data_room_entity ? form.data_room_entity : undefined,
@@ -244,6 +263,16 @@ function UploadModal({ onClose }: { onClose: () => void }) {
           )}
 
           <div>
+            <label className="block text-xs text-slate-400 mb-1">{t('docvault.belongsTo')}</label>
+            <select value={form.family_member_id} onChange={set('family_member_id')} className={cls}>
+              <option value="">{t('docvault.unassigned')}</option>
+              {members.map(m => (
+                <option key={m.id} value={m.id}>{m.first_name} {m.last_name}</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
             <label className="block text-xs text-slate-400 mb-1">{t('common.notes')}</label>
             <textarea value={form.notes} onChange={set('notes')} rows={2} className={cls} />
           </div>
@@ -277,7 +306,15 @@ function UploadModal({ onClose }: { onClose: () => void }) {
 function DocDetailPanel({ doc, onClose }: { doc: DocFile; onClose: () => void }) {
   const { t } = useTranslation()
   const qc = useQueryClient()
+  const { members } = useFamilyMembers()
   const [deleting, setDeleting] = useState(false)
+  const [downloading, setDownloading] = useState(false)
+
+  const assign = useMutation({
+    mutationFn: (memberId: string | null) =>
+      api.patch(`/docvault/files/${doc.id}`, { family_member_id: memberId }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['docvault-files'] }),
+  })
 
   const { mutate: deleteDoc, isPending: isDeleting } = useMutation({
     mutationFn: async () => {
@@ -293,9 +330,19 @@ function DocDetailPanel({ doc, onClose }: { doc: DocFile; onClose: () => void })
     },
   })
 
-  const downloadUrl = `/api/v1/files/download?bucket=${BUCKET_DOCUMENTS}&key=${encodeURIComponent(doc.storage_path)}`
   const expired     = isExpired(doc.expires_date)
   const expiring    = isExpiringSoon(doc.expires_date)
+
+  // Authenticated download — fetch with the Bearer token then save as a blob.
+  // A plain <a href> can't carry the Authorization header (requireAuth is header-only).
+  const handleDownload = async () => {
+    setDownloading(true)
+    try {
+      await api.download(`/files/download?bucket=${BUCKET_DOCUMENTS}&key=${encodeURIComponent(doc.storage_path)}`, doc.file_name)
+    } finally {
+      setDownloading(false)
+    }
+  }
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -340,6 +387,21 @@ function DocDetailPanel({ doc, onClose }: { doc: DocFile; onClose: () => void })
           ))}
         </div>
 
+        {/* Belongs to (family member) — assign / reassign */}
+        <div>
+          <p className="text-slate-500 text-xs mb-1">{t('docvault.belongsTo')}</p>
+          <select
+            value={doc.family_member_id ?? ''}
+            disabled={assign.isPending}
+            onChange={e => assign.mutate(e.target.value || null)}
+            className="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-orange-500 disabled:opacity-50">
+            <option value="">{t('docvault.unassigned')}</option>
+            {members.map(m => (
+              <option key={m.id} value={m.id}>{m.first_name} {m.last_name}</option>
+            ))}
+          </select>
+        </div>
+
         {doc.notes && (
           <div>
             <p className="text-slate-500 text-xs mb-1">{t('common.notes')}</p>
@@ -349,10 +411,10 @@ function DocDetailPanel({ doc, onClose }: { doc: DocFile; onClose: () => void })
 
         {/* Actions */}
         <div className="flex flex-col gap-2 pt-2">
-          <a href={downloadUrl} target="_blank" rel="noreferrer"
-            className="flex items-center justify-center gap-2 py-2.5 bg-blue-700 hover:bg-blue-600 text-white text-sm rounded-lg transition-colors">
-            {t('docvault.downloadView')}
-          </a>
+          <button onClick={handleDownload} disabled={downloading}
+            className="flex items-center justify-center gap-2 py-2.5 bg-blue-700 hover:bg-blue-600 disabled:opacity-50 text-white text-sm rounded-lg transition-colors">
+            {downloading ? t('common.loading') : t('docvault.downloadView')}
+          </button>
 
           {!deleting ? (
             <button onClick={() => setDeleting(true)}
@@ -381,18 +443,21 @@ function DocDetailPanel({ doc, onClose }: { doc: DocFile; onClose: () => void })
 
 export default function DocVault() {
   const { t } = useTranslation()
+  const { members } = useFamilyMembers()
   const [typeFilter, setTypeFilter] = useState<DocType | ''>('')
   const [dataRoomFilter, setDataRoomFilter] = useState<'' | 'true' | 'false'>('')
+  const [memberFilter, setMemberFilter] = useState('')
   const [search, setSearch] = useState('')
   const [selected, setSelected] = useState<DocFile | null>(null)
   const [showUpload, setShowUpload] = useState(false)
 
   const { data: files = [], isLoading } = useQuery({
-    queryKey: ['docvault-files', typeFilter, dataRoomFilter],
+    queryKey: ['docvault-files', typeFilter, dataRoomFilter, memberFilter],
     queryFn: () => {
       const q = new URLSearchParams()
       if (typeFilter)       q.set('document_type', typeFilter)
       if (dataRoomFilter)   q.set('is_data_room',  dataRoomFilter)
+      if (memberFilter)     q.set('family_member_id', memberFilter)
       const qs = q.toString()
       return api.get<DocFile[]>(`/docvault/files${qs ? `?${qs}` : ''}`)
     },
@@ -461,6 +526,13 @@ export default function DocVault() {
           <option value="">{t('docvault.allDocuments')}</option>
           <option value="true">{t('docvault.dataRoomOnly')}</option>
           <option value="false">{t('docvault.personalOnly')}</option>
+        </select>
+        <select value={memberFilter} onChange={e => setMemberFilter(e.target.value)}
+          className="bg-slate-700 border border-slate-600 rounded-lg px-3 py-1.5 text-white text-sm">
+          <option value="">{t('docvault.filterByMember')}</option>
+          {members.map(m => (
+            <option key={m.id} value={m.id}>{m.first_name} {m.last_name}</option>
+          ))}
         </select>
         <span className="text-slate-500 text-sm ml-auto">{t('docvault.documentCount', { count: displayed.length })}</span>
       </div>

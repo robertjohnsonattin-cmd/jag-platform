@@ -1,18 +1,31 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { imsApi } from '../api/ims'
+import { glApi } from '../api/gl'
+import { tenantApi } from '../api/client'
 import ConfirmDeleteModal from '../components/ui/ConfirmDeleteModal'
+import AuthedImg from '../components/AuthedImg'
 import type {
   Item, ItemDetail,
   ItemCondition, MovementType,
   StockTakeSummary, StockTakeLine, StockTakeStatus,
   DepreciationSchedule, Vehicle, VehicleServiceLog,
+  WorkOrder, WorkOrderStatus, PMSchedule,
+  FuelLog, OperatingCost, VehicleTCO,
+  ComplianceDoc, VehicleDisposal,
 } from '../types/ims'
+import type { GlAccount } from '../types/gl'
 import { VEHICLE_OWNER_OPTIONS } from '../types/ims'
+import { ENTITY_NAMES } from '../lib/entities'
+
+const ENTITY_OPTIONS = Object.entries(ENTITY_NAMES)
+  .filter(([id]) => id !== '00000000-0000-0000-0000-000000000000')
+  .map(([id, name]) => ({ id, name }))
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 const fmt = new Intl.NumberFormat('en-TT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const fmtMoney = (v: number | null, currency = 'TTD') =>
   v == null ? '—' : `${currency} ${fmt.format(v)}`
@@ -245,163 +258,6 @@ function CreateLocationModal({ onClose, onCreated }: { onClose: () => void; onCr
 
 const SERVICE_TYPE_OPTIONS = ['OIL_CHANGE','FULL_SERVICE','TYRES','BRAKES','INSPECTION','WASH','OTHER'] as const
 
-// ── Log Service Modal ─────────────────────────────────────────────────────────
-
-function LogServiceModal({ vehicle, onClose }: { vehicle: Vehicle; onClose: () => void }) {
-  const qc = useQueryClient()
-  const { t } = useTranslation()
-  const todayStr = new Date().toISOString().split('T')[0]
-  const [serviceDate, setServiceDate] = useState(todayStr)
-  const [mileage, setMileage] = useState(String(vehicle.current_mileage_km ?? ''))
-  const [intervalDays, setIntervalDays] = useState(String(vehicle.service_interval_days))
-  const [serviceType, setServiceType] = useState('OTHER')
-  const [description, setDescription] = useState('')
-  const [costTtd, setCostTtd] = useState('')
-  const [performedBy, setPerformedBy] = useState('')
-  const [saving, setSaving] = useState(false)
-  const [error, setError] = useState('')
-
-  const submit = async () => {
-    setSaving(true); setError('')
-    try {
-      await imsApi.logVehicleService(vehicle.id, {
-        service_date: serviceDate,
-        service_type: serviceType,
-        service_interval_days: Number(intervalDays),
-        mileage_km: mileage ? Number(mileage) : undefined,
-        description: description || undefined,
-        cost_ttd: costTtd ? Number(costTtd) : undefined,
-        performed_by: performedBy || undefined,
-      })
-      qc.invalidateQueries({ queryKey: ['ims-vehicles'] })
-      qc.invalidateQueries({ queryKey: ['ims-vehicle-service-log', vehicle.id] })
-      onClose()
-    } catch (e) { setError((e as Error).message); setSaving(false) }
-  }
-
-  const nextDate = (() => {
-    const d = new Date(serviceDate + 'T00:00:00Z')
-    d.setUTCDate(d.getUTCDate() + Number(intervalDays))
-    return d.toISOString().split('T')[0]
-  })()
-
-  return (
-    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[60] p-4">
-      <div className="bg-slate-800 border border-slate-700 rounded-xl w-full max-w-md p-5 shadow-2xl">
-        <h3 className="text-base font-semibold mb-1 text-white">{t('inv.logServiceTitle')}</h3>
-        <p className="text-xs text-slate-400 mb-4">{vehicle.registration_number} — {vehicle.make} {vehicle.model}</p>
-        <div className="space-y-3">
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs text-slate-400 mb-1">{t('inv.serviceDate')} *</label>
-              <input type="date" value={serviceDate} onChange={e => setServiceDate(e.target.value)} className={cls} />
-            </div>
-            <div>
-              <label className="block text-xs text-slate-400 mb-1">{t('inv.serviceType')}</label>
-              <select value={serviceType} onChange={e => setServiceType(e.target.value)} className={cls}>
-                {SERVICE_TYPE_OPTIONS.map(opt => <option key={opt} value={opt}>{opt.replace('_',' ')}</option>)}
-              </select>
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs text-slate-400 mb-1">{t('inv.serviceIntervalDays')}</label>
-              <input type="number" min="1" max="3650" value={intervalDays} onChange={e => setIntervalDays(e.target.value)} className={cls} />
-              <p className="text-xs text-slate-500 mt-1">{t('inv.nextServiceDue')} <span className="text-orange-400 font-medium">{fmtDate(nextDate)}</span></p>
-            </div>
-            <div>
-              <label className="block text-xs text-slate-400 mb-1">{t('inv.currentMileageKm')}</label>
-              <input type="number" min="0" value={mileage} onChange={e => setMileage(e.target.value)} className={cls} />
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs text-slate-400 mb-1">{t('inv.serviceCostTTD')}</label>
-              <input type="number" min="0" step="0.01" value={costTtd} onChange={e => setCostTtd(e.target.value)} className={cls} placeholder="0.00" />
-            </div>
-            <div>
-              <label className="block text-xs text-slate-400 mb-1">{t('inv.performedBy')}</label>
-              <input value={performedBy} onChange={e => setPerformedBy(e.target.value)} className={cls} placeholder={t('inv.performedByPlaceholder')} />
-            </div>
-          </div>
-          <div>
-            <label className="block text-xs text-slate-400 mb-1">{t('inv.serviceDescription')}</label>
-            <textarea value={description} onChange={e => setDescription(e.target.value)} rows={2}
-              className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-orange-500 resize-none" />
-          </div>
-          {error && <p className="text-red-400 text-xs">{error}</p>}
-        </div>
-        <div className="flex gap-3 mt-4">
-          <button onClick={submit} disabled={saving}
-            className="flex-1 py-2 bg-orange-600 hover:bg-orange-500 disabled:opacity-50 text-white text-sm rounded-lg">
-            {saving ? t('common.saving') : t('inv.saveServiceLog')}
-          </button>
-          <button onClick={onClose} className="px-4 py-2 text-slate-400 hover:text-white text-sm">{t('common.cancel')}</button>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-// ── Service History Modal ──────────────────────────────────────────────────────
-
-function ServiceHistoryModal({ vehicle, onClose }: { vehicle: Vehicle; onClose: () => void }) {
-  const { t } = useTranslation()
-  const { data: logs, isLoading } = useQuery<VehicleServiceLog[]>({
-    queryKey: ['ims-vehicle-service-log', vehicle.id],
-    queryFn: () => imsApi.getVehicleServiceLog(vehicle.id),
-  })
-
-  const fmt2 = new Intl.NumberFormat('en-TT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-
-  return (
-    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[60] p-4">
-      <div className="bg-slate-800 border border-slate-700 rounded-xl w-full max-w-2xl shadow-2xl flex flex-col max-h-[80vh]">
-        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-700 flex-shrink-0">
-          <div>
-            <h3 className="text-base font-semibold text-white">{t('inv.serviceHistoryTitle')}</h3>
-            <p className="text-xs text-slate-400">{vehicle.registration_number} — {vehicle.make} {vehicle.model}</p>
-          </div>
-          <button onClick={onClose} className="text-slate-400 hover:text-white text-xl leading-none">&times;</button>
-        </div>
-        <div className="flex-1 overflow-auto">
-          {isLoading && <div className="flex items-center justify-center h-20 text-slate-400 text-sm">{t('common.loading')}</div>}
-          {!isLoading && (!logs || logs.length === 0) && (
-            <div className="flex items-center justify-center h-20 text-slate-500 text-sm">{t('inv.noServiceHistory')}</div>
-          )}
-          {logs && logs.length > 0 && (
-            <table className="w-full text-sm">
-              <thead className="text-slate-400 text-xs uppercase tracking-wide border-b border-slate-700 sticky top-0 bg-slate-800">
-                <tr>
-                  {(['date','type','mileage','cost','performedBy','description'] as const).map(key => (
-                    <th key={key} className="px-4 py-2.5 text-left font-medium">{t(`inv.svcLog_${key}`)}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {logs.map(log => (
-                  <tr key={log.id} className="border-b border-slate-700/50 hover:bg-slate-700/20">
-                    <td className="px-4 py-2.5 text-white">{fmtDate(log.service_date)}</td>
-                    <td className="px-4 py-2.5">
-                      <span className="px-2 py-0.5 rounded bg-slate-700 text-slate-300 text-xs">{log.service_type.replace('_',' ')}</span>
-                    </td>
-                    <td className="px-4 py-2.5 text-slate-300">{log.mileage_km != null ? `${log.mileage_km.toLocaleString()} km` : '—'}</td>
-                    <td className="px-4 py-2.5 text-slate-300">{log.cost_ttd ? `TTD ${fmt2.format(parseFloat(log.cost_ttd))}` : '—'}</td>
-                    <td className="px-4 py-2.5 text-slate-300 text-xs">{log.performed_by ?? '—'}</td>
-                    <td className="px-4 py-2.5 text-slate-400 text-xs max-w-xs truncate">{log.description ?? '—'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-        <div className="px-5 py-3 border-t border-slate-700 flex-shrink-0 text-xs text-slate-500">
-          {logs ? t('inv.serviceHistoryCount', { count: logs.length }) : ''}
-        </div>
-      </div>
-    </div>
-  )
-}
 
 // ── Add Vehicle Modal ─────────────────────────────────────────────────────────
 
@@ -653,6 +509,7 @@ function EditVehicleModal({
   const qc = useQueryClient()
   const { t } = useTranslation()
   const [form, setForm] = useState({
+    item_name: vehicle.item_name ?? '',
     owner_entity: vehicle.owner_entity ?? vehicle.fleet_type ?? '',
     owner_entity_custom: '',
     location_id: vehicle.location_id ?? '',
@@ -660,10 +517,13 @@ function EditVehicleModal({
     condition: vehicle.item_condition ?? 'GOOD',
     current_mileage_km: vehicle.current_mileage_km != null ? String(vehicle.current_mileage_km) : '',
     unit_value: vehicle.current_value != null ? String(vehicle.current_value) : '',
-    insurance_expiry: vehicle.insurance_expiry ?? '',
+    insurance_expiry: vehicle.insurance_expiry ? vehicle.insurance_expiry.slice(0, 10) : '',
     insurance_provider: vehicle.insurance_provider ?? '',
     insurance_policy_number: vehicle.insurance_policy_number ?? '',
-    registration_expiry: vehicle.registration_expiry ?? '',
+    registration_expiry: vehicle.registration_expiry ? vehicle.registration_expiry.slice(0, 10) : '',
+    vin: vehicle.vin ?? '',
+    engine_number: vehicle.engine_number ?? '',
+    sim_number: vehicle.sim_number ?? '',
   })
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
     setForm(f => ({ ...f, [k]: e.target.value }))
@@ -671,18 +531,29 @@ function EditVehicleModal({
   const ownerEntityFinal = form.owner_entity === 'Other' ? form.owner_entity_custom : form.owner_entity
 
   const { mutate, isPending, error } = useMutation({
-    mutationFn: () => imsApi.updateVehicle(vehicle.id, {
-      owner_entity: ownerEntityFinal || undefined,
-      colour: form.colour || undefined,
-      condition: form.condition || undefined,
-      current_mileage_km: form.current_mileage_km ? Number(form.current_mileage_km) : undefined,
-      unit_value: form.unit_value ? Number(form.unit_value) : undefined,
-      insurance_expiry: form.insurance_expiry || undefined,
-      insurance_provider: form.insurance_provider || undefined,
-      insurance_policy_number: form.insurance_policy_number || undefined,
-      registration_expiry: form.registration_expiry || undefined,
-      location_id: form.location_id || undefined,
-    }),
+    mutationFn: async () => {
+      const vehicleP = imsApi.updateVehicle(vehicle.id, {
+        owner_entity: ownerEntityFinal || undefined,
+        colour: form.colour || undefined,
+        condition: form.condition || undefined,
+        current_mileage_km: form.current_mileage_km ? Number(form.current_mileage_km) : undefined,
+        unit_value: form.unit_value ? Number(form.unit_value) : undefined,
+        insurance_expiry: (form.insurance_expiry && DATE_RE.test(form.insurance_expiry)) ? form.insurance_expiry : undefined,
+        insurance_provider: form.insurance_provider || undefined,
+        insurance_policy_number: form.insurance_policy_number || undefined,
+        registration_expiry: (form.registration_expiry && DATE_RE.test(form.registration_expiry)) ? form.registration_expiry : undefined,
+        location_id: form.location_id || undefined,
+        vin: form.vin || undefined,
+        engine_number: form.engine_number || undefined,
+        sim_number: form.sim_number || undefined,
+      })
+      const itemPatch: Record<string, unknown> = {}
+      if (form.item_name.trim() && form.item_name.trim() !== vehicle.item_name) itemPatch.name = form.item_name.trim()
+      const itemP = Object.keys(itemPatch).length > 0
+        ? imsApi.updateItem(vehicle.item_id, itemPatch as Parameters<typeof imsApi.updateItem>[1])
+        : Promise.resolve()
+      return Promise.all([vehicleP, itemP])
+    },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['ims-vehicles'] }); onClose() },
   })
 
@@ -692,6 +563,10 @@ function EditVehicleModal({
         <h3 className="text-base font-semibold mb-1 text-white">{t('inv.editVehicleTitle')}</h3>
         <p className="text-xs text-slate-400 mb-4">{vehicle.registration_number} — {vehicle.make} {vehicle.model}</p>
         <div className="space-y-3">
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">{t('inv.nameStar')}</label>
+            <input value={form.item_name} onChange={set('item_name')} className={cls} placeholder={t('inv.vehicleNamePlaceholder')} />
+          </div>
           <div>
             <label className="block text-xs text-slate-400 mb-1">{t('inv.ownerEntityStar')}</label>
             <select value={form.owner_entity} onChange={set('owner_entity')} className={cls}>
@@ -752,22 +627,23 @@ function EditVehicleModal({
               <input value={form.insurance_policy_number} onChange={set('insurance_policy_number')} className={cls} />
             </div>
           </div>
-          {(vehicle.vin || vehicle.engine_number) && (
-            <div className="flex gap-3">
-              {vehicle.vin && (
-                <div className="flex-1">
-                  <label className="block text-xs text-slate-400 mb-1">{t('inv.vinChassis')}</label>
-                  <input readOnly value={vehicle.vin} className="w-full bg-slate-700/50 border border-slate-600 rounded-lg px-3 py-2 text-xs text-slate-300 font-mono cursor-default select-all" />
-                </div>
-              )}
-              {vehicle.engine_number && (
-                <div className="flex-1">
-                  <label className="block text-xs text-slate-400 mb-1">{t('inv.engineNumber')}</label>
-                  <input readOnly value={vehicle.engine_number} className="w-full bg-slate-700/50 border border-slate-600 rounded-lg px-3 py-2 text-xs text-slate-300 font-mono cursor-default select-all" />
-                </div>
-              )}
+          <div className="flex gap-3">
+            <div className="flex-1">
+              <label className="block text-xs text-slate-400 mb-1">{t('inv.vinChassis')}</label>
+              <input value={form.vin} onChange={set('vin')} className={`${cls} font-mono`} placeholder="e.g. JTMBD33V806023456" />
             </div>
-          )}
+            <div className="flex-1">
+              <label className="block text-xs text-slate-400 mb-1">{t('inv.engineNumber')}</label>
+              <input value={form.engine_number} onChange={set('engine_number')} className={`${cls} font-mono`} placeholder="e.g. 2AZ1234567" />
+            </div>
+          </div>
+          <div className="flex gap-3">
+            <div className="flex-1">
+              <label className="block text-xs text-slate-400 mb-1">{t('inv.simNumber')}</label>
+              <input value={form.sim_number} onChange={set('sim_number')} className={cls} placeholder="e.g. 18681234567" />
+            </div>
+            <div className="flex-1" />
+          </div>
           {error && <p className="text-red-400 text-xs">{error instanceof Error ? error.message : 'Failed.'}</p>}
         </div>
         <div className="flex gap-3 mt-4">
@@ -1066,6 +942,200 @@ function EditItemModal({
   )
 }
 
+// ── Dispose Asset Modal ───────────────────────────────────────────────────────
+
+function DisposeAssetModal({ item, onClose }: { item: Item; onClose: () => void }) {
+  const qc = useQueryClient()
+  const [form, setForm] = useState({
+    disposal_type:  'WRITE_OFF' as 'SALE' | 'WRITE_OFF' | 'TRANSFER',
+    disposal_date:  new Date().toISOString().slice(0, 10),
+    disposal_notes: '',
+    sale_price_ttd: '',
+    buyer_name:     '',
+  })
+  const [showGl, setShowGl] = useState(false)
+  const [glForm, setGlForm] = useState({
+    owner_entity_id:        '',
+    asset_gl_account_id:    '',
+    acc_dep_gl_account_id:  '',
+    proceeds_gl_account_id: '',
+    gain_gl_account_id:     '',
+    loss_gl_account_id:     '',
+  })
+  const [submitErr, setSubmitErr] = useState('')
+
+  const { data: glAccounts = [] } = useQuery<GlAccount[]>({
+    queryKey: ['gl-accounts', glForm.owner_entity_id],
+    queryFn: () => glApi.getAccounts({ owner_entity_id: glForm.owner_entity_id, is_active: 'true' }),
+    enabled: !!glForm.owner_entity_id && showGl,
+    staleTime: 60_000,
+  })
+
+  const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
+    setForm(f => ({ ...f, [k]: e.target.value }))
+
+  const setGl = (k: keyof typeof glForm) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
+    setGlForm(f => ({ ...f, [k]: e.target.value }))
+
+  const { mutate, isPending } = useMutation({
+    mutationFn: () => {
+      const payload: Parameters<typeof imsApi.disposeItem>[1] = {
+        disposal_type:  form.disposal_type,
+        disposal_date:  form.disposal_date,
+        disposal_notes: form.disposal_notes || undefined,
+        sale_price_ttd: form.disposal_type === 'SALE' && form.sale_price_ttd ? parseFloat(form.sale_price_ttd) : undefined,
+        buyer_name:     (form.disposal_type === 'SALE' || form.disposal_type === 'TRANSFER') && form.buyer_name ? form.buyer_name : undefined,
+      }
+      if (showGl && glForm.owner_entity_id && glForm.asset_gl_account_id) {
+        payload.owner_entity_id       = glForm.owner_entity_id
+        payload.asset_gl_account_id   = glForm.asset_gl_account_id
+        payload.acc_dep_gl_account_id = glForm.acc_dep_gl_account_id || undefined
+        payload.proceeds_gl_account_id = glForm.proceeds_gl_account_id || undefined
+        payload.gain_gl_account_id     = glForm.gain_gl_account_id || undefined
+        payload.loss_gl_account_id     = glForm.loss_gl_account_id || undefined
+      }
+      return imsApi.disposeItem(item.id, payload)
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['ims-items'] })
+      onClose()
+    },
+    onError: (e: unknown) => setSubmitErr((e as Error).message),
+  })
+
+  const cls = 'bg-slate-700 border border-slate-600 rounded px-2 py-1.5 text-white text-xs focus:outline-none focus:ring-1 focus:ring-orange-500 w-full'
+  const assetAccounts  = glAccounts.filter(a => a.account_type === 'ASSET')
+  const expenseAccounts = glAccounts.filter(a => a.account_type === 'EXPENSE')
+  const incomeAccounts = glAccounts.filter(a => a.account_type === 'REVENUE' || a.account_type === 'OTHER_INCOME')
+
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+      <div className="bg-slate-800 border border-slate-700 rounded-xl w-full max-w-lg p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h2 className="text-lg font-semibold text-white">Dispose Asset</h2>
+            <p className="text-slate-400 text-xs mt-0.5">{item.name}</p>
+          </div>
+          <button onClick={onClose} className="text-slate-400 hover:text-white text-xl leading-none">&times;</button>
+        </div>
+
+        <div className="space-y-3 mb-4">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">Disposal Type *</label>
+              <select value={form.disposal_type} onChange={set('disposal_type')} className={cls}>
+                <option value="SALE">Sale</option>
+                <option value="WRITE_OFF">Write-Off</option>
+                <option value="TRANSFER">Internal Transfer</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">Disposal Date *</label>
+              <input type="date" value={form.disposal_date} onChange={set('disposal_date')} className={cls} />
+            </div>
+          </div>
+
+          {form.disposal_type === 'SALE' && (
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">Sale Price (TTD)</label>
+                <input type="number" min="0" step="0.01" value={form.sale_price_ttd} onChange={set('sale_price_ttd')} className={cls} placeholder="0.00" />
+              </div>
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">Buyer Name</label>
+                <input value={form.buyer_name} onChange={set('buyer_name')} className={cls} />
+              </div>
+            </div>
+          )}
+          {form.disposal_type === 'TRANSFER' && (
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">Transfer To</label>
+              <input value={form.buyer_name} onChange={set('buyer_name')} className={cls} placeholder="Entity or department" />
+            </div>
+          )}
+
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">Notes</label>
+            <textarea value={form.disposal_notes} onChange={set('disposal_notes')} rows={2}
+              className={cls + ' resize-none'} placeholder="Reason for disposal, condition at disposal, etc." />
+          </div>
+        </div>
+
+        {/* Optional GL section */}
+        {form.disposal_type !== 'TRANSFER' && (
+          <div className="border border-slate-600 rounded-lg overflow-hidden mb-4">
+            <button onClick={() => setShowGl(v => !v)}
+              className="w-full px-3 py-2 text-left text-xs text-slate-300 bg-slate-700/50 hover:bg-slate-700 transition-colors flex items-center justify-between">
+              <span>Post to Finance Ledger (optional)</span>
+              <span className="text-slate-500">{showGl ? '▲' : '▼'}</span>
+            </button>
+            {showGl && (
+              <div className="p-3 space-y-2">
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">Entity</label>
+                  <select value={glForm.owner_entity_id} onChange={setGl('owner_entity_id')} className={cls}>
+                    <option value="">— select entity —</option>
+                    {ENTITY_OPTIONS.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">Asset GL Account (Cr)</label>
+                  <select value={glForm.asset_gl_account_id} onChange={setGl('asset_gl_account_id')} className={cls} disabled={!glForm.owner_entity_id}>
+                    <option value="">{glForm.owner_entity_id ? '— pick account —' : '← select entity first'}</option>
+                    {assetAccounts.map(a => <option key={a.id} value={a.id}>{a.account_code} — {a.account_name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">Accumulated Depreciation (Dr)</label>
+                  <select value={glForm.acc_dep_gl_account_id} onChange={setGl('acc_dep_gl_account_id')} className={cls} disabled={!glForm.owner_entity_id}>
+                    <option value="">— none / no dep schedule —</option>
+                    {assetAccounts.map(a => <option key={a.id} value={a.id}>{a.account_code} — {a.account_name}</option>)}
+                  </select>
+                </div>
+                {form.disposal_type === 'SALE' && (
+                  <div>
+                    <label className="block text-xs text-slate-400 mb-1">Proceeds / Bank Account (Dr)</label>
+                    <select value={glForm.proceeds_gl_account_id} onChange={setGl('proceeds_gl_account_id')} className={cls} disabled={!glForm.owner_entity_id}>
+                      <option value="">— none —</option>
+                      {assetAccounts.map(a => <option key={a.id} value={a.id}>{a.account_code} — {a.account_name}</option>)}
+                    </select>
+                  </div>
+                )}
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-xs text-slate-400 mb-1">Gain Account (Cr)</label>
+                    <select value={glForm.gain_gl_account_id} onChange={setGl('gain_gl_account_id')} className={cls} disabled={!glForm.owner_entity_id}>
+                      <option value="">— none —</option>
+                      {incomeAccounts.map(a => <option key={a.id} value={a.id}>{a.account_code} — {a.account_name}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs text-slate-400 mb-1">Loss Account (Dr)</label>
+                    <select value={glForm.loss_gl_account_id} onChange={setGl('loss_gl_account_id')} className={cls} disabled={!glForm.owner_entity_id}>
+                      <option value="">— none —</option>
+                      {expenseAccounts.map(a => <option key={a.id} value={a.id}>{a.account_code} — {a.account_name}</option>)}
+                    </select>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {submitErr && <p className="text-red-400 text-xs mb-3">{submitErr}</p>}
+
+        <div className="flex gap-3">
+          <button onClick={() => { setSubmitErr(''); mutate() }} disabled={isPending}
+            className="flex-1 py-2 bg-red-700 hover:bg-red-600 disabled:opacity-50 text-white text-sm rounded-lg transition-colors">
+            {isPending ? 'Processing…' : 'Confirm Disposal'}
+          </button>
+          <button onClick={onClose} className="px-4 py-2 text-slate-400 hover:text-white text-sm transition-colors">Cancel</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Item Detail Panel ─────────────────────────────────────────────────────────
 
 function ItemDetailPanel({
@@ -1079,6 +1149,7 @@ function ItemDetailPanel({
   const [addBarcodeModal, setAddBarcodeModal] = useState(false)
   const [editModal, setEditModal] = useState(false)
   const [showDeleteItem, setShowDeleteItem] = useState(false)
+  const [showDisposeModal, setShowDisposeModal] = useState(false)
   const [detailTab, setDetailTab] = useState<'info' | 'movements' | 'barcodes' | 'photos'>('info')
   const qc = useQueryClient()
   const { t } = useTranslation()
@@ -1103,7 +1174,20 @@ function ItemDetailPanel({
 
   return (
     <>
+      {showDisposeModal && <DisposeAssetModal item={item} onClose={() => setShowDisposeModal(false)} />}
       <div className="flex flex-col h-full">
+        {/* Disposed banner */}
+        {!item.is_active && item.disposal_type && (
+          <div className="mx-4 mt-3 px-4 py-2.5 bg-slate-700/60 border border-slate-600 rounded-lg text-sm text-slate-300 flex items-center gap-2">
+            <span className="text-slate-400 font-medium">DISPOSED</span>
+            <span className="text-slate-500">·</span>
+            <span>{item.disposal_type}</span>
+            {item.disposed_at && <><span className="text-slate-500">·</span><span>{fmtDate(item.disposed_at)}</span></>}
+            {item.sale_price_ttd && <><span className="text-slate-500">·</span><span className="text-green-400">{fmtMoney(parseFloat(item.sale_price_ttd))}</span></>}
+            {item.buyer_name && <><span className="text-slate-500">·</span><span>{item.buyer_name}</span></>}
+            {item.disposal_gl_entry_id && <span className="ml-auto text-xs text-green-400">GL posted</span>}
+          </div>
+        )}
         {/* Header */}
         <div className="px-5 py-4 border-b border-slate-700 flex items-start justify-between gap-3">
           <div className="min-w-0">
@@ -1119,6 +1203,13 @@ function ItemDetailPanel({
             >
               {t('common.edit')}
             </button>
+            {item.is_asset && !item.is_vehicle && item.is_active && (
+              <button
+                onClick={() => setShowDisposeModal(true)}
+                className="px-3 py-1.5 rounded text-xs bg-slate-700 hover:bg-red-800 text-orange-400 hover:text-white transition-colors"
+                title="Dispose this asset"
+              >Dispose</button>
+            )}
             <button
               onClick={() => setShowDeleteItem(true)}
               className="px-3 py-1.5 rounded text-xs bg-slate-700 hover:bg-red-700 text-slate-400 hover:text-white transition-colors"
@@ -1404,8 +1495,8 @@ function PhotosTab({ itemId }: { itemId: string }) {
       <div className="grid grid-cols-2 gap-2">
         {photos.map(p => (
           <div key={p.id} className="relative group rounded-lg overflow-hidden bg-slate-700 aspect-square">
-            <img
-              src={`/api/v1${imsApi.photoDownloadUrl(itemId, p.id)}`}
+            <AuthedImg
+              path={imsApi.photoDownloadUrl(itemId, p.id)}
               alt={t('inv.itemPhoto')}
               className="w-full h-full object-cover"
             />
@@ -1432,6 +1523,7 @@ function ItemsTab() {
   const [locationId, setLocationId] = useState('')
   const [categoryId, setCategoryId] = useState('')
   const [isAsset, setIsAsset] = useState<'all' | 'true' | 'false'>('all')
+  const [showInactive, setShowInactive] = useState(false)
   const [page, setPage] = useState(1)
   const [selected, setSelected] = useState<Item | null>(null)
   const [showAdd, setShowAdd] = useState(false)
@@ -1440,22 +1532,23 @@ function ItemsTab() {
   const { data: catData } = useQuery({ queryKey: ['ims-categories'], queryFn: imsApi.getCategories })
 
   const { data, isLoading } = useQuery({
-    queryKey: ['ims-items', search, locationId, categoryId, isAsset, page],
+    queryKey: ['ims-items', search, locationId, categoryId, isAsset, showInactive, page],
     queryFn: () => imsApi.getItems({
       search: search || undefined,
       location_id: locationId || undefined,
       category_id: categoryId || undefined,
       is_asset: isAsset === 'all' ? undefined : isAsset === 'true',
+      is_active: showInactive ? 'all' : true,
       page,
       limit: 25,
     }),
   })
 
   const resetFilters = useCallback(() => {
-    setSearch(''); setLocationId(''); setCategoryId(''); setIsAsset('all'); setPage(1)
+    setSearch(''); setLocationId(''); setCategoryId(''); setIsAsset('all'); setShowInactive(false); setPage(1)
   }, [])
 
-  const items = data?.items ?? []
+  const items = (data?.items ?? []).filter(item => !item.is_vehicle)
   const pagination = data?.pagination
 
   return (
@@ -1503,6 +1596,11 @@ function ItemsTab() {
               <option value="true">{t('inv.assets')}</option>
               <option value="false">{t('inv.stock')}</option>
             </select>
+            <label className="flex items-center gap-1.5 text-xs text-slate-400 cursor-pointer select-none whitespace-nowrap">
+              <input type="checkbox" checked={showInactive} onChange={e => { setShowInactive(e.target.checked); setPage(1) }}
+                className="accent-orange-500" />
+              Show disposed
+            </label>
           </div>
           {(search || locationId || categoryId || isAsset !== 'all') && (
             <button onClick={resetFilters} className="text-xs text-slate-400 hover:text-white transition-colors">
@@ -1525,11 +1623,14 @@ function ItemsTab() {
               <button
                 key={item.id}
                 onClick={() => setSelected(item)}
-                className={`w-full text-left px-4 py-3 border-b border-slate-700/50 hover:bg-slate-700/40 transition-colors ${selected?.id === item.id ? 'bg-slate-700/60' : ''}`}
+                className={`w-full text-left px-4 py-3 border-b border-slate-700/50 hover:bg-slate-700/40 transition-colors ${selected?.id === item.id ? 'bg-slate-700/60' : ''} ${!item.is_active ? 'opacity-60' : ''}`}
               >
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
-                    <p className="text-white text-sm font-medium truncate">{item.name}</p>
+                    <div className="flex items-center gap-1.5">
+                      <p className="text-white text-sm font-medium truncate">{item.name}</p>
+                      {!item.is_active && <span className="px-1.5 py-0.5 text-[10px] bg-slate-600 text-slate-300 rounded shrink-0">DISPOSED</span>}
+                    </div>
                     <p className="text-slate-400 text-xs mt-0.5 truncate">
                       {item.sku ? `${item.sku} · ` : ''}{item.location_code} · {item.category_name ?? t('inv.uncategorised')}
                     </p>
@@ -1603,20 +1704,39 @@ function ItemsTab() {
 function VehiclesTab() {
   const { t } = useTranslation()
   const [ownerFilter, setOwnerFilter] = useState('ALL')
+  const [showDisposed, setShowDisposed] = useState(false)
   const [page, setPage] = useState(1)
   const [showAdd, setShowAdd] = useState(false)
-  const [logServiceFor, setLogServiceFor] = useState<Vehicle | null>(null)
-  const [serviceHistoryFor, setServiceHistoryFor] = useState<Vehicle | null>(null)
   const [editVehicle, setEditVehicle] = useState<Vehicle | null>(null)
   const [deletingVehicle, setDeletingVehicle] = useState<Vehicle | null>(null)
+  const [manageVehicle, setManageVehicle] = useState<Vehicle | null>(null)
+  const [syncing, setSyncing] = useState(false)
+  const [syncResult, setSyncResult] = useState<{ total_events_created: number; failed: number } | null>(null)
   const qc = useQueryClient()
+
+  const syncToCalendar = async () => {
+    setSyncing(true); setSyncResult(null)
+    try {
+      const client = tenantApi('00000000-0000-0000-0001-000000000001')
+      const result = await client.post<{ total_events_created: number; vehicle_events: number; inspection_events: number; insurance_events: number; failed: number }>(
+        '/admin/calendar/backfill', {}
+      )
+      setSyncResult({ total_events_created: result.total_events_created, failed: result.failed })
+      qc.invalidateQueries({ queryKey: ['ims-vehicles'] })
+    } catch (e) {
+      setSyncResult({ total_events_created: 0, failed: 1 })
+    } finally {
+      setSyncing(false)
+    }
+  }
 
   const { data: locData } = useQuery({ queryKey: ['ims-locations'], queryFn: imsApi.getLocations })
 
   const { data, isLoading } = useQuery({
-    queryKey: ['ims-vehicles', ownerFilter, page],
+    queryKey: ['ims-vehicles', ownerFilter, showDisposed, page],
     queryFn: () => imsApi.getVehicles({
       owner_entity: ownerFilter === 'ALL' ? undefined : ownerFilter,
+      include_disposed: showDisposed ? 'true' : undefined,
       page,
       limit: 25,
     }),
@@ -1686,10 +1806,30 @@ function VehiclesTab() {
             {o}
           </button>
         ))}
-        <button
-          onClick={() => setShowAdd(true)}
-          className="ml-auto px-3 py-1.5 bg-orange-600 hover:bg-orange-500 text-white text-xs rounded-lg transition-colors"
-        >{t('inv.addVehicleFilterBtn')}</button>
+        <div className="ml-auto flex items-center gap-2">
+          <label className="flex items-center gap-1.5 text-xs text-slate-400 cursor-pointer select-none">
+            <input type="checkbox" checked={showDisposed} onChange={e => { setShowDisposed(e.target.checked); setPage(1) }}
+              className="accent-orange-500" />
+            Show disposed
+          </label>
+          {syncResult && (
+            <span className={`text-xs ${syncResult.failed > 0 ? 'text-red-400' : 'text-green-400'}`}>
+              {syncResult.failed > 0
+                ? `⚠ ${syncResult.failed} failed`
+                : `✓ ${syncResult.total_events_created} event${syncResult.total_events_created !== 1 ? 's' : ''} synced`}
+            </span>
+          )}
+          <button
+            onClick={syncToCalendar}
+            disabled={syncing}
+            className="px-3 py-1.5 bg-slate-700 hover:bg-green-800 disabled:opacity-50 text-slate-300 hover:text-white text-xs rounded-lg transition-colors"
+            title={t('inv.syncCalendarTooltip')}
+          >{syncing ? '⏳' : '📅'} {t('inv.syncCalendarBtn')}</button>
+          <button
+            onClick={() => setShowAdd(true)}
+            className="px-3 py-1.5 bg-orange-600 hover:bg-orange-500 text-white text-xs rounded-lg transition-colors"
+          >{t('inv.addVehicleFilterBtn')}</button>
+        </div>
       </div>
 
       {/* Table */}
@@ -1715,7 +1855,6 @@ function VehiclesTab() {
                   ['insurance',    t('inv.colInsurance')],
                   ['regExpiry',    t('inv.colRegExpiry')],
                   ['nextService',  t('inv.colNextService')],
-                  ['history',      ''],
                   ['actions',      ''],
                 ] as [string, string][]).map(([key, label]) => (
                   <th key={key} className="px-4 py-2.5 text-left font-medium">{label}</th>
@@ -1724,8 +1863,11 @@ function VehiclesTab() {
             </thead>
             <tbody>
               {vehicles.map(v => (
-                <tr key={v.id} className="border-b border-slate-700/50 hover:bg-slate-700/30 transition-colors">
-                  <td className="px-4 py-2.5 text-white font-mono font-medium">{v.registration_number}</td>
+                <tr key={v.id} className={`border-b border-slate-700/50 hover:bg-slate-700/30 transition-colors ${v.status === 'DISPOSED' ? 'opacity-60' : ''}`}>
+                  <td className="px-4 py-2.5 font-mono font-medium">
+                    <span className={v.status === 'DISPOSED' ? 'text-slate-400' : 'text-white'}>{v.registration_number}</span>
+                    {v.status === 'DISPOSED' && <span className="ml-1.5 px-1.5 py-0.5 text-[10px] bg-slate-600 text-slate-300 rounded">DISPOSED</span>}
+                  </td>
                   <td className="px-4 py-2.5 text-white">{v.make} {v.model}</td>
                   <td className="px-4 py-2.5 text-slate-300">{v.year}</td>
                   <td className="px-4 py-2.5 text-slate-300 text-xs">{v.owner_entity ?? v.fleet_type}</td>
@@ -1773,21 +1915,14 @@ function VehiclesTab() {
                     </div>
                   </td>
                   <td className="px-4 py-2.5">
-                    <button onClick={() => setServiceHistoryFor(v)}
-                      className="text-xs px-2 py-1 rounded bg-slate-700 hover:bg-slate-600 text-slate-400 hover:text-white transition-colors"
-                      title={t('inv.serviceHistoryBtn')}>
-                      📋
-                    </button>
-                  </td>
-                  <td className="px-4 py-2.5">
                     <div className="flex gap-1">
+                      <button onClick={() => setManageVehicle(v)}
+                        className="text-xs px-2 py-1 rounded bg-orange-700 hover:bg-orange-600 text-white transition-colors">
+                        Manage ›
+                      </button>
                       <button onClick={() => setEditVehicle(v)}
                         className="text-xs px-2 py-1 rounded bg-slate-700 hover:bg-slate-600 text-slate-300 hover:text-white transition-colors">
                         {t('common.edit')}
-                      </button>
-                      <button onClick={() => setLogServiceFor(v)}
-                        className="text-xs px-2 py-1 rounded bg-slate-700 hover:bg-orange-700 text-slate-300 hover:text-white transition-colors">
-                        {t('inv.serviceBtn')}
                       </button>
                       <button onClick={() => setDeletingVehicle(v)}
                         className="text-xs px-2 py-1 rounded bg-slate-700 hover:bg-red-700 text-slate-500 hover:text-white transition-colors"
@@ -1813,9 +1948,8 @@ function VehiclesTab() {
         </div>
       )}
 
+      {manageVehicle && <VehicleManageModal vehicle={manageVehicle} onClose={() => setManageVehicle(null)} />}
       {showAdd && <AddVehicleModal locations={locData ?? []} onClose={() => { setShowAdd(false); qc.invalidateQueries({ queryKey: ['ims-vehicles'] }) }} />}
-      {logServiceFor && <LogServiceModal vehicle={logServiceFor} onClose={() => setLogServiceFor(null)} />}
-      {serviceHistoryFor && <ServiceHistoryModal vehicle={serviceHistoryFor} onClose={() => setServiceHistoryFor(null)} />}
       {editVehicle && <EditVehicleModal vehicle={editVehicle} locations={locData ?? []} onClose={() => setEditVehicle(null)} />}
       {deletingVehicle && (
         <ConfirmDeleteModal
@@ -1826,6 +1960,1148 @@ function VehiclesTab() {
           onClose={() => setDeletingVehicle(null)}
         />
       )}
+    </div>
+  )
+}
+
+// ── VMS: Service Log Tab ──────────────────────────────────────────────────────
+
+function VehicleServiceLogTab({ vehicle }: { vehicle: Vehicle }) {
+  const qc = useQueryClient()
+  const { t } = useTranslation()
+  const todayStr = new Date().toISOString().split('T')[0]
+  const [showForm, setShowForm] = useState(false)
+  const [serviceDate, setServiceDate] = useState(todayStr)
+  const [mileage, setMileage] = useState(String(vehicle.current_mileage_km ?? ''))
+  const [intervalDays, setIntervalDays] = useState(String(vehicle.service_interval_days ?? 90))
+  const [serviceType, setServiceType] = useState('OTHER')
+  const [description, setDescription] = useState('')
+  const [costTtd, setCostTtd] = useState('')
+  const [performedBy, setPerformedBy] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  const { data: logs, isLoading } = useQuery<VehicleServiceLog[]>({
+    queryKey: ['ims-vehicle-service-log', vehicle.id],
+    queryFn: () => imsApi.getVehicleServiceLog(vehicle.id),
+  })
+
+  const fmt2 = new Intl.NumberFormat('en-TT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+
+  const nextDate = (() => {
+    const d = new Date(serviceDate + 'T00:00:00Z')
+    d.setUTCDate(d.getUTCDate() + Number(intervalDays))
+    return d.toISOString().split('T')[0]
+  })()
+
+  const resetForm = () => {
+    setServiceDate(todayStr); setMileage(String(vehicle.current_mileage_km ?? ''))
+    setIntervalDays(String(vehicle.service_interval_days ?? 90)); setServiceType('OTHER')
+    setDescription(''); setCostTtd(''); setPerformedBy(''); setError('')
+  }
+
+  const submit = async () => {
+    setSaving(true); setError('')
+    try {
+      await imsApi.logVehicleService(vehicle.id, {
+        service_date: serviceDate,
+        service_type: serviceType,
+        service_interval_days: Number(intervalDays),
+        mileage_km: mileage ? Number(mileage) : undefined,
+        description: description || undefined,
+        cost_ttd: costTtd ? Number(costTtd) : undefined,
+        performed_by: performedBy || undefined,
+      })
+      qc.invalidateQueries({ queryKey: ['ims-vehicles'] })
+      qc.invalidateQueries({ queryKey: ['ims-vehicle-service-log', vehicle.id] })
+      setShowForm(false); resetForm()
+    } catch (e) { setError((e as Error).message); setSaving(false) }
+  }
+
+  return (
+    <div className="flex flex-col h-full overflow-y-auto p-4 space-y-4">
+      {/* Log entry form */}
+      <div>
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-medium text-white">Service Log</h3>
+          <button onClick={() => { setShowForm(v => !v); resetForm() }}
+            className="px-3 py-1 text-xs bg-orange-600 hover:bg-orange-500 text-white rounded transition-colors">
+            {showForm ? 'Cancel' : '+ Log Service'}
+          </button>
+        </div>
+
+        {showForm && (
+          <div className="bg-slate-700/40 border border-slate-700 rounded-lg p-4 space-y-3 mb-4">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">{t('inv.serviceDate')} *</label>
+                <input type="date" value={serviceDate} onChange={e => setServiceDate(e.target.value)} className={cls} />
+              </div>
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">{t('inv.serviceType')}</label>
+                <select value={serviceType} onChange={e => setServiceType(e.target.value)} className={cls}>
+                  {SERVICE_TYPE_OPTIONS.map(opt => <option key={opt} value={opt}>{opt.replace('_', ' ')}</option>)}
+                </select>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">{t('inv.serviceIntervalDays')}</label>
+                <input type="number" min="1" max="3650" value={intervalDays} onChange={e => setIntervalDays(e.target.value)} className={cls} />
+                <p className="text-xs text-slate-500 mt-1">{t('inv.nextServiceDue')} <span className="text-orange-400 font-medium">{fmtDate(nextDate)}</span></p>
+              </div>
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">{t('inv.currentMileageKm')}</label>
+                <input type="number" min="0" value={mileage} onChange={e => setMileage(e.target.value)} className={cls} />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">{t('inv.serviceCostTTD')}</label>
+                <input type="number" min="0" step="0.01" value={costTtd} onChange={e => setCostTtd(e.target.value)} className={cls} placeholder="0.00" />
+              </div>
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">{t('inv.performedBy')}</label>
+                <input value={performedBy} onChange={e => setPerformedBy(e.target.value)} className={cls} placeholder={t('inv.performedByPlaceholder')} />
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">{t('inv.serviceDescription')}</label>
+              <textarea value={description} onChange={e => setDescription(e.target.value)} rows={2}
+                className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-orange-500 resize-none" />
+            </div>
+            {error && <p className="text-red-400 text-xs">{error}</p>}
+            <div className="flex gap-2">
+              <button onClick={submit} disabled={saving}
+                className="flex-1 py-2 bg-orange-600 hover:bg-orange-500 disabled:opacity-50 text-white text-sm rounded-lg">
+                {saving ? t('common.saving') : t('inv.saveServiceLog')}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* History table */}
+      <div>
+        {isLoading && <p className="text-slate-400 text-sm py-4">{t('common.loading')}</p>}
+        {!isLoading && (!logs || logs.length === 0) && (
+          <p className="text-slate-500 text-sm text-center py-8">{t('inv.noServiceHistory')}</p>
+        )}
+        {logs && logs.length > 0 && (
+          <div className="overflow-x-auto rounded-lg border border-slate-700">
+            <table className="w-full text-sm">
+              <thead className="text-slate-400 text-xs uppercase tracking-wide border-b border-slate-700 bg-slate-900/50">
+                <tr>
+                  {(['date', 'type', 'mileage', 'cost', 'performedBy', 'description'] as const).map(key => (
+                    <th key={key} className="px-4 py-2.5 text-left font-medium">{t(`inv.svcLog_${key}`)}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {logs.map(log => (
+                  <tr key={log.id} className="border-b border-slate-700/50 hover:bg-slate-700/20">
+                    <td className="px-4 py-2.5 text-white whitespace-nowrap">{fmtDate(log.service_date)}</td>
+                    <td className="px-4 py-2.5">
+                      <span className="px-2 py-0.5 rounded bg-slate-700 text-slate-300 text-xs">{log.service_type.replace('_', ' ')}</span>
+                    </td>
+                    <td className="px-4 py-2.5 text-slate-300 whitespace-nowrap">{log.mileage_km != null ? `${log.mileage_km.toLocaleString()} km` : '—'}</td>
+                    <td className="px-4 py-2.5 text-slate-300 whitespace-nowrap">{log.cost_ttd ? `TTD ${fmt2.format(parseFloat(log.cost_ttd))}` : '—'}</td>
+                    <td className="px-4 py-2.5 text-slate-300 text-xs">{log.performed_by ?? '—'}</td>
+                    <td className="px-4 py-2.5 text-slate-400 text-xs max-w-xs truncate">{log.description ?? '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        {logs && logs.length > 0 && (
+          <p className="text-xs text-slate-500 mt-2">{t('inv.serviceHistoryCount', { count: logs.length })}</p>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ── VMS: Manage Modal ─────────────────────────────────────────────────────────
+
+const WO_STATUS_STYLES: Record<WorkOrderStatus, string> = {
+  OPEN:           'bg-blue-900/50   text-blue-300   border border-blue-700',
+  IN_PROGRESS:    'bg-yellow-900/50 text-yellow-300 border border-yellow-700',
+  AWAITING_PARTS: 'bg-orange-900/50 text-orange-300 border border-orange-700',
+  COMPLETE:       'bg-green-900/50  text-green-300  border border-green-700',
+  CANCELLED:      'bg-slate-700     text-slate-400  border border-slate-600',
+}
+
+const fmtTTDv = (v: string | number | null | undefined) =>
+  v == null ? '—' : `TTD ${new Intl.NumberFormat('en-TT', { minimumFractionDigits: 2 }).format(Number(v))}`
+
+// ── VMS: TCO Card ─────────────────────────────────────────────────────────────
+
+function TCOCard({ vehicleId }: { vehicleId: string }) {
+  const { data: tco, isLoading } = useQuery<VehicleTCO>({
+    queryKey: ['vms-tco', vehicleId],
+    queryFn: () => imsApi.getVehicleTCO(vehicleId),
+  })
+
+  if (isLoading) return <div className="text-slate-400 text-xs py-2">Loading TCO…</div>
+  if (!tco) return null
+
+  return (
+    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4">
+      {([
+        { key: 'maint',  label: 'Maintenance',     value: tco.total_maintenance_cost,  color: 'text-orange-400' },
+        { key: 'fuel',   label: 'Fuel',             value: tco.total_fuel_cost,         color: 'text-blue-400' },
+        { key: 'ops',    label: 'Operating',        value: tco.total_operating_cost,    color: 'text-purple-400' },
+        { key: 'total',  label: 'Total Ownership',  value: tco.total_ownership_cost,    color: 'text-white' },
+      ] as { key: string; label: string; value: string; color: string }[]).map(c => (
+        <div key={c.key} className="bg-slate-700/50 rounded-lg p-3 text-center">
+          <p className={`text-sm font-bold ${c.color}`}>{fmtTTDv(c.value)}</p>
+          <p className="text-xs text-slate-400 mt-0.5">{c.label}</p>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// ── VMS: Maintenance Tab ──────────────────────────────────────────────────────
+
+function VehicleMaintenanceTab({ vehicleId }: { vehicleId: string }) {
+  const qc = useQueryClient()
+  const [showNewWO, setShowNewWO] = useState(false)
+  const [showNewPM, setShowNewPM] = useState(false)
+  const [expandedWO, setExpandedWO] = useState<string | null>(null)
+  const [woItems, setWoItems] = useState<Record<string, WorkOrder['items']>>({})
+
+  const { data: woData, isLoading: woLoading } = useQuery<{ work_orders: WorkOrder[] }>({
+    queryKey: ['vms-work-orders', vehicleId],
+    queryFn: () => imsApi.getWorkOrders(vehicleId, { limit: 50 }),
+  })
+
+  const { data: pmData, isLoading: pmLoading } = useQuery<{ pm_schedules: PMSchedule[] }>({
+    queryKey: ['vms-pm-schedules', vehicleId],
+    queryFn: () => imsApi.getPMSchedules(vehicleId),
+  })
+
+  const { mutate: updateStatus } = useMutation({
+    mutationFn: ({ woId, status }: { woId: string; status: string }) =>
+      imsApi.updateWorkOrderStatus(vehicleId, woId, status),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['vms-work-orders', vehicleId] }),
+  })
+
+  const { mutate: deletePM } = useMutation({
+    mutationFn: (pmId: string) => imsApi.deletePMSchedule(vehicleId, pmId),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['vms-pm-schedules', vehicleId] }),
+  })
+
+  const expandWO = async (wo: WorkOrder) => {
+    if (expandedWO === wo.id) { setExpandedWO(null); return }
+    setExpandedWO(wo.id)
+    if (!woItems[wo.id]) {
+      const res = await imsApi.getWorkOrderItems(vehicleId, wo.id)
+      setWoItems(prev => ({ ...prev, [wo.id]: res.items }))
+    }
+  }
+
+  const wos = woData?.work_orders ?? []
+  const pms = pmData?.pm_schedules ?? []
+
+  const STATUS_FLOW: Record<WorkOrderStatus, WorkOrderStatus | null> = {
+    OPEN: 'IN_PROGRESS', IN_PROGRESS: 'COMPLETE', AWAITING_PARTS: 'IN_PROGRESS', COMPLETE: null, CANCELLED: null,
+  }
+
+  return (
+    <div className="flex flex-col h-full overflow-y-auto p-4 space-y-5">
+      {/* Work Orders */}
+      <div>
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-medium text-white">Work Orders</h3>
+          <button onClick={() => setShowNewWO(v => !v)}
+            className="px-3 py-1 text-xs bg-orange-600 hover:bg-orange-500 text-white rounded transition-colors">
+            {showNewWO ? 'Cancel' : '+ New WO'}
+          </button>
+        </div>
+
+        {showNewWO && (
+          <NewWorkOrderForm vehicleId={vehicleId} onClose={() => { setShowNewWO(false); qc.invalidateQueries({ queryKey: ['vms-work-orders', vehicleId] }) }} />
+        )}
+
+        {woLoading && <p className="text-slate-400 text-sm">Loading…</p>}
+        {!woLoading && wos.length === 0 && <p className="text-slate-500 text-sm text-center py-4">No work orders yet.</p>}
+
+        <div className="space-y-2">
+          {wos.map(wo => {
+            const nextStatus = STATUS_FLOW[wo.status]
+            const labour = parseFloat(wo.total_labour_cost ?? '0')
+            const parts  = parseFloat(wo.total_parts_cost  ?? '0')
+            return (
+              <div key={wo.id} className="bg-slate-700/50 rounded-lg border border-slate-700 overflow-hidden">
+                <div className="flex items-start gap-3 p-3 cursor-pointer" onClick={() => expandWO(wo)}>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-white font-mono text-xs font-medium">{wo.wo_number}</span>
+                      <span className="text-slate-400 text-xs">{wo.wo_type.replace('_', ' ')}</span>
+                      <span className={`px-1.5 py-0.5 rounded text-xs ${WO_STATUS_STYLES[wo.status]}`}>{wo.status.replace('_', ' ')}</span>
+                    </div>
+                    <p className="text-slate-300 text-sm mt-1 truncate">{wo.description}</p>
+                    <p className="text-slate-500 text-xs mt-0.5">
+                      {fmtDate(wo.opened_date)}{wo.workshop_name ? ` · ${wo.workshop_name}` : ''}
+                      {(labour + parts) > 0 ? ` · ${fmtTTDv(String(labour + parts))}` : ''}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    {nextStatus && (
+                      <button onClick={e => { e.stopPropagation(); updateStatus({ woId: wo.id, status: nextStatus }) }}
+                        className="px-2 py-1 text-xs bg-slate-600 hover:bg-green-700 text-slate-300 hover:text-white rounded transition-colors whitespace-nowrap">
+                        → {nextStatus.replace('_', ' ')}
+                      </button>
+                    )}
+                    <span className="text-slate-500 text-lg">{expandedWO === wo.id ? '▲' : '▼'}</span>
+                  </div>
+                </div>
+
+                {expandedWO === wo.id && (
+                  <div className="border-t border-slate-700 p-3">
+                    <AddLineItemForm vehicleId={vehicleId} woId={wo.id}
+                      onAdded={() => {
+                        imsApi.getWorkOrderItems(vehicleId, wo.id).then(r => setWoItems(p => ({ ...p, [wo.id]: r.items })))
+                        qc.invalidateQueries({ queryKey: ['vms-work-orders', vehicleId] })
+                      }} />
+                    {(woItems[wo.id] ?? []).length > 0 && (
+                      <table className="w-full text-xs mt-3">
+                        <thead>
+                          <tr className="text-slate-400 border-b border-slate-700">
+                            <th className="text-left py-1">Type</th>
+                            <th className="text-left py-1">Description</th>
+                            <th className="text-right py-1">Qty</th>
+                            <th className="text-right py-1">Unit</th>
+                            <th className="text-right py-1">Total</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {(woItems[wo.id] ?? []).map(item => (
+                            <tr key={item.id} className="border-b border-slate-700/40">
+                              <td className="py-1.5 text-slate-400">{item.item_type}</td>
+                              <td className="py-1.5 text-slate-300">{item.description}</td>
+                              <td className="py-1.5 text-right text-slate-300">{item.quantity}</td>
+                              <td className="py-1.5 text-right text-slate-300">{fmtTTDv(item.unit_cost)}</td>
+                              <td className="py-1.5 text-right text-white font-medium">{fmtTTDv(item.line_total)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
+                    {wo.notes && <p className="text-slate-500 text-xs mt-2 italic">{wo.notes}</p>}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      </div>
+
+      {/* PM Schedules */}
+      <div>
+        <div className="flex items-center justify-between mb-3 border-t border-slate-700 pt-4">
+          <h3 className="text-sm font-medium text-white">Preventive Maintenance</h3>
+          <button onClick={() => setShowNewPM(v => !v)}
+            className="px-3 py-1 text-xs bg-slate-600 hover:bg-slate-500 text-slate-300 hover:text-white rounded transition-colors">
+            {showNewPM ? 'Cancel' : '+ Add Task'}
+          </button>
+        </div>
+
+        {showNewPM && (
+          <NewPMForm vehicleId={vehicleId} onClose={() => { setShowNewPM(false); qc.invalidateQueries({ queryKey: ['vms-pm-schedules', vehicleId] }) }} />
+        )}
+
+        {pmLoading && <p className="text-slate-400 text-sm">Loading…</p>}
+        {!pmLoading && pms.length === 0 && <p className="text-slate-500 text-sm text-center py-4">No PM tasks configured.</p>}
+
+        <div className="space-y-2">
+          {pms.map(pm => {
+            const isDue = pm.next_due_date && new Date(pm.next_due_date + 'T00:00:00').getTime() <= Date.now() + 7 * 86400000
+            return (
+              <div key={pm.id} className={`flex items-center gap-3 p-3 rounded-lg border ${isDue ? 'bg-yellow-900/20 border-yellow-700' : 'bg-slate-700/40 border-slate-700'}`}>
+                <div className="flex-1 min-w-0">
+                  <p className="text-white text-sm font-medium">{pm.task_name}</p>
+                  <p className="text-slate-400 text-xs">
+                    Every {pm.interval_value} {pm.interval_type}
+                    {pm.last_done_date ? ` · Last: ${fmtDate(pm.last_done_date)}` : ''}
+                    {pm.next_due_date ? ` · Due: ${fmtDate(pm.next_due_date)}` : ''}
+                    {pm.next_due_km   ? ` · At: ${pm.next_due_km.toLocaleString()} km` : ''}
+                  </p>
+                </div>
+                <button onClick={() => deletePM(pm.id)}
+                  className="text-slate-600 hover:text-red-400 transition-colors text-lg leading-none"
+                  title="Remove">×</button>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function NewWorkOrderForm({ vehicleId, onClose }: { vehicleId: string; onClose: () => void }) {
+  const [form, setForm] = useState({ wo_type: 'CORRECTIVE', description: '', opened_date: new Date().toISOString().slice(0, 10), workshop_name: '', mechanic_name: '' })
+  const [saving, setSaving] = useState(false)
+  const [err, setErr] = useState('')
+  const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setForm(f => ({ ...f, [k]: e.target.value }))
+
+  const submit = async () => {
+    if (!form.description.trim()) { setErr('Description required.'); return }
+    setSaving(true); setErr('')
+    try {
+      await imsApi.createWorkOrder(vehicleId, {
+        wo_type: form.wo_type, description: form.description.trim(), opened_date: form.opened_date,
+        workshop_name: form.workshop_name || undefined, mechanic_name: form.mechanic_name || undefined,
+      })
+      onClose()
+    } catch (e) { setErr((e as Error).message); setSaving(false) }
+  }
+
+  return (
+    <div className="bg-slate-800 border border-slate-600 rounded-lg p-3 mb-3 space-y-2">
+      <div className="flex gap-2">
+        <select value={form.wo_type} onChange={set('wo_type')} className={cls}>
+          {(['CORRECTIVE','PREVENTIVE','INSPECTION','BODYWORK','OTHER'] as const).map(opt => (
+            <option key={opt} value={opt}>{opt}</option>
+          ))}
+        </select>
+        <input type="date" value={form.opened_date} onChange={set('opened_date')} className={cls} />
+      </div>
+      <input value={form.description} onChange={set('description')} className={cls} placeholder="Work description *" />
+      <div className="flex gap-2">
+        <input value={form.workshop_name} onChange={set('workshop_name')} className={cls} placeholder="Workshop (optional)" />
+        <input value={form.mechanic_name} onChange={set('mechanic_name')} className={cls} placeholder="Mechanic (optional)" />
+      </div>
+      {err && <p className="text-red-400 text-xs">{err}</p>}
+      <div className="flex gap-2">
+        <button onClick={submit} disabled={saving} className="px-3 py-1.5 text-xs bg-orange-600 hover:bg-orange-500 disabled:opacity-50 text-white rounded">{saving ? 'Saving…' : 'Create WO'}</button>
+        <button onClick={onClose} className="px-3 py-1.5 text-xs text-slate-400 hover:text-white">Cancel</button>
+      </div>
+    </div>
+  )
+}
+
+function AddLineItemForm({ vehicleId, woId, onAdded }: { vehicleId: string; woId: string; onAdded: () => void }) {
+  const [show, setShow] = useState(false)
+  const [form, setForm] = useState({ item_type: 'PART', description: '', quantity: '1', unit_cost: '' })
+  const [saving, setSaving] = useState(false)
+  const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setForm(f => ({ ...f, [k]: e.target.value }))
+
+  const submit = async () => {
+    if (!form.description.trim() || !form.unit_cost) return
+    setSaving(true)
+    try {
+      await imsApi.addWorkOrderItem(vehicleId, woId, {
+        item_type: form.item_type, description: form.description.trim(),
+        quantity: Number(form.quantity), unit_cost: Number(form.unit_cost),
+      })
+      onAdded(); setShow(false); setForm({ item_type: 'PART', description: '', quantity: '1', unit_cost: '' })
+    } finally { setSaving(false) }
+  }
+
+  if (!show) return <button onClick={() => setShow(true)} className="text-xs text-orange-400 hover:text-orange-300">+ Add line item</button>
+  return (
+    <div className="bg-slate-800 border border-slate-600 rounded p-2 space-y-2">
+      <div className="flex gap-2">
+        <select value={form.item_type} onChange={set('item_type')} className="bg-slate-700 border border-slate-600 rounded px-2 py-1 text-xs text-white">
+          {(['PART','LABOUR','CONSUMABLE','SUBLET'] as const).map(opt => <option key={opt} value={opt}>{opt}</option>)}
+        </select>
+        <input value={form.description} onChange={set('description')} className="flex-1 bg-slate-700 border border-slate-600 rounded px-2 py-1 text-xs text-white" placeholder="Description *" />
+        <input type="number" min="0.01" step="0.01" value={form.quantity} onChange={set('quantity')} className="w-16 bg-slate-700 border border-slate-600 rounded px-2 py-1 text-xs text-white" placeholder="Qty" />
+        <input type="number" min="0" step="0.01" value={form.unit_cost} onChange={set('unit_cost')} className="w-24 bg-slate-700 border border-slate-600 rounded px-2 py-1 text-xs text-white" placeholder="Unit cost" />
+        <button onClick={submit} disabled={saving || !form.description || !form.unit_cost}
+          className="px-2 py-1 text-xs bg-orange-600 hover:bg-orange-500 disabled:opacity-50 text-white rounded">{saving ? '…' : 'Add'}</button>
+        <button onClick={() => setShow(false)} className="text-slate-500 hover:text-white text-xs">×</button>
+      </div>
+    </div>
+  )
+}
+
+function NewPMForm({ vehicleId, onClose }: { vehicleId: string; onClose: () => void }) {
+  const [form, setForm] = useState({ task_name: '', interval_type: 'DAYS', interval_value: '90', notes: '' })
+  const [saving, setSaving] = useState(false)
+  const [err, setErr] = useState('')
+  const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setForm(f => ({ ...f, [k]: e.target.value }))
+
+  const submit = async () => {
+    if (!form.task_name.trim()) { setErr('Task name required.'); return }
+    setSaving(true); setErr('')
+    try {
+      await imsApi.createPMSchedule(vehicleId, { task_name: form.task_name.trim(), interval_type: form.interval_type, interval_value: Number(form.interval_value), notes: form.notes || undefined })
+      onClose()
+    } catch (e) { setErr((e as Error).message); setSaving(false) }
+  }
+
+  return (
+    <div className="bg-slate-800 border border-slate-600 rounded-lg p-3 mb-3 space-y-2">
+      <input value={form.task_name} onChange={set('task_name')} className={cls} placeholder="Task name e.g. Oil Change *" />
+      <div className="flex gap-2">
+        <input type="number" min="1" value={form.interval_value} onChange={set('interval_value')} className="w-24 bg-slate-700 border border-slate-600 rounded px-2 py-1.5 text-sm text-white" placeholder="90" />
+        <select value={form.interval_type} onChange={set('interval_type')} className={cls}>
+          {(['DAYS','KM','HOURS'] as const).map(opt => <option key={opt} value={opt}>{opt}</option>)}
+        </select>
+      </div>
+      {err && <p className="text-red-400 text-xs">{err}</p>}
+      <div className="flex gap-2">
+        <button onClick={submit} disabled={saving} className="px-3 py-1.5 text-xs bg-slate-600 hover:bg-slate-500 disabled:opacity-50 text-white rounded">{saving ? 'Saving…' : 'Add Task'}</button>
+        <button onClick={onClose} className="px-3 py-1.5 text-xs text-slate-400 hover:text-white">Cancel</button>
+      </div>
+    </div>
+  )
+}
+
+// ── VMS: Fuel & Costs Tab ─────────────────────────────────────────────────────
+
+function VehicleFuelCostsTab({ vehicleId }: { vehicleId: string }) {
+  const qc = useQueryClient()
+  const [showFuelForm, setShowFuelForm] = useState(false)
+  const [showCostForm, setShowCostForm] = useState(false)
+
+  const { data: fuelData, isLoading: fuelLoading } = useQuery<{ fuel_logs: FuelLog[] }>({
+    queryKey: ['vms-fuel-logs', vehicleId],
+    queryFn: () => imsApi.getFuelLogs(vehicleId, { limit: 50 }),
+  })
+
+  const { data: costData, isLoading: costLoading } = useQuery<{ operating_costs: OperatingCost[] }>({
+    queryKey: ['vms-op-costs', vehicleId],
+    queryFn: () => imsApi.getOperatingCosts(vehicleId, { limit: 50 }),
+  })
+
+  const { mutate: delFuel }  = useMutation({ mutationFn: (id: string) => imsApi.deleteFuelLog(vehicleId, id),       onSuccess: () => qc.invalidateQueries({ queryKey: ['vms-fuel-logs', vehicleId] }) })
+  const { mutate: delCost }  = useMutation({ mutationFn: (id: string) => imsApi.deleteOperatingCost(vehicleId, id), onSuccess: () => qc.invalidateQueries({ queryKey: ['vms-op-costs', vehicleId] }) })
+
+  const logs  = fuelData?.fuel_logs      ?? []
+  const costs = costData?.operating_costs ?? []
+
+  return (
+    <div className="flex flex-col h-full overflow-y-auto p-4 space-y-5">
+      <TCOCard vehicleId={vehicleId} />
+
+      {/* Fuel Logs */}
+      <div>
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-medium text-white">Fuel Log</h3>
+          <button onClick={() => setShowFuelForm(v => !v)}
+            className="px-3 py-1 text-xs bg-orange-600 hover:bg-orange-500 text-white rounded transition-colors">
+            {showFuelForm ? 'Cancel' : '+ Log Fill-up'}
+          </button>
+        </div>
+
+        {showFuelForm && (
+          <NewFuelLogForm vehicleId={vehicleId} onClose={() => { setShowFuelForm(false); qc.invalidateQueries({ queryKey: ['vms-fuel-logs', vehicleId] }); qc.invalidateQueries({ queryKey: ['vms-tco', vehicleId] }) }} />
+        )}
+
+        {fuelLoading && <p className="text-slate-400 text-sm">Loading…</p>}
+        {!fuelLoading && logs.length === 0 && <p className="text-slate-500 text-sm text-center py-3">No fuel logs.</p>}
+
+        {logs.length > 0 && (
+          <div className="overflow-x-auto rounded-lg border border-slate-700">
+            <table className="w-full text-xs">
+              <thead className="bg-slate-700/50 text-slate-400">
+                <tr>
+                  {['Date','Litres','Price/L','Total','Mileage','Station','Full?',''].map(h => (
+                    <th key={h} className="px-3 py-2 text-left font-medium">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {logs.map(log => (
+                  <tr key={log.id} className="border-t border-slate-700/50 hover:bg-slate-700/20">
+                    <td className="px-3 py-2 text-white">{fmtDate(log.fill_date)}</td>
+                    <td className="px-3 py-2 text-slate-300">{parseFloat(log.litres).toFixed(2)} L</td>
+                    <td className="px-3 py-2 text-slate-300">{parseFloat(log.price_per_litre).toFixed(2)}</td>
+                    <td className="px-3 py-2 text-orange-400 font-medium">{fmtTTDv(log.total_cost_ttd)}</td>
+                    <td className="px-3 py-2 text-slate-400">{log.mileage_km != null ? `${log.mileage_km.toLocaleString()} km` : '—'}</td>
+                    <td className="px-3 py-2 text-slate-400">{log.station_name ?? '—'}</td>
+                    <td className="px-3 py-2 text-center">{log.full_tank ? '✓' : '—'}</td>
+                    <td className="px-3 py-2">
+                      <button onClick={() => delFuel(log.id)} className="text-slate-600 hover:text-red-400 transition-colors">×</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* Operating Costs */}
+      <div>
+        <div className="flex items-center justify-between mb-3 border-t border-slate-700 pt-4">
+          <h3 className="text-sm font-medium text-white">Operating Costs</h3>
+          <button onClick={() => setShowCostForm(v => !v)}
+            className="px-3 py-1 text-xs bg-slate-600 hover:bg-slate-500 text-slate-300 hover:text-white rounded transition-colors">
+            {showCostForm ? 'Cancel' : '+ Add Cost'}
+          </button>
+        </div>
+
+        {showCostForm && (
+          <NewOperatingCostForm vehicleId={vehicleId} onClose={() => { setShowCostForm(false); qc.invalidateQueries({ queryKey: ['vms-op-costs', vehicleId] }); qc.invalidateQueries({ queryKey: ['vms-tco', vehicleId] }) }} />
+        )}
+
+        {costLoading && <p className="text-slate-400 text-sm">Loading…</p>}
+        {!costLoading && costs.length === 0 && <p className="text-slate-500 text-sm text-center py-3">No operating costs.</p>}
+
+        {costs.length > 0 && (
+          <div className="overflow-x-auto rounded-lg border border-slate-700">
+            <table className="w-full text-xs">
+              <thead className="bg-slate-700/50 text-slate-400">
+                <tr>
+                  {['Date','Type','Description','Amount','Vendor',''].map(h => (
+                    <th key={h} className="px-3 py-2 text-left font-medium">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {costs.map(c => (
+                  <tr key={c.id} className="border-t border-slate-700/50 hover:bg-slate-700/20">
+                    <td className="px-3 py-2 text-white">{fmtDate(c.cost_date)}</td>
+                    <td className="px-3 py-2"><span className="px-1.5 py-0.5 rounded bg-slate-700 text-slate-300">{c.cost_type}</span></td>
+                    <td className="px-3 py-2 text-slate-400 max-w-xs truncate">{c.description ?? '—'}</td>
+                    <td className="px-3 py-2 text-purple-400 font-medium">{fmtTTDv(c.amount_ttd)}</td>
+                    <td className="px-3 py-2 text-slate-400">{c.vendor_name ?? '—'}</td>
+                    <td className="px-3 py-2">
+                      <button onClick={() => delCost(c.id)} className="text-slate-600 hover:text-red-400 transition-colors">×</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function NewFuelLogForm({ vehicleId, onClose }: { vehicleId: string; onClose: () => void }) {
+  const [form, setForm] = useState({ fill_date: new Date().toISOString().slice(0, 10), litres: '', price_per_litre: '', mileage_km: '', station_name: '', full_tank: true })
+  const [saving, setSaving] = useState(false)
+  const [err, setErr] = useState('')
+  const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement>) => setForm(f => ({ ...f, [k]: e.target.value }))
+
+  const total = form.litres && form.price_per_litre ? (Number(form.litres) * Number(form.price_per_litre)).toFixed(2) : ''
+
+  const submit = async () => {
+    if (!form.litres || !form.price_per_litre) { setErr('Litres and price are required.'); return }
+    setSaving(true); setErr('')
+    try {
+      await imsApi.addFuelLog(vehicleId, {
+        fill_date: form.fill_date, litres: Number(form.litres), price_per_litre: Number(form.price_per_litre),
+        mileage_km: form.mileage_km ? Number(form.mileage_km) : undefined,
+        station_name: form.station_name || undefined, full_tank: form.full_tank,
+      })
+      onClose()
+    } catch (e) { setErr((e as Error).message); setSaving(false) }
+  }
+
+  return (
+    <div className="bg-slate-800 border border-slate-600 rounded-lg p-3 mb-3 space-y-2">
+      <div className="grid grid-cols-2 gap-2">
+        <div><label className="block text-xs text-slate-400 mb-1">Date *</label><input type="date" value={form.fill_date} onChange={set('fill_date')} className={cls} /></div>
+        <div><label className="block text-xs text-slate-400 mb-1">Litres *</label><input type="number" min="0.01" step="0.01" value={form.litres} onChange={set('litres')} className={cls} placeholder="0.00" /></div>
+        <div><label className="block text-xs text-slate-400 mb-1">Price/Litre (TTD) *</label><input type="number" min="0.01" step="0.01" value={form.price_per_litre} onChange={set('price_per_litre')} className={cls} placeholder="0.00" /></div>
+        <div><label className="block text-xs text-slate-400 mb-1">Total{total ? ` = TTD ${total}` : ''}</label><input readOnly value={total ? `TTD ${total}` : ''} className="w-full bg-slate-700/50 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-300 cursor-default" /></div>
+        <div><label className="block text-xs text-slate-400 mb-1">Mileage (km)</label><input type="number" min="0" value={form.mileage_km} onChange={set('mileage_km')} className={cls} /></div>
+        <div><label className="block text-xs text-slate-400 mb-1">Station</label><input value={form.station_name} onChange={set('station_name')} className={cls} /></div>
+      </div>
+      <div className="flex items-center gap-2">
+        <input type="checkbox" id="ft" checked={form.full_tank} onChange={e => setForm(f => ({ ...f, full_tank: e.target.checked }))} className="rounded" />
+        <label htmlFor="ft" className="text-sm text-slate-300">Full tank</label>
+      </div>
+      {err && <p className="text-red-400 text-xs">{err}</p>}
+      <div className="flex gap-2">
+        <button onClick={submit} disabled={saving} className="px-3 py-1.5 text-xs bg-orange-600 hover:bg-orange-500 disabled:opacity-50 text-white rounded">{saving ? 'Saving…' : 'Log Fill-up'}</button>
+        <button onClick={onClose} className="px-3 py-1.5 text-xs text-slate-400 hover:text-white">Cancel</button>
+      </div>
+    </div>
+  )
+}
+
+function NewOperatingCostForm({ vehicleId, onClose }: { vehicleId: string; onClose: () => void }) {
+  const [form, setForm] = useState({ cost_date: new Date().toISOString().slice(0, 10), cost_type: 'TOLL', amount_ttd: '', description: '', vendor_name: '' })
+  const [saving, setSaving] = useState(false)
+  const [err, setErr] = useState('')
+  const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setForm(f => ({ ...f, [k]: e.target.value }))
+
+  const submit = async () => {
+    if (!form.amount_ttd) { setErr('Amount required.'); return }
+    setSaving(true); setErr('')
+    try {
+      await imsApi.addOperatingCost(vehicleId, { cost_date: form.cost_date, cost_type: form.cost_type, amount_ttd: Number(form.amount_ttd), description: form.description || undefined, vendor_name: form.vendor_name || undefined })
+      onClose()
+    } catch (e) { setErr((e as Error).message); setSaving(false) }
+  }
+
+  return (
+    <div className="bg-slate-800 border border-slate-600 rounded-lg p-3 mb-3 space-y-2">
+      <div className="grid grid-cols-2 gap-2">
+        <div><label className="block text-xs text-slate-400 mb-1">Date *</label><input type="date" value={form.cost_date} onChange={set('cost_date')} className={cls} /></div>
+        <div>
+          <label className="block text-xs text-slate-400 mb-1">Type *</label>
+          <select value={form.cost_type} onChange={set('cost_type')} className={cls}>
+            {(['TOLL','PARKING','CLEANING','ACCESSORIES','ADMIN','OTHER'] as const).map(opt => <option key={opt} value={opt}>{opt}</option>)}
+          </select>
+        </div>
+        <div><label className="block text-xs text-slate-400 mb-1">Amount (TTD) *</label><input type="number" min="0.01" step="0.01" value={form.amount_ttd} onChange={set('amount_ttd')} className={cls} /></div>
+        <div><label className="block text-xs text-slate-400 mb-1">Vendor</label><input value={form.vendor_name} onChange={set('vendor_name')} className={cls} /></div>
+        <div className="col-span-2"><label className="block text-xs text-slate-400 mb-1">Description</label><input value={form.description} onChange={set('description')} className={cls} /></div>
+      </div>
+      {err && <p className="text-red-400 text-xs">{err}</p>}
+      <div className="flex gap-2">
+        <button onClick={submit} disabled={saving} className="px-3 py-1.5 text-xs bg-slate-600 hover:bg-slate-500 disabled:opacity-50 text-white rounded">{saving ? 'Saving…' : 'Add Cost'}</button>
+        <button onClick={onClose} className="px-3 py-1.5 text-xs text-slate-400 hover:text-white">Cancel</button>
+      </div>
+    </div>
+  )
+}
+
+// ── VMS: Compliance Tab ───────────────────────────────────────────────────────
+
+const COMPLIANCE_DOC_LABELS: Record<string, string> = {
+  MOT: 'MOT / Inspection', ROADWORTHY: 'Roadworthy', FIRE_EXTINGUISHER: 'Fire Extinguisher',
+  FIRST_AID: 'First Aid Kit', THIRD_PARTY_CERT: 'Third Party Cert', DRIVER_LICENSE_COPY: 'Driver License Copy',
+  ROAD_LICENCE: 'Road Licence', OTHER: 'Other',
+}
+
+function VehicleComplianceTab({ vehicleId }: { vehicleId: string }) {
+  const qc = useQueryClient()
+  const [showForm, setShowForm] = useState(false)
+
+  const { data, isLoading } = useQuery<{ compliance_docs: ComplianceDoc[] }>({
+    queryKey: ['vms-compliance', vehicleId],
+    queryFn: () => imsApi.getComplianceDocs(vehicleId),
+  })
+
+  const { mutate: delDoc } = useMutation({
+    mutationFn: (docId: string) => imsApi.deleteComplianceDoc(vehicleId, docId),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['vms-compliance', vehicleId] }),
+  })
+
+  const docs = data?.compliance_docs ?? []
+  const expiredDocs  = docs.filter(d => d.is_expired)
+  const expiringSoon = docs.filter(d => !d.is_expired && d.is_expiring_soon)
+
+  return (
+    <div className="flex flex-col h-full overflow-y-auto p-4 space-y-4">
+      {expiredDocs.length > 0 && (
+        <div className="px-3 py-2 bg-red-900/40 border border-red-700 rounded text-sm text-red-300">
+          Expired: {expiredDocs.map(d => COMPLIANCE_DOC_LABELS[d.doc_type] ?? d.doc_type).join(', ')}
+        </div>
+      )}
+      {expiringSoon.length > 0 && (
+        <div className="px-3 py-2 bg-orange-900/40 border border-orange-700 rounded text-sm text-orange-300">
+          Expiring soon: {expiringSoon.map(d => COMPLIANCE_DOC_LABELS[d.doc_type] ?? d.doc_type).join(', ')}
+        </div>
+      )}
+
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-medium text-white">Compliance Documents</h3>
+        <button onClick={() => setShowForm(v => !v)}
+          className="px-3 py-1 text-xs bg-orange-600 hover:bg-orange-500 text-white rounded transition-colors">
+          {showForm ? 'Cancel' : '+ Add Document'}
+        </button>
+      </div>
+
+      {showForm && (
+        <NewComplianceDocForm vehicleId={vehicleId} onClose={() => { setShowForm(false); qc.invalidateQueries({ queryKey: ['vms-compliance', vehicleId] }) }} />
+      )}
+
+      {isLoading && <p className="text-slate-400 text-sm">Loading…</p>}
+      {!isLoading && docs.length === 0 && <p className="text-slate-500 text-sm text-center py-4">No compliance documents.</p>}
+
+      <div className="space-y-2">
+        {docs.map(doc => (
+          <div key={doc.id} className={`flex items-center gap-3 p-3 rounded-lg border ${doc.is_expired ? 'bg-red-900/20 border-red-700' : doc.is_expiring_soon ? 'bg-orange-900/20 border-orange-700' : 'bg-slate-700/40 border-slate-700'}`}>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2">
+                <span className="text-white text-sm font-medium">{COMPLIANCE_DOC_LABELS[doc.doc_type] ?? doc.doc_type}</span>
+                {doc.is_expired       && <span className="px-1.5 py-0.5 rounded bg-red-800 text-red-300 text-xs">EXPIRED</span>}
+                {doc.is_expiring_soon && !doc.is_expired && <span className="px-1.5 py-0.5 rounded bg-orange-800 text-orange-300 text-xs">SOON</span>}
+              </div>
+              <p className="text-slate-400 text-xs mt-0.5">
+                {doc.doc_number ? `#${doc.doc_number}` : ''}
+                {doc.issued_by  ? ` · ${doc.issued_by}` : ''}
+                {doc.expiry_date ? ` · Exp: ${fmtDate(doc.expiry_date)}` : ''}
+              </p>
+            </div>
+            <button onClick={() => delDoc(doc.id)} className="text-slate-600 hover:text-red-400 transition-colors text-lg leading-none">×</button>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function NewComplianceDocForm({ vehicleId, onClose }: { vehicleId: string; onClose: () => void }) {
+  const [form, setForm] = useState({ doc_type: 'ROAD_LICENCE', doc_number: '', issued_by: '', issue_date: '', expiry_date: '', notes: '' })
+  const [saving, setSaving] = useState(false)
+  const [err, setErr] = useState('')
+  const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setForm(f => ({ ...f, [k]: e.target.value }))
+
+  const submit = async () => {
+    setSaving(true); setErr('')
+    try {
+      await imsApi.createComplianceDoc(vehicleId, {
+        doc_type: form.doc_type, doc_number: form.doc_number || undefined,
+        issued_by: form.issued_by || undefined, issue_date: form.issue_date || undefined,
+        expiry_date: form.expiry_date || undefined, notes: form.notes || undefined,
+      })
+      onClose()
+    } catch (e) { setErr((e as Error).message); setSaving(false) }
+  }
+
+  return (
+    <div className="bg-slate-800 border border-slate-600 rounded-lg p-3 space-y-2">
+      <div className="grid grid-cols-2 gap-2">
+        <div className="col-span-2">
+          <label className="block text-xs text-slate-400 mb-1">Document Type *</label>
+          <select value={form.doc_type} onChange={set('doc_type')} className={cls}>
+            {Object.entries(COMPLIANCE_DOC_LABELS).map(([val, label]) => <option key={val} value={val}>{label}</option>)}
+          </select>
+        </div>
+        <div><label className="block text-xs text-slate-400 mb-1">Doc Number</label><input value={form.doc_number} onChange={set('doc_number')} className={cls} /></div>
+        <div><label className="block text-xs text-slate-400 mb-1">Issued By</label><input value={form.issued_by} onChange={set('issued_by')} className={cls} /></div>
+        <div><label className="block text-xs text-slate-400 mb-1">Issue Date</label><input type="date" value={form.issue_date} onChange={set('issue_date')} className={cls} /></div>
+        <div><label className="block text-xs text-slate-400 mb-1">Expiry Date</label><input type="date" value={form.expiry_date} onChange={set('expiry_date')} className={cls} /></div>
+      </div>
+      {err && <p className="text-red-400 text-xs">{err}</p>}
+      <div className="flex gap-2">
+        <button onClick={submit} disabled={saving} className="px-3 py-1.5 text-xs bg-orange-600 hover:bg-orange-500 disabled:opacity-50 text-white rounded">{saving ? 'Saving…' : 'Save'}</button>
+        <button onClick={onClose} className="px-3 py-1.5 text-xs text-slate-400 hover:text-white">Cancel</button>
+      </div>
+    </div>
+  )
+}
+
+// ── VMS: Disposal Tab ─────────────────────────────────────────────────────────
+
+const VEH_OWNER_ENTITY_MAP: Record<string, string> = {
+  'JAG Holdings':       '00000000-0000-0000-0001-000000000001',
+  'JABCO':              '00000000-0000-0000-0001-000000000002',
+  'JAG Properties':     '00000000-0000-0000-0001-000000000003',
+  'JAG Entertainment':  '00000000-0000-0000-0001-000000000004',
+  'JAG Finance':        '00000000-0000-0000-0001-000000000005',
+  'Personal — Robert':  '00000000-0000-0000-0001-000000000008',
+  'Personal — Phillip': '00000000-0000-0000-0001-000000000010',
+  'Personal — Brian':   '00000000-0000-0000-0001-000000000011',
+}
+
+function VehicleDisposalTab({ vehicle }: { vehicle: Vehicle }) {
+  const qc = useQueryClient()
+  const [form, setForm] = useState({ disposal_type: 'SALE', disposal_date: new Date().toISOString().slice(0, 10), sale_price_ttd: '', buyer_name: '', final_mileage_km: String(vehicle.current_mileage_km ?? ''), notes: '' })
+  const [glForm, setGlForm] = useState({ vehicle_asset_gl_account_id: '', proceeds_gl_account_id: '', gain_loss_gl_account_id: '' })
+  const [showGl, setShowGl] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [err, setErr] = useState('')
+  const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => setForm(f => ({ ...f, [k]: e.target.value }))
+  const setGl = (k: string) => (e: React.ChangeEvent<HTMLSelectElement>) => setGlForm(f => ({ ...f, [k]: e.target.value }))
+
+  const ownerEntityId = vehicle.owner_entity ? VEH_OWNER_ENTITY_MAP[vehicle.owner_entity] : undefined
+
+  const { data: disposal, isLoading } = useQuery<VehicleDisposal>({
+    queryKey: ['vms-disposal', vehicle.id],
+    queryFn: () => imsApi.getDisposal(vehicle.id),
+    retry: false,
+  })
+
+  const { data: glAccounts = [] } = useQuery<GlAccount[]>({
+    queryKey: ['gl-accounts-disposal', ownerEntityId],
+    queryFn: () => glApi.getAccounts({ owner_entity_id: ownerEntityId, is_active: 'true' }),
+    enabled: !!ownerEntityId && showGl,
+    staleTime: 60_000,
+  })
+
+  const submit = async () => {
+    if (form.disposal_type === 'SALE' && !form.sale_price_ttd) { setErr('Sale price required for SALE disposal.'); return }
+    if (showGl && !glForm.vehicle_asset_gl_account_id) { setErr('Select a Vehicle Asset account to post to GL, or disable GL posting.'); return }
+    if (showGl && form.disposal_type === 'SALE' && !glForm.proceeds_gl_account_id) { setErr('Select a Proceeds account for SALE disposal GL entry.'); return }
+    setSaving(true); setErr('')
+    try {
+      await imsApi.disposeVehicle(vehicle.id, {
+        disposal_type: form.disposal_type, disposal_date: form.disposal_date,
+        sale_price_ttd: form.sale_price_ttd ? Number(form.sale_price_ttd) : undefined,
+        buyer_name: form.buyer_name || undefined,
+        final_mileage_km: form.final_mileage_km ? Number(form.final_mileage_km) : undefined,
+        notes: form.notes || undefined,
+        ...(showGl && glForm.vehicle_asset_gl_account_id ? {
+          vehicle_asset_gl_account_id: glForm.vehicle_asset_gl_account_id,
+          proceeds_gl_account_id: glForm.proceeds_gl_account_id || undefined,
+          gain_gl_account_id: glForm.gain_loss_gl_account_id || undefined,
+          loss_gl_account_id: glForm.gain_loss_gl_account_id || undefined,
+        } : {}),
+      })
+      qc.invalidateQueries({ queryKey: ['vms-disposal', vehicle.id] })
+      qc.invalidateQueries({ queryKey: ['ims-vehicles'] })
+    } catch (e) { setErr((e as Error).message); setSaving(false) }
+  }
+
+  if (isLoading) return <div className="flex items-center justify-center h-32 text-slate-400 text-sm">Loading…</div>
+
+  if (disposal) {
+    const gl = disposal.gain_loss_ttd ? Number(disposal.gain_loss_ttd) : null
+    return (
+      <div className="p-4 space-y-4">
+        <div className="px-3 py-2 bg-slate-700/50 border border-slate-600 rounded text-sm text-slate-300">
+          Vehicle marked as <strong className="text-red-400">DISPOSED</strong>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          {([
+            { key: 'type',   label: 'Disposal Type',    value: disposal.disposal_type },
+            { key: 'date',   label: 'Disposal Date',    value: fmtDate(disposal.disposal_date) },
+            { key: 'cost',   label: 'Cost at Disposal', value: fmtTTDv(disposal.cost_at_disposal) },
+            { key: 'dep',    label: 'Accumulated Dep',  value: fmtTTDv(disposal.accumulated_dep) },
+            { key: 'nbv',    label: 'Net Book Value',   value: fmtTTDv(disposal.nbv_at_disposal) },
+            { key: 'sale',   label: 'Sale Price',       value: disposal.sale_price_ttd ? fmtTTDv(disposal.sale_price_ttd) : '—' },
+          ] as { key: string; label: string; value: string }[]).map(r => (
+            <div key={r.key}>
+              <p className="text-xs text-slate-400">{r.label}</p>
+              <p className="text-sm text-white font-medium">{r.value}</p>
+            </div>
+          ))}
+        </div>
+        {gl !== null && (
+          <div className={`px-3 py-2 rounded border text-sm font-medium ${gl >= 0 ? 'bg-green-900/30 border-green-700 text-green-300' : 'bg-red-900/30 border-red-700 text-red-300'}`}>
+            {gl >= 0 ? `Gain on disposal: ${fmtTTDv(String(gl))}` : `Loss on disposal: ${fmtTTDv(String(Math.abs(gl)))}`}
+          </div>
+        )}
+        {disposal.buyer_name && <p className="text-xs text-slate-400">Buyer: <span className="text-slate-300">{disposal.buyer_name}</span></p>}
+        {disposal.notes && <p className="text-xs text-slate-500 italic">{disposal.notes}</p>}
+        {disposal.journal_entry_id
+          ? <p className="text-xs text-green-400">GL journal entry posted ✓</p>
+          : <p className="text-xs text-slate-500">No GL entry posted — accounts were not provided at disposal time.</p>
+        }
+      </div>
+    )
+  }
+
+  if (vehicle.status === 'DISPOSED') {
+    return <div className="flex items-center justify-center h-32 text-slate-500 text-sm">Vehicle is disposed — no record found.</div>
+  }
+
+  return (
+    <div className="p-4 space-y-4">
+      <div className="px-3 py-2 bg-orange-900/30 border border-orange-700 rounded text-sm text-orange-300">
+        Disposing a vehicle is irreversible. The vehicle will be marked DISPOSED, a stock movement written, and it will be removed from the active fleet.
+      </div>
+
+      <div className="space-y-3">
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">Disposal Type *</label>
+            <select value={form.disposal_type} onChange={set('disposal_type')} className={cls}>
+              <option value="SALE">Sale</option>
+              <option value="WRITE_OFF">Write-Off</option>
+              <option value="TRANSFER">Transfer</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">Disposal Date *</label>
+            <input type="date" value={form.disposal_date} onChange={set('disposal_date')} className={cls} />
+          </div>
+        </div>
+
+        {form.disposal_type === 'SALE' && (
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">Sale Price (TTD) *</label>
+              <input type="number" min="0" step="0.01" value={form.sale_price_ttd} onChange={set('sale_price_ttd')} className={cls} placeholder="0.00" />
+            </div>
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">Buyer Name</label>
+              <input value={form.buyer_name} onChange={set('buyer_name')} className={cls} />
+            </div>
+          </div>
+        )}
+
+        <div>
+          <label className="block text-xs text-slate-400 mb-1">Final Mileage (km)</label>
+          <input type="number" min="0" value={form.final_mileage_km} onChange={set('final_mileage_km')} className={cls} />
+        </div>
+
+        <div>
+          <label className="block text-xs text-slate-400 mb-1">Notes</label>
+          <textarea value={form.notes} onChange={set('notes')} rows={2} className={`${cls} resize-none`} />
+        </div>
+
+        {/* Optional GL posting section */}
+        {form.disposal_type !== 'TRANSFER' && ownerEntityId && (
+          <div className="border border-slate-700 rounded-lg overflow-hidden">
+            <button type="button" onClick={() => setShowGl(v => !v)}
+              className="w-full px-3 py-2 flex items-center justify-between bg-slate-800 hover:bg-slate-700/60 text-sm text-slate-300 transition-colors">
+              <span>Post to Finance Ledger (optional)</span>
+              <span className="text-slate-500 text-xs">{showGl ? '▲ hide' : '▼ expand'}</span>
+            </button>
+            {showGl && (
+              <div className="p-3 space-y-3 bg-slate-800/40">
+                <p className="text-xs text-slate-400">Providing GL accounts will post a balanced journal entry to Finance. Accumulated depreciation is pulled from the depreciation schedule automatically.</p>
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">Vehicle Asset Account *</label>
+                  <select value={glForm.vehicle_asset_gl_account_id} onChange={setGl('vehicle_asset_gl_account_id')} className={cls}>
+                    <option value="">— select account —</option>
+                    {glAccounts.filter(a => a.account_type === 'ASSET').map(a => (
+                      <option key={a.id} value={a.id}>{a.account_code} — {a.account_name}</option>
+                    ))}
+                  </select>
+                </div>
+                {form.disposal_type === 'SALE' && (
+                  <div>
+                    <label className="block text-xs text-slate-400 mb-1">Proceeds / Cash Account *</label>
+                    <select value={glForm.proceeds_gl_account_id} onChange={setGl('proceeds_gl_account_id')} className={cls}>
+                      <option value="">— select account —</option>
+                      {glAccounts.filter(a => a.account_type === 'ASSET').map(a => (
+                        <option key={a.id} value={a.id}>{a.account_code} — {a.account_name}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">Gain / Loss Account (optional)</label>
+                  <select value={glForm.gain_loss_gl_account_id} onChange={setGl('gain_loss_gl_account_id')} className={cls}>
+                    <option value="">— none (omit gain/loss line) —</option>
+                    {glAccounts.filter(a => a.account_type === 'OTHER_INCOME' || a.account_type === 'OTHER_EXPENSE' || a.account_type === 'REVENUE' || a.account_type === 'EXPENSE').map(a => (
+                      <option key={a.id} value={a.id}>{a.account_code} — {a.account_name}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {err && <p className="text-red-400 text-xs">{err}</p>}
+
+        <button onClick={submit} disabled={saving}
+          className="w-full py-2 bg-red-700 hover:bg-red-600 disabled:opacity-50 text-white text-sm rounded-lg transition-colors">
+          {saving ? 'Processing…' : `Dispose Vehicle — ${form.disposal_type}`}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ── VMS: Manage Modal (container) ─────────────────────────────────────────────
+
+type VmsTab = 'photos' | 'maintenance' | 'service-log' | 'fuel-costs' | 'compliance' | 'disposal'
+
+function VehiclePhotosTab({ itemId }: { itemId: string }) {
+  const { t } = useTranslation()
+  const qc = useQueryClient()
+  const inputRef = useRef<HTMLInputElement>(null)
+  const [uploading, setUploading] = useState(false)
+
+  const { data: photos = [], isLoading } = useQuery({
+    queryKey: ['item-photos', itemId],
+    queryFn: () => imsApi.getPhotos(itemId),
+  })
+
+  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setUploading(true)
+    try {
+      await imsApi.uploadPhoto(itemId, file, photos.length === 0)
+      qc.invalidateQueries({ queryKey: ['item-photos', itemId] })
+    } finally {
+      setUploading(false)
+      if (inputRef.current) inputRef.current.value = ''
+    }
+  }
+
+  const handleDelete = async (photoId: string) => {
+    await imsApi.deletePhoto(itemId, photoId)
+    qc.invalidateQueries({ queryKey: ['item-photos', itemId] })
+  }
+
+  if (isLoading) return <div className="flex items-center justify-center h-32 text-slate-400 text-sm">{t('common.loading')}</div>
+
+  return (
+    <div className="p-4 overflow-auto h-full">
+      <div className="flex items-center justify-between mb-4">
+        <p className="text-slate-400 text-sm">{photos.length} {photos.length === 1 ? t('inv.photo') : t('inv.photoCount_other', { count: photos.length })}</p>
+        <label className={`cursor-pointer px-3 py-1.5 bg-orange-600 hover:bg-orange-500 text-white text-xs rounded-lg transition-colors ${uploading ? 'opacity-50 pointer-events-none' : ''}`}>
+          {uploading ? t('inv.uploading') : `+ ${t('inv.addPhoto')}`}
+          <input ref={inputRef} type="file" accept="image/*" className="hidden" onChange={handleUpload} />
+        </label>
+      </div>
+      {photos.length === 0 ? (
+        <div className="flex items-center justify-center h-40 border-2 border-dashed border-slate-600 rounded-lg text-slate-500 text-sm">
+          {t('inv.noPhotos', 'No photos yet')}
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+          {photos.map(photo => (
+            <div key={photo.id} className="relative group rounded-lg overflow-hidden border border-slate-700 bg-slate-900 aspect-video">
+              <AuthedImg
+                path={imsApi.photoDownloadUrl(itemId, photo.id)}
+                alt=""
+                className="w-full h-full object-cover"
+              />
+              {photo.is_primary && (
+                <span className="absolute top-1 left-1 px-1.5 py-0.5 bg-orange-600 text-white text-xs rounded">Primary</span>
+              )}
+              <button
+                onClick={() => handleDelete(photo.id)}
+                className="absolute top-1 right-1 w-6 h-6 bg-red-700 hover:bg-red-600 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"
+              >×</button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function VehicleManageModal({ vehicle, onClose }: { vehicle: Vehicle; onClose: () => void }) {
+  const [tab, setTab] = useState<VmsTab>('photos')
+  const isDisposed = vehicle.status === 'DISPOSED'
+
+  const tabs: { key: VmsTab; label: string }[] = [
+    { key: 'photos',      label: '📷 Photos' },
+    { key: 'maintenance', label: 'Maintenance' },
+    { key: 'service-log', label: 'Service Log' },
+    { key: 'fuel-costs',  label: 'Fuel & Costs' },
+    { key: 'compliance',  label: 'Compliance' },
+    { key: 'disposal',    label: isDisposed ? 'Disposal Record' : 'Dispose' },
+  ]
+
+  return (
+    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-[60] p-2 sm:p-4">
+      <div className="bg-slate-800 border border-slate-700 rounded-xl w-full max-w-4xl shadow-2xl flex flex-col" style={{ height: '90vh' }}>
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-700 flex-shrink-0">
+          <div>
+            <h2 className="text-white font-semibold">{vehicle.registration_number} — {vehicle.make} {vehicle.model}</h2>
+            <p className="text-slate-400 text-xs mt-0.5">{vehicle.owner_entity ?? vehicle.fleet_type} · {vehicle.year} · {vehicle.item_condition}{isDisposed ? ' · DISPOSED' : ''}</p>
+          </div>
+          <button onClick={onClose} className="text-slate-400 hover:text-white text-xl leading-none">&times;</button>
+        </div>
+
+        {/* Tabs */}
+        <div className="flex border-b border-slate-700 px-5 flex-shrink-0 overflow-x-auto">
+          {tabs.map(({ key, label }) => (
+            <button key={key} onClick={() => setTab(key)}
+              className={`py-2.5 px-4 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap ${
+                tab === key ? 'border-orange-500 text-orange-400' : 'border-transparent text-slate-400 hover:text-white'
+              }`}>
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {/* Content */}
+        <div className="flex-1 overflow-hidden">
+          {tab === 'photos'      && <VehiclePhotosTab      itemId={vehicle.item_id} />}
+          {tab === 'maintenance' && <VehicleMaintenanceTab vehicleId={vehicle.id} />}
+          {tab === 'service-log' && <VehicleServiceLogTab  vehicle={vehicle} />}
+          {tab === 'fuel-costs'  && <VehicleFuelCostsTab   vehicleId={vehicle.id} />}
+          {tab === 'compliance'  && <VehicleComplianceTab  vehicleId={vehicle.id} />}
+          {tab === 'disposal'    && <VehicleDisposalTab    vehicle={vehicle} />}
+        </div>
+      </div>
     </div>
   )
 }
@@ -2278,10 +3554,16 @@ function AddScheduleModal({ onClose }: { onClose: () => void }) {
     queryKey: ['ims-items-assets'],
     queryFn: () => imsApi.getItems({ is_asset: true, limit: 100 }),
   })
+  const { data: glAccounts = [] } = useQuery<GlAccount[]>({
+    queryKey: ['gl-accounts-dep'],
+    queryFn: () => glApi.getAccounts({ is_active: 'true' }),
+    staleTime: 60_000,
+  })
   const [form, setForm] = useState({
     item_id: '', method: 'STRAIGHT_LINE', useful_life_years: '5',
     residual_value: '0', depreciation_start: new Date().toISOString().slice(0, 10),
     cost_at_start: '', notes: '',
+    dep_expense_gl_account_id: '', acc_dep_gl_account_id: '',
   })
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
     setForm(f => ({ ...f, [k]: e.target.value }))
@@ -2295,11 +3577,15 @@ function AddScheduleModal({ onClose }: { onClose: () => void }) {
       depreciation_start: form.depreciation_start,
       cost_at_start: Number(form.cost_at_start),
       notes: form.notes || undefined,
+      dep_expense_gl_account_id: form.dep_expense_gl_account_id || undefined,
+      acc_dep_gl_account_id: form.acc_dep_gl_account_id || undefined,
     }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['ims-dep-schedules'] }); onClose() },
   })
 
   const assets = assetsData?.items ?? []
+  const expenseAccounts = glAccounts.filter(a => a.account_type === 'EXPENSE')
+  const assetAccounts   = glAccounts.filter(a => a.account_type === 'ASSET')
 
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
@@ -2344,6 +3630,31 @@ function AddScheduleModal({ onClose }: { onClose: () => void }) {
             <label className="block text-xs text-slate-400 mb-1">{t('common.notes')}</label>
             <textarea value={form.notes} onChange={set('notes')} rows={2} className={cls} />
           </div>
+
+          <div className="border-t border-slate-700 pt-3">
+            <p className="text-xs text-slate-400 mb-2">GL Accounts — set now to enable automatic journal entries on each depreciation post</p>
+            <div className="space-y-2">
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">Depreciation Expense Account</label>
+                <select value={form.dep_expense_gl_account_id} onChange={set('dep_expense_gl_account_id')} className={cls}>
+                  <option value="">— none (skip GL posting) —</option>
+                  {expenseAccounts.map(a => (
+                    <option key={a.id} value={a.id}>{a.account_code} — {a.account_name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">Accumulated Depreciation Account</label>
+                <select value={form.acc_dep_gl_account_id} onChange={set('acc_dep_gl_account_id')} className={cls}>
+                  <option value="">— none (skip GL posting) —</option>
+                  {assetAccounts.map(a => (
+                    <option key={a.id} value={a.id}>{a.account_code} — {a.account_name}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          </div>
+
           {error && <p className="text-red-400 text-xs">{error instanceof Error ? error.message : 'Failed.'}</p>}
         </div>
         <div className="flex gap-3 mt-5">
@@ -2370,10 +3681,19 @@ function ScheduleDetail({ sched, onClose }: { sched: DepreciationSchedule; onClo
     return d.toISOString().slice(0, 10)
   })
   const [periodEnd, setPeriodEnd] = useState(today)
+  const [glExpense, setGlExpense] = useState(sched.dep_expense_gl_account_id ?? '')
+  const [glAccDep, setGlAccDep]   = useState(sched.acc_dep_gl_account_id ?? '')
+  const [showGlEdit, setShowGlEdit] = useState(!sched.dep_expense_gl_account_id)
 
   const { data: entries = [], isLoading } = useQuery({
     queryKey: ['ims-dep-entries', sched.id],
     queryFn: () => imsApi.getDepreciationEntries(sched.id),
+  })
+
+  const { data: glAccounts = [] } = useQuery<GlAccount[]>({
+    queryKey: ['gl-accounts-dep'],
+    queryFn: () => glApi.getAccounts({ is_active: 'true' }),
+    staleTime: 60_000,
   })
 
   const { mutate: postEntry, isPending: posting, error } = useMutation({
@@ -2381,6 +3701,17 @@ function ScheduleDetail({ sched, onClose }: { sched: DepreciationSchedule; onClo
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['ims-dep-entries', sched.id] })
       qc.invalidateQueries({ queryKey: ['ims-dep-schedules'] })
+    },
+  })
+
+  const { mutate: saveGl, isPending: savingGl } = useMutation({
+    mutationFn: () => imsApi.updateDepreciationGlAccounts(sched.id, {
+      dep_expense_gl_account_id: glExpense || null,
+      acc_dep_gl_account_id: glAccDep || null,
+    }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['ims-dep-schedules'] })
+      setShowGlEdit(false)
     },
   })
 
@@ -2444,6 +3775,65 @@ function ScheduleDetail({ sched, onClose }: { sched: DepreciationSchedule; onClo
           {error && <p className="text-red-400 text-xs">{error instanceof Error ? error.message : 'Failed.'}</p>}
         </div>
       )}
+
+      {/* GL Accounts */}
+      <div className="px-5 py-3 border-b border-slate-700">
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-xs text-slate-400 font-medium">GL Accounts</span>
+          {!showGlEdit && (
+            <button onClick={() => setShowGlEdit(true)} className="text-xs text-orange-400 hover:text-orange-300 transition-colors">Edit</button>
+          )}
+        </div>
+        {showGlEdit ? (
+          <div className="space-y-2">
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">Depreciation Expense</label>
+              <select value={glExpense} onChange={e => setGlExpense(e.target.value)}
+                className="w-full bg-slate-700 border border-slate-600 rounded px-2 py-1.5 text-white text-xs">
+                <option value="">— none (skip GL posting) —</option>
+                {glAccounts.filter(a => a.account_type === 'EXPENSE').map(a => (
+                  <option key={a.id} value={a.id}>{a.account_code} — {a.account_name}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">Accumulated Depreciation</label>
+              <select value={glAccDep} onChange={e => setGlAccDep(e.target.value)}
+                className="w-full bg-slate-700 border border-slate-600 rounded px-2 py-1.5 text-white text-xs">
+                <option value="">— none (skip GL posting) —</option>
+                {glAccounts.filter(a => a.account_type === 'ASSET').map(a => (
+                  <option key={a.id} value={a.id}>{a.account_code} — {a.account_name}</option>
+                ))}
+              </select>
+            </div>
+            <div className="flex gap-2 pt-1">
+              <button onClick={() => saveGl()} disabled={savingGl}
+                className="px-3 py-1 text-xs bg-orange-600 hover:bg-orange-500 disabled:opacity-50 text-white rounded transition-colors">
+                {savingGl ? 'Saving…' : 'Save GL Accounts'}
+              </button>
+              <button onClick={() => { setGlExpense(sched.dep_expense_gl_account_id ?? ''); setGlAccDep(sched.acc_dep_gl_account_id ?? ''); setShowGlEdit(false) }}
+                className="px-3 py-1 text-xs text-slate-400 hover:text-white transition-colors">
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 gap-2 text-xs">
+            <div>
+              <p className="text-slate-500">Dep Expense</p>
+              <p className={sched.dep_expense_gl_account_id ? 'text-green-400' : 'text-slate-500 italic'}>
+                {glAccounts.find(a => a.id === sched.dep_expense_gl_account_id)?.account_name ?? 'Not set — GL posting disabled'}
+              </p>
+            </div>
+            <div>
+              <p className="text-slate-500">Acc Depreciation</p>
+              <p className={sched.acc_dep_gl_account_id ? 'text-green-400' : 'text-slate-500 italic'}>
+                {glAccounts.find(a => a.id === sched.acc_dep_gl_account_id)?.account_name ?? 'Not set'}
+              </p>
+            </div>
+          </div>
+        )}
+      </div>
 
       {/* Entries */}
       <div className="flex-1 overflow-y-auto">

@@ -8,6 +8,9 @@ import type {
   PurchaseOrdersResponse, PurchaseOrderDetail, POLineInput,
   StockTakeSummary, StockTakeDetail,
   DepreciationSchedule, DepreciationEntry,
+  WorkOrder, WorkOrderItem, PMSchedule,
+  FuelLog, OperatingCost, VehicleTCO,
+  ComplianceDoc, VehicleDisposal,
 } from '../types/ims'
 
 // IMS uses jag_commercial with withTenantRLS.
@@ -33,7 +36,7 @@ export const imsApi = {
     location_id?: string
     category_id?: string
     is_asset?: boolean
-    is_active?: boolean
+    is_active?: boolean | 'all'
     search?: string
     page?: number
     limit?: number
@@ -101,6 +104,7 @@ export const imsApi = {
     unit_value?: number; insurance_policy_number?: string; insurance_provider?: string;
     insurance_expiry?: string; registration_expiry?: string;
     last_service_date?: string; service_interval_days?: number; location_id?: string;
+    vin?: string; engine_number?: string; sim_number?: string;
   }): Promise<{ updated: boolean }> =>
     client.patch(`/ims/vehicles/${vehicleId}`, data),
 
@@ -133,8 +137,11 @@ export const imsApi = {
   deletePhoto: (itemId: string, photoId: string): Promise<{ deleted: boolean }> =>
     client.delete(`/ims/items/${itemId}/photos/${photoId}`),
 
+  // BASE-relative (no /api/v1 prefix) — consumed via <AuthedImg> / api.objectUrl,
+  // which prepend BASE. This endpoint streams bytes behind header-only auth, so it
+  // cannot be used as a bare <img src>.
   photoDownloadUrl: (itemId: string, photoId: string): string =>
-    `/api/v1/ims/items/${itemId}/photos/${photoId}/download`,
+    `/ims/items/${itemId}/photos/${photoId}/download`,
 
   // ── Valuation ─────────────────────────────────────────────────────────────────
 
@@ -231,6 +238,7 @@ export const imsApi = {
   createDepreciationSchedule: (data: {
     item_id: string; method?: string; useful_life_years: number;
     residual_value?: number; depreciation_start: string; cost_at_start: number; notes?: string;
+    dep_expense_gl_account_id?: string; acc_dep_gl_account_id?: string;
   }): Promise<{ id: string }> =>
     client.post('/ims/depreciation/schedules', data),
 
@@ -240,24 +248,153 @@ export const imsApi = {
   postDepreciationEntry: (scheduleId: string, data: { period_start: string; period_end: string; notes?: string }): Promise<DepreciationEntry> =>
     client.post(`/ims/depreciation/schedules/${scheduleId}/post`, data),
 
+  updateDepreciationGlAccounts: (scheduleId: string, data: { dep_expense_gl_account_id: string | null; acc_dep_gl_account_id: string | null }): Promise<{ updated: boolean }> =>
+    client.patch(`/ims/depreciation/schedules/${scheduleId}/gl-accounts`, data),
+
   // ── Vehicles ──────────────────────────────────────────────────────────────────
 
   getVehicles: (params: {
     owner_entity?: string
+    include_disposed?: 'true' | 'false'
     page?: number
     limit?: number
   } = {}): Promise<VehiclesResponse> => {
     const q = new URLSearchParams()
-    if (params.owner_entity) q.set('owner_entity', params.owner_entity)
-    if (params.page)         q.set('page', String(params.page))
-    if (params.limit)        q.set('limit', String(params.limit))
+    if (params.owner_entity)     q.set('owner_entity', params.owner_entity)
+    if (params.include_disposed) q.set('include_disposed', params.include_disposed)
+    if (params.page)             q.set('page', String(params.page))
+    if (params.limit)            q.set('limit', String(params.limit))
     const qs = q.toString()
     return client.get(`/ims/vehicles${qs ? `?${qs}` : ''}`)
   },
+
+  disposeItem: (id: string, data: {
+    disposal_type: 'SALE' | 'WRITE_OFF' | 'TRANSFER'
+    disposal_date: string
+    disposal_notes?: string
+    sale_price_ttd?: number
+    buyer_name?: string
+    owner_entity_id?: string
+    asset_gl_account_id?: string
+    acc_dep_gl_account_id?: string
+    proceeds_gl_account_id?: string
+    gain_gl_account_id?: string
+    loss_gl_account_id?: string
+  }) => client.post<{ disposed: boolean; item_id: string }>(`/ims/items/${id}/dispose`, data),
 
   deleteItem: (id: string) =>
     client.delete<{ deleted: boolean; id: string }>(`/ims/items/${id}`),
 
   deleteVehicle: (id: string) =>
     client.delete<{ deleted: boolean; id: string }>(`/ims/vehicles/${id}`),
+
+  // ── Work Orders ───────────────────────────────────────────────────────────────
+
+  getWorkOrders: (vehicleId: string, params?: { status?: string; limit?: number }): Promise<{ work_orders: WorkOrder[] }> => {
+    const q = new URLSearchParams()
+    if (params?.status) q.set('status', params.status)
+    if (params?.limit)  q.set('limit', String(params.limit))
+    const qs = q.toString()
+    return client.get(`/ims/vehicles/${vehicleId}/work-orders${qs ? `?${qs}` : ''}`)
+  },
+
+  createWorkOrder: (vehicleId: string, data: {
+    wo_type: string; description: string; opened_date: string;
+    mileage_at_open?: number; mechanic_name?: string; workshop_name?: string; notes?: string;
+  }): Promise<WorkOrder> =>
+    client.post(`/ims/vehicles/${vehicleId}/work-orders`, data),
+
+  updateWorkOrderStatus: (vehicleId: string, woId: string, status: string): Promise<{ updated: boolean }> =>
+    client.patch(`/ims/vehicles/${vehicleId}/work-orders/${woId}/status`, { status }),
+
+  getWorkOrderItems: (vehicleId: string, woId: string): Promise<{ items: WorkOrderItem[] }> =>
+    client.get(`/ims/vehicles/${vehicleId}/work-orders/${woId}/items`),
+
+  addWorkOrderItem: (vehicleId: string, woId: string, data: {
+    item_type: string; description: string; quantity?: number; unit_cost: number;
+  }): Promise<WorkOrderItem> =>
+    client.post(`/ims/vehicles/${vehicleId}/work-orders/${woId}/items`, data),
+
+  // ── PM Schedules ──────────────────────────────────────────────────────────────
+
+  getPMSchedules: (vehicleId: string): Promise<{ pm_schedules: PMSchedule[] }> =>
+    client.get(`/ims/vehicles/${vehicleId}/pm-schedules`),
+
+  createPMSchedule: (vehicleId: string, data: {
+    task_name: string; interval_type: string; interval_value: number; notes?: string;
+  }): Promise<PMSchedule> =>
+    client.post(`/ims/vehicles/${vehicleId}/pm-schedules`, data),
+
+  markPMDone: (vehicleId: string, pmId: string, data: { done_date: string; done_km?: number }): Promise<{ updated: boolean }> =>
+    client.patch(`/ims/vehicles/${vehicleId}/pm-schedules/${pmId}`, { ...data, action: 'mark_done' }),
+
+  deletePMSchedule: (vehicleId: string, pmId: string): Promise<{ deleted: boolean }> =>
+    client.delete(`/ims/vehicles/${vehicleId}/pm-schedules/${pmId}`),
+
+  // ── Fuel Logs ─────────────────────────────────────────────────────────────────
+
+  getFuelLogs: (vehicleId: string, params?: { limit?: number }): Promise<{ fuel_logs: FuelLog[] }> => {
+    const q = new URLSearchParams()
+    if (params?.limit) q.set('limit', String(params.limit))
+    const qs = q.toString()
+    return client.get(`/ims/vehicles/${vehicleId}/fuel-logs${qs ? `?${qs}` : ''}`)
+  },
+
+  addFuelLog: (vehicleId: string, data: {
+    fill_date: string; litres: number; price_per_litre: number;
+    mileage_km?: number; fuel_type?: string; station_name?: string;
+    full_tank?: boolean; notes?: string;
+  }): Promise<FuelLog> =>
+    client.post(`/ims/vehicles/${vehicleId}/fuel-logs`, data),
+
+  deleteFuelLog: (vehicleId: string, logId: string): Promise<{ deleted: boolean }> =>
+    client.delete(`/ims/vehicles/${vehicleId}/fuel-logs/${logId}`),
+
+  // ── Operating Costs ───────────────────────────────────────────────────────────
+
+  getOperatingCosts: (vehicleId: string, params?: { limit?: number }): Promise<{ operating_costs: OperatingCost[] }> => {
+    const q = new URLSearchParams()
+    if (params?.limit) q.set('limit', String(params.limit))
+    const qs = q.toString()
+    return client.get(`/ims/vehicles/${vehicleId}/operating-costs${qs ? `?${qs}` : ''}`)
+  },
+
+  addOperatingCost: (vehicleId: string, data: {
+    cost_date: string; cost_type: string; amount_ttd: number;
+    description?: string; vendor_name?: string; notes?: string;
+  }): Promise<OperatingCost> =>
+    client.post(`/ims/vehicles/${vehicleId}/operating-costs`, data),
+
+  deleteOperatingCost: (vehicleId: string, costId: string): Promise<{ deleted: boolean }> =>
+    client.delete(`/ims/vehicles/${vehicleId}/operating-costs/${costId}`),
+
+  // ── TCO ───────────────────────────────────────────────────────────────────────
+
+  getVehicleTCO: (vehicleId: string): Promise<VehicleTCO> =>
+    client.get(`/ims/vehicles/${vehicleId}/tco`),
+
+  // ── Compliance Docs ───────────────────────────────────────────────────────────
+
+  getComplianceDocs: (vehicleId: string): Promise<{ compliance_docs: ComplianceDoc[] }> =>
+    client.get(`/ims/vehicles/${vehicleId}/compliance-docs`),
+
+  createComplianceDoc: (vehicleId: string, data: {
+    doc_type: string; doc_number?: string; issued_by?: string;
+    issue_date?: string; expiry_date?: string; notes?: string;
+  }): Promise<ComplianceDoc> =>
+    client.post(`/ims/vehicles/${vehicleId}/compliance-docs`, data),
+
+  deleteComplianceDoc: (vehicleId: string, docId: string): Promise<{ deleted: boolean }> =>
+    client.delete(`/ims/vehicles/${vehicleId}/compliance-docs/${docId}`),
+
+  // ── Disposal ──────────────────────────────────────────────────────────────────
+
+  getDisposal: (vehicleId: string): Promise<VehicleDisposal> =>
+    client.get(`/ims/vehicles/${vehicleId}/disposal`),
+
+  disposeVehicle: (vehicleId: string, data: {
+    disposal_type: string; disposal_date: string; sale_price_ttd?: number;
+    buyer_name?: string; final_mileage_km?: number; notes?: string;
+  }): Promise<VehicleDisposal> =>
+    client.post(`/ims/vehicles/${vehicleId}/dispose`, data),
 }

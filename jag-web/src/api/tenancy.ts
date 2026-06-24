@@ -59,8 +59,21 @@ export const tenancyApi = {
   decideApplication: (id: string, decision: string, reason?: string) =>
     api.post<Row>(`/properties/applications/${id}/decide`, { decision, rejection_reason: reason }),
 
-  uploadApplicationDoc: (id: string, body: { file_type: string; content_type: string }) =>
-    api.post<{ upload_url: string; object_key: string }>(`/properties/applications/${id}/upload-doc`, body),
+  uploadApplicationDoc: (id: string, docType: string, file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    form.append('doc_type', docType)
+    return api.postForm<Row>(`/properties/applications/${id}/upload-doc`, form)
+  },
+
+  getApplicationDocuments: (id: string) =>
+    api.get<{ id: string; doc_type: string; label: string; file_name: string; created_at: string }[]>(`/properties/applications/${id}/documents`),
+
+  downloadApplicationDoc: (id: string, docId: string, fileName: string) =>
+    api.download(`/properties/applications/${id}/documents/${docId}/download`, fileName),
+
+  createTenantFromApplication: (id: string, body: { first_name?: string; last_name?: string }) =>
+    api.post<{ tenant: Record<string, unknown>; docs_copied: number }>(`/properties/applications/${id}/create-tenant`, body),
 
   // ── Rent Schedule ─────────────────────────────────────────
   getRentSchedule: (params?: { lease_id?: string; status?: string }) =>
@@ -147,7 +160,7 @@ export const tenancyApi = {
   processVacate: (id: string, body: { vacating_date: string; exit_inspection_scheduled_at?: string }) =>
     api.post<void>(`/properties/renewals/${id}/vacate`, body),
 
-  // ── WhatsApp ──────────────────────────────────────────────
+  // ── WhatsApp (legacy send route) ─────────────────────────
   getConversations: () =>
     api.get<Row[]>('/properties/whatsapp/conversations'),
 
@@ -159,4 +172,27 @@ export const tenancyApi = {
 
   sendWaTemplate: (body: { to: string; template_name: string; language_code?: string; components?: unknown[] }) =>
     api.post<void>('/properties/whatsapp/send-template', body),
+
+  // ── WA Inbox (unified view) ───────────────────────────────
+  getWaInbox: () =>
+    api.get<Row[]>('/properties/wa-inbox'),
+
+  getWaThread: (phone: string) =>
+    api.get<{ phone: string; messages: Row[]; log: Row[]; enquiries: Row[] }>(`/properties/wa-inbox/${encodeURIComponent(phone)}`),
+
+  sendWaInboxReply: (phone: string, body: string) =>
+    api.post<void>(`/properties/wa-inbox/${encodeURIComponent(phone)}/reply`, { body }),
+
+  logContact: (phone: string, body: { log_type: string; body: string; duration_mins?: number; enquiry_id?: string | null; ticket_id?: string | null }) =>
+    api.post<Row>(`/properties/wa-inbox/${encodeURIComponent(phone)}/log`, body),
+
+  // ── WA Pending Approvals ──────────────────────────────────
+  getWaApprovals: (status?: string) =>
+    api.get<Row[]>(`/properties/wa-approvals${qs({ status })}`),
+
+  sendWaApproval: (id: string) =>
+    api.post<Row>(`/properties/wa-approvals/${id}/send`, {}),
+
+  dismissWaApproval: (id: string) =>
+    api.post<void>(`/properties/wa-approvals/${id}/dismiss`, {}),
 }

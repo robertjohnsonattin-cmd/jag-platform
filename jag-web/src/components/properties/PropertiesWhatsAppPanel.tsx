@@ -5,6 +5,18 @@ import { tenancyApi } from '../../api/tenancy'
 
 const cls = 'w-full bg-slate-700 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500'
 
+const LOG_TYPES = ['CALL_INBOUND','CALL_OUTBOUND','WHATSAPP_CALL','IN_PERSON','NOTE','EMAIL'] as const
+type LogType = typeof LOG_TYPES[number]
+
+const LOG_ICON: Record<string, string> = {
+  CALL_INBOUND:  '📞↙',
+  CALL_OUTBOUND: '📞↗',
+  WHATSAPP_CALL: '📲',
+  IN_PERSON:     '🤝',
+  NOTE:          '📝',
+  EMAIL:         '✉️',
+}
+
 export default function PropertiesWhatsAppPanel() {
   const { t } = useTranslation()
   const qc = useQueryClient()
@@ -12,35 +24,61 @@ export default function PropertiesWhatsAppPanel() {
   const [msgBody, setMsgBody] = useState('')
   const [newPhone, setNewPhone] = useState('')
   const [showNew, setShowNew] = useState(false)
+  const [showLog, setShowLog] = useState(false)
+  const [logForm, setLogForm] = useState<{ log_type: LogType; body: string; duration_mins: string }>({
+    log_type: 'NOTE', body: '', duration_mins: '',
+  })
 
   const { data: conversations = [] } = useQuery({
-    queryKey: ['wa-conversations'],
-    queryFn: () => tenancyApi.getConversations(),
+    queryKey: ['wa-inbox'],
+    queryFn: () => tenancyApi.getWaInbox(),
     refetchInterval: 30_000,
   })
 
-  const { data: thread = [] } = useQuery({
+  const { data: threadData } = useQuery({
     queryKey: ['wa-thread', selectedPhone],
-    queryFn: () => tenancyApi.getThread(selectedPhone!),
+    queryFn: () => tenancyApi.getWaThread(selectedPhone!),
     enabled: !!selectedPhone,
     refetchInterval: 15_000,
   })
 
+  const phone = selectedPhone ?? newPhone
+
+  // Merge WA messages + contact log into a unified timeline sorted by time
+  const timeline = (() => {
+    if (!threadData) return []
+    const msgs = (threadData.messages ?? []).map((m: Record<string, unknown>) => ({ ...m, _type: 'WA', _time: String(m['created_at']) }))
+    const log  = (threadData.log ?? []).map((l: Record<string, unknown>) => ({ ...l, _type: 'LOG', _time: String(l['created_at']) }))
+    return [...msgs, ...log].sort((a, b) => new Date(a._time).getTime() - new Date(b._time).getTime())
+  })()
+
   const sendMut = useMutation({
-    mutationFn: (to: string) => tenancyApi.sendWaText({ to, body: msgBody }),
+    mutationFn: () => tenancyApi.sendWaInboxReply(phone, msgBody),
     onSuccess: () => { setMsgBody(''); qc.invalidateQueries({ queryKey: ['wa-thread', selectedPhone] }) },
   })
 
-  const phone = selectedPhone ?? newPhone
+  const logMut = useMutation({
+    mutationFn: () => tenancyApi.logContact(phone, {
+      log_type: logForm.log_type,
+      body: logForm.body,
+      duration_mins: logForm.duration_mins ? parseInt(logForm.duration_mins) : undefined,
+    }),
+    onSuccess: () => {
+      setLogForm({ log_type: 'NOTE', body: '', duration_mins: '' })
+      setShowLog(false)
+      qc.invalidateQueries({ queryKey: ['wa-thread', selectedPhone] })
+      qc.invalidateQueries({ queryKey: ['wa-inbox'] })
+    },
+  })
 
   return (
     <div className="flex gap-4 h-[700px]">
-      {/* Conversations list */}
-      <div className="w-64 overflow-y-auto border-r border-slate-700 pr-3">
+      {/* Conversations sidebar */}
+      <div className="w-64 overflow-y-auto border-r border-slate-700 pr-3 flex-shrink-0">
         <div className="flex items-center justify-between mb-3">
-          <p className="text-sm font-medium text-slate-300">{t('tenancy.conversations', 'Conversations')}</p>
+          <p className="text-sm font-medium text-slate-300">{t('tenancy.conversations', 'Contacts')}</p>
           <button onClick={() => setShowNew(!showNew)} className="text-xs text-blue-400 hover:text-blue-300">
-            {t('tenancy.new', 'New')}
+            {t('tenancy.new', '+ New')}
           </button>
         </div>
         {showNew && (
@@ -48,43 +86,87 @@ export default function PropertiesWhatsAppPanel() {
             value={newPhone} onChange={e => setNewPhone(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter' && newPhone) { setSelectedPhone(null); setShowNew(false) } }} />
         )}
-        {conversations.length === 0 && <p className="text-xs text-slate-500">{t('tenancy.noConversations', 'No conversations yet.')}</p>}
+        {conversations.length === 0 && (
+          <p className="text-xs text-slate-500">{t('tenancy.noConversations', 'No conversations yet.')}</p>
+        )}
         {conversations.map((c: Record<string, unknown>) => (
-          <div key={String(c['phone'])} onClick={() => { setSelectedPhone(String(c['phone'])); setNewPhone('') }}
+          <div key={String(c['phone'])}
+            onClick={() => { setSelectedPhone(String(c['phone'])); setNewPhone('') }}
             className={`p-2.5 rounded cursor-pointer mb-1 transition-colors ${selectedPhone === String(c['phone']) ? 'bg-slate-700' : 'hover:bg-slate-800'}`}>
-            <p className="text-sm text-slate-300 font-mono">{String(c['phone'])}</p>
-            <p className="text-xs text-slate-500 truncate">{String(c['last_inbound'] ?? '—').slice(0, 50)}</p>
-            <p className="text-xs text-slate-600">{c['last_message_at'] ? new Date(String(c['last_message_at'])).toLocaleDateString('en-TT') : ''}</p>
+            <div className="flex items-center gap-1.5">
+              <span className="text-sm text-slate-300 font-mono flex-1 truncate">{String(c['phone'])}</span>
+              {Number(c['unread'] ?? 0) > 0 && (
+                <span className="text-xs bg-blue-600 text-white rounded-full px-1.5 py-0.5 font-semibold">{String(c['unread'])}</span>
+              )}
+            </div>
+            <p className="text-xs text-slate-600">{c['last_at'] ? new Date(String(c['last_at'])).toLocaleDateString('en-TT') : ''}</p>
           </div>
         ))}
       </div>
 
-      {/* Thread */}
-      <div className="flex-1 flex flex-col">
-        {!phone && <p className="text-sm text-slate-500 mt-16 text-center">{t('tenancy.selectConversation', 'Select a conversation or enter a number to start.')}</p>}
+      {/* Thread / detail */}
+      <div className="flex-1 flex flex-col min-w-0">
+        {!phone && (
+          <p className="text-sm text-slate-500 mt-16 text-center">{t('tenancy.selectConversation', 'Select a contact or enter a number.')}</p>
+        )}
         {phone && (
           <>
-            <div className="flex-1 overflow-y-auto flex flex-col gap-2 p-2 bg-slate-900 rounded mb-3">
-              {thread.length === 0 && <p className="text-xs text-slate-600 text-center mt-4">{t('tenancy.noMessages', 'No messages yet.')}</p>}
-              {thread.map((msg: Record<string, unknown>) => (
-                <div key={String(msg['id'])} className={`flex ${msg['direction'] === 'OUTBOUND' ? 'justify-end' : 'justify-start'}`}>
-                  <div className={`max-w-[70%] rounded-lg px-3 py-2 text-sm ${msg['direction'] === 'OUTBOUND' ? 'bg-blue-700 text-white' : 'bg-slate-700 text-slate-200'}`}>
-                    {msg['template_name']
-                      ? <span className="italic text-xs opacity-80">[{String(msg['template_name'])}]</span>
-                      : String(msg['body'] ?? '')}
-                    <p className="text-xs opacity-60 mt-1">
-                      {msg['sent_at'] ? new Date(String(msg['sent_at'])).toLocaleTimeString('en-TT', { hour: '2-digit', minute: '2-digit' }) : ''}
-                      {msg['direction'] === 'OUTBOUND' && Boolean(msg['delivery_status']) && <span className="ml-1">· {String(msg['delivery_status'])}</span>}
-                    </p>
-                  </div>
-                </div>
-              ))}
+            {/* Header */}
+            <div className="flex items-center gap-2 mb-3 pb-2 border-b border-slate-700">
+              <span className="text-sm font-mono text-slate-200">{phone}</span>
+              {threadData?.enquiries?.length ? (
+                <span className="text-xs text-slate-500">{threadData.enquiries.length} enquir{threadData.enquiries.length === 1 ? 'y' : 'ies'}</span>
+              ) : null}
+              <button onClick={() => setShowLog(true)}
+                className="ml-auto text-xs px-2.5 py-1 border border-slate-600 text-slate-300 hover:bg-slate-700 rounded">
+                {t('tenancy.logCall', '+ Log Call / Note')}
+              </button>
             </div>
+
+            {/* Timeline */}
+            <div className="flex-1 overflow-y-auto flex flex-col gap-2 p-2 bg-slate-900 rounded mb-3">
+              {timeline.length === 0 && (
+                <p className="text-xs text-slate-600 text-center mt-4">{t('tenancy.noMessages', 'No messages yet.')}</p>
+              )}
+              {timeline.map((entry: Record<string, unknown>) => {
+                if (entry['_type'] === 'WA') {
+                  const isOut = entry['direction'] === 'OUTBOUND'
+                  return (
+                    <div key={`wa-${entry['id']}`} className={`flex ${isOut ? 'justify-end' : 'justify-start'}`}>
+                      <div className={`max-w-[72%] rounded-lg px-3 py-2 text-sm ${isOut ? 'bg-blue-700 text-white' : 'bg-slate-700 text-slate-200'}`}>
+                        {entry['template_name']
+                          ? <span className="italic text-xs opacity-80">[{String(entry['template_name'])}]</span>
+                          : String(entry['body'] ?? '')}
+                        <p className="text-xs opacity-60 mt-0.5">
+                          {entry['sent_at'] ? new Date(String(entry['sent_at'])).toLocaleTimeString('en-TT', { hour: '2-digit', minute: '2-digit' }) : ''}
+                          {isOut && Boolean(entry['delivery_status']) && <span className="ml-1">· {entry['delivery_status'] as string}</span>}
+                        </p>
+                      </div>
+                    </div>
+                  )
+                }
+                // Contact log entry
+                return (
+                  <div key={`log-${entry['id']}`} className="flex justify-center">
+                    <div className="text-xs text-slate-500 bg-slate-800 border border-slate-700 rounded px-3 py-1.5 max-w-[80%]">
+                      <span className="mr-1.5">{LOG_ICON[String(entry['log_type'])] ?? '📌'}</span>
+                      <span className="font-medium text-slate-400">{String(entry['log_type']).replace(/_/g,' ')}</span>
+                      {Boolean(entry['duration_mins']) && <span className="ml-1">({String(entry['duration_mins'])}m)</span>}
+                      {' — '}
+                      {String(entry['body'])}
+                      <span className="ml-2 text-slate-600">{new Date(String(entry['created_at'])).toLocaleTimeString('en-TT', { hour: '2-digit', minute: '2-digit' })}</span>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+
+            {/* Compose */}
             <div className="flex gap-2">
-              <input className={cls} placeholder={t('tenancy.typeMessage', 'Type a message...')}
+              <input className={cls} placeholder={t('tenancy.typeMessage', 'WhatsApp message...')}
                 value={msgBody} onChange={e => setMsgBody(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter' && msgBody.trim()) sendMut.mutate(phone) }} />
-              <button onClick={() => sendMut.mutate(phone)} disabled={sendMut.isPending || !msgBody.trim()}
+                onKeyDown={e => { if (e.key === 'Enter' && msgBody.trim()) sendMut.mutate() }} />
+              <button onClick={() => sendMut.mutate()} disabled={sendMut.isPending || !msgBody.trim()}
                 className="px-4 py-1.5 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded disabled:opacity-40">
                 {t('common.send', 'Send')}
               </button>
@@ -92,6 +174,47 @@ export default function PropertiesWhatsAppPanel() {
           </>
         )}
       </div>
+
+      {/* Log call / note modal */}
+      {showLog && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-slate-800 rounded-lg p-6 w-full max-w-sm">
+            <h2 className="text-base font-semibold mb-4">{t('tenancy.logCall', 'Log Call / Note')}</h2>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">{t('tenancy.logType', 'Type')}</label>
+                <select className={cls} value={logForm.log_type}
+                  onChange={e => setLogForm(f => ({ ...f, log_type: e.target.value as LogType }))}>
+                  {LOG_TYPES.map(lt => (
+                    <option key={lt} value={lt}>{LOG_ICON[lt]} {lt.replace(/_/g, ' ')}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">{t('tenancy.notes', 'Notes')}</label>
+                <textarea className={cls} rows={3} value={logForm.body}
+                  onChange={e => setLogForm(f => ({ ...f, body: e.target.value }))} />
+              </div>
+              {['CALL_INBOUND','CALL_OUTBOUND','WHATSAPP_CALL','IN_PERSON'].includes(logForm.log_type) && (
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">{t('tenancy.durationMins', 'Duration (minutes)')}</label>
+                  <input type="number" className={cls} min={0} value={logForm.duration_mins}
+                    onChange={e => setLogForm(f => ({ ...f, duration_mins: e.target.value }))} />
+                </div>
+              )}
+            </div>
+            <div className="flex gap-2 justify-end mt-4">
+              <button onClick={() => setShowLog(false)} className="px-4 py-2 text-sm text-slate-400 hover:text-slate-200">
+                {t('common.cancel', 'Cancel')}
+              </button>
+              <button onClick={() => logMut.mutate()} disabled={logMut.isPending || !logForm.body.trim()}
+                className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded disabled:opacity-40">
+                {logMut.isPending ? t('common.saving', 'Saving...') : t('common.save', 'Save')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
