@@ -6,6 +6,7 @@ import { glApi } from '../api/gl'
 import { tenantApi } from '../api/client'
 import ConfirmDeleteModal from '../components/ui/ConfirmDeleteModal'
 import AuthedImg from '../components/AuthedImg'
+import { VehicleGpsTab, FleetMapModal, TrackersModal } from '../components/ims/VehicleGps'
 import type {
   Item, ItemDetail,
   ItemCondition, MovementType,
@@ -1710,6 +1711,8 @@ function VehiclesTab() {
   const [editVehicle, setEditVehicle] = useState<Vehicle | null>(null)
   const [deletingVehicle, setDeletingVehicle] = useState<Vehicle | null>(null)
   const [manageVehicle, setManageVehicle] = useState<Vehicle | null>(null)
+  const [showFleetMap, setShowFleetMap] = useState(false)
+  const [showTrackers, setShowTrackers] = useState(false)
   const [syncing, setSyncing] = useState(false)
   const [syncResult, setSyncResult] = useState<{ total_events_created: number; failed: number } | null>(null)
   const qc = useQueryClient()
@@ -1825,6 +1828,14 @@ function VehiclesTab() {
             className="px-3 py-1.5 bg-slate-700 hover:bg-green-800 disabled:opacity-50 text-slate-300 hover:text-white text-xs rounded-lg transition-colors"
             title={t('inv.syncCalendarTooltip')}
           >{syncing ? '⏳' : '📅'} {t('inv.syncCalendarBtn')}</button>
+          <button
+            onClick={() => setShowFleetMap(true)}
+            className="px-3 py-1.5 bg-slate-700 hover:bg-orange-800 text-slate-300 hover:text-white text-xs rounded-lg transition-colors"
+          >🗺 Fleet Map</button>
+          <button
+            onClick={() => setShowTrackers(true)}
+            className="px-3 py-1.5 bg-slate-700 hover:bg-orange-800 text-slate-300 hover:text-white text-xs rounded-lg transition-colors"
+          >📡 GPS Trackers</button>
           <button
             onClick={() => setShowAdd(true)}
             className="px-3 py-1.5 bg-orange-600 hover:bg-orange-500 text-white text-xs rounded-lg transition-colors"
@@ -1949,6 +1960,8 @@ function VehiclesTab() {
       )}
 
       {manageVehicle && <VehicleManageModal vehicle={manageVehicle} onClose={() => setManageVehicle(null)} />}
+      {showFleetMap && <FleetMapModal onClose={() => setShowFleetMap(false)} />}
+      {showTrackers && <TrackersModal onClose={() => setShowTrackers(false)} />}
       {showAdd && <AddVehicleModal locations={locData ?? []} onClose={() => { setShowAdd(false); qc.invalidateQueries({ queryKey: ['ims-vehicles'] }) }} />}
       {editVehicle && <EditVehicleModal vehicle={editVehicle} locations={locData ?? []} onClose={() => setEditVehicle(null)} />}
       {deletingVehicle && (
@@ -2985,7 +2998,7 @@ function VehicleDisposalTab({ vehicle }: { vehicle: Vehicle }) {
 
 // ── VMS: Manage Modal (container) ─────────────────────────────────────────────
 
-type VmsTab = 'photos' | 'maintenance' | 'service-log' | 'fuel-costs' | 'compliance' | 'disposal'
+type VmsTab = 'photos' | 'maintenance' | 'service-log' | 'fuel-costs' | 'compliance' | 'disposal' | 'gps'
 
 function VehiclePhotosTab({ itemId }: { itemId: string }) {
   const { t } = useTranslation()
@@ -3065,6 +3078,7 @@ function VehicleManageModal({ vehicle, onClose }: { vehicle: Vehicle; onClose: (
     { key: 'service-log', label: 'Service Log' },
     { key: 'fuel-costs',  label: 'Fuel & Costs' },
     { key: 'compliance',  label: 'Compliance' },
+    { key: 'gps',         label: '📍 GPS' },
     { key: 'disposal',    label: isDisposed ? 'Disposal Record' : 'Dispose' },
   ]
 
@@ -3099,6 +3113,7 @@ function VehicleManageModal({ vehicle, onClose }: { vehicle: Vehicle; onClose: (
           {tab === 'service-log' && <VehicleServiceLogTab  vehicle={vehicle} />}
           {tab === 'fuel-costs'  && <VehicleFuelCostsTab   vehicleId={vehicle.id} />}
           {tab === 'compliance'  && <VehicleComplianceTab  vehicleId={vehicle.id} />}
+          {tab === 'gps'         && <VehicleGpsTab         vehicleId={vehicle.id} registration={vehicle.registration_number} />}
           {tab === 'disposal'    && <VehicleDisposalTab    vehicle={vehicle} />}
         </div>
       </div>

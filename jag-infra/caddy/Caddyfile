@@ -90,6 +90,31 @@ auth.jagcorporate.com {
 	}
 }
 
+# ── traccar.jagcorporate.com — Traccar GPS server (own UI + Traccar Manager app) ─────
+# Independent fallback view if the JAG app is down. Traccar serves its own SPA and
+# sets its own headers, so no strict CSP is imposed here.
+
+traccar.jagcorporate.com {
+	import cloudflare_tls
+
+	request_body {
+		max_size 10MB
+	}
+
+	reverse_proxy traccar:8082 {
+		header_up X-Real-IP {http.request.header.CF-Connecting-IP}
+		header_up X-Forwarded-For {http.request.header.CF-Connecting-IP}
+		header_up X-Forwarded-Proto https
+	}
+
+	header {
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+		-Server
+	}
+}
+
 # ── jagcorporate.com / www.jagcorporate.com — JAG React frontend ─────────────────────────────
 
 jagcorporate.com, www.jagcorporate.com {
@@ -102,7 +127,7 @@ jagcorporate.com, www.jagcorporate.com {
 		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
 		# React SPA — scripts/styles from self; API + auth calls to JAG subdomains;
 		# Keycloak iframes allowed for silent token refresh
-		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' https://api.jagcorporate.com https://auth.jagcorporate.com; font-src 'self'; frame-src https://auth.jagcorporate.com; object-src 'none'; base-uri 'self'; form-action 'self' https://auth.jagcorporate.com"
+		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://*.tile.openstreetmap.org; connect-src 'self' https://api.jagcorporate.com https://auth.jagcorporate.com; font-src 'self'; frame-src https://auth.jagcorporate.com; object-src 'none'; base-uri 'self'; form-action 'self' https://auth.jagcorporate.com"
 		Cross-Origin-Resource-Policy same-origin
 		-Server
 	}

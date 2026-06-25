@@ -11,6 +11,7 @@ import type {
   WorkOrder, WorkOrderItem, PMSchedule,
   FuelLog, OperatingCost, VehicleTCO,
   ComplianceDoc, VehicleDisposal,
+  GpsTracker, GpsPosition, GpsEvent, Geofence, FleetVehiclePosition, TrackerStatus,
 } from '../types/ims'
 
 // IMS uses jag_commercial with withTenantRLS.
@@ -397,4 +398,66 @@ export const imsApi = {
     buyer_name?: string; final_mileage_km?: number; notes?: string;
   }): Promise<VehicleDisposal> =>
     client.post(`/ims/vehicles/${vehicleId}/dispose`, data),
+
+  // ── GPS tracking (Traccar) ──────────────────────────────────────────────────────
+
+  getVehicleGpsCurrent: (vehicleId: string): Promise<{ position: GpsPosition | null }> =>
+    client.get(`/ims/vehicles/${vehicleId}/gps/current`),
+
+  getVehicleGpsHistory: (vehicleId: string, params?: { from?: string; to?: string }):
+    Promise<{ from: string; to: string; count: number; points: GpsPosition[] }> => {
+    const q = new URLSearchParams()
+    if (params?.from) q.set('from', params.from)
+    if (params?.to)   q.set('to', params.to)
+    const qs = q.toString()
+    return client.get(`/ims/vehicles/${vehicleId}/gps/history${qs ? `?${qs}` : ''}`)
+  },
+
+  getVehicleGpsEvents: (vehicleId: string, params?: { from?: string; to?: string }):
+    Promise<{ from: string; to: string; events: GpsEvent[] }> => {
+    const q = new URLSearchParams()
+    if (params?.from) q.set('from', params.from)
+    if (params?.to)   q.set('to', params.to)
+    const qs = q.toString()
+    return client.get(`/ims/vehicles/${vehicleId}/gps/events${qs ? `?${qs}` : ''}`)
+  },
+
+  getVehicleGeofences: (vehicleId: string): Promise<{ geofences: Geofence[] }> =>
+    client.get(`/ims/vehicles/${vehicleId}/gps/geofences`),
+
+  createGeofence: (vehicleId: string, data: {
+    name: string; type: 'circle' | 'polygon';
+    center?: { lat: number; lng: number }; radius_m?: number;
+    points?: Array<{ lat: number; lng: number }>;
+  }): Promise<{ geofence: Geofence }> =>
+    client.post(`/ims/vehicles/${vehicleId}/gps/geofences`, data),
+
+  deleteGeofence: (vehicleId: string, gfid: number): Promise<{ deleted: boolean }> =>
+    client.delete(`/ims/vehicles/${vehicleId}/gps/geofences/${gfid}`),
+
+  // ── Fleet map ─────────────────────────────────────────────────────────────────
+
+  getFleetPositions: (): Promise<{ fleet: FleetVehiclePosition[] }> =>
+    client.get('/ims/gps/fleet'),
+
+  // ── Tracker registry ────────────────────────────────────────────────────────────
+
+  getTrackers: (): Promise<{ trackers: GpsTracker[] }> =>
+    client.get('/ims/gps/trackers'),
+
+  createTracker: (data: {
+    device_serial: string; model?: string; protocol?: string;
+    traccar_device_id?: number; sim_phone?: string; vehicle_id?: string; notes?: string;
+  }): Promise<GpsTracker> =>
+    client.post('/ims/gps/trackers', data),
+
+  updateTracker: (tid: string, data: {
+    model?: string; protocol?: string; traccar_device_id?: number | null;
+    sim_phone?: string | null; vehicle_id?: string | null;
+    status?: TrackerStatus; notes?: string;
+  }): Promise<{ updated: boolean }> =>
+    client.patch(`/ims/gps/trackers/${tid}`, data),
+
+  deleteTracker: (tid: string): Promise<{ deleted: boolean }> =>
+    client.delete(`/ims/gps/trackers/${tid}`),
 }

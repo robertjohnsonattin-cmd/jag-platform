@@ -129,9 +129,17 @@ services:
       MINIO_ACCESS_KEY:           ${MINIO_ACCESS_KEY}
       MINIO_SECRET_KEY:           ${MINIO_SECRET_KEY}
       MINIO_BUCKET_STATEMENTS:    ${MINIO_BUCKET_STATEMENTS}
-      MINIO_AUDIT_TOKEN:          ${MINIO_AUDIT_TOKEN}
       PORT:                       "3000"
       NODE_ENV:                   "production"
+      TRACCAR_URL:                ${TRACCAR_URL}
+      TRACCAR_USER:               ${TRACCAR_USER}
+      TRACCAR_PASSWORD:           ${TRACCAR_PASSWORD}
+      TRACCAR_EVENT_TOKEN:        ${TRACCAR_EVENT_TOKEN}
+      GOOGLE_CALENDAR_ID:             ${GOOGLE_CALENDAR_ID}
+      GOOGLE_SERVICE_ACCOUNT_EMAIL:   ${GOOGLE_SERVICE_ACCOUNT_EMAIL}
+      GOOGLE_SERVICE_ACCOUNT_KEY:     ${GOOGLE_SERVICE_ACCOUNT_KEY}
+    volumes:
+      - /opt/jag/jag-api/google-calendar-key.json:/opt/jag/jag-api/google-calendar-key.json:ro
     ports:
       - "127.0.0.1:3000:3000"    # nginx proxies; never expose directly
     extra_hosts:
@@ -153,6 +161,49 @@ services:
           memory: 512M
         reservations:
           memory: 128M
+
+  # ── Traccar — GPS tracking server ─────────────────────────────────────────────
+  # Source of truth for vehicle positions / history / geofences / events.
+  # Devices (TK918/TK905/JTK905 = tkstar:5013, Q8 = gt06:5023) connect directly
+  # over the internet — those ports MUST be opened in the Oracle Security List.
+  # Web UI (8082) is localhost-only here; exposed via Caddy at traccar.jagcorporate.com.
+  # Config via env (CONFIG_USE_ENVIRONMENT_VARIABLES) so secrets stay in .env (STD-07).
+  # DB: native PostgreSQL, dedicated `traccar` database (Traccar runs its own migrations).
+  traccar:
+    image: traccar/traccar:latest
+    container_name: jag-traccar
+    restart: unless-stopped
+    environment:
+      CONFIG_USE_ENVIRONMENT_VARIABLES: "true"
+      LOGGER_CONSOLE: "true"
+      DATABASE_DRIVER:   org.postgresql.Driver
+      DATABASE_URL:      ${TRACCAR_DB_URL}
+      DATABASE_USER:     ${TRACCAR_DB_USER}
+      DATABASE_PASSWORD: ${TRACCAR_DB_PASSWORD}
+      # Forward device events (geofence/overspeed/SOS) to jag-api → notification bell
+      EVENT_FORWARD_URL:    http://api:3000/internal/traccar-event
+      EVENT_FORWARD_HEADER: "Authorization: Bearer ${TRACCAR_EVENT_TOKEN}"
+    ports:
+      - "0.0.0.0:5013:5015"      # host 5013 -> jt808 (TK905B-4G / JTK905B-4G), PUBLIC
+      - "0.0.0.0:5023:5093"      # host 5023 -> watch (TK918-4GSA), PUBLIC; Q8/gt06 deferred (needs 3rd port)
+      - "127.0.0.1:8082:8082"    # web UI — fronted by Caddy / SSH tunnel
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8082/api/server || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 256M
 
   # ── MinIO Object Storage ──────────────────────────────────────────────────────
   minio:

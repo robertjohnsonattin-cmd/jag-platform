@@ -443,6 +443,70 @@ export interface VehicleDisposal {
   created_at: string
 }
 
+// ── GPS tracking (Traccar integration) ────────────────────────────────────────
+
+export type TrackerStatus = 'UNASSIGNED' | 'ASSIGNED' | 'RETIRED'
+
+export interface GpsTracker {
+  id: string
+  device_serial: string
+  model: string | null
+  protocol: string | null
+  traccar_device_id: number | null
+  sim_phone: string | null
+  status: TrackerStatus
+  vehicle_id: string | null
+  notes: string | null
+  last_seen_at: string | null
+  last_modified_at: string
+  created_at: string
+  vehicle_registration?: string | null
+  vehicle_name?: string | null
+}
+
+export interface GpsPosition {
+  latitude: number
+  longitude: number
+  speed_kmh: number
+  course: number
+  altitude: number
+  fix_time: string
+  device_id: number
+  attributes: Record<string, unknown>
+}
+
+export interface GpsEvent {
+  id: number
+  type: string
+  eventTime: string
+  deviceId: number
+  geofenceId?: number
+  attributes: Record<string, unknown>
+}
+
+export interface Geofence {
+  id: number
+  name: string
+  description?: string
+  area: string
+}
+
+export interface FleetVehiclePosition {
+  vehicle_id: string
+  registration_number: string
+  make: string
+  model: string
+  item_name: string
+  traccar_device_id: number
+  position: {
+    latitude: number
+    longitude: number
+    speed_kmh: number
+    course: number
+    fix_time: string
+  } | null
+}
+
 export interface RecordMovementPayload {
   item_id: string
   movement_type: MovementType

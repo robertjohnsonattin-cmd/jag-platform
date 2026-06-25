@@ -11,6 +11,7 @@ import { vmsMaintenanceRouter }  from './vms-maintenance';
 import { vmsCostsRouter }        from './vms-costs';
 import { vmsComplianceRouter }   from './vms-compliance';
 import { vmsDisposalRouter }     from './vms-disposal';
+import { vmsGpsRouter }          from './vms-gps';
 
 export const imsRouter = Router();
 
@@ -24,6 +25,7 @@ imsRouter.use('/vehicles',     vmsMaintenanceRouter); // work orders + PM schedu
 imsRouter.use('/vehicles',     vmsCostsRouter);       // fuel logs + operating costs + TCO
 imsRouter.use('/vehicles',     vmsComplianceRouter);  // compliance document vault
 imsRouter.use('/vehicles',     vmsDisposalRouter);    // disposal workflow + GL posting
+imsRouter.use('/',             vmsGpsRouter);          // GPS: /vehicles/:id/gps/*, /gps/fleet, /gps/trackers
 imsRouter.use('/',             imsSuppliersRouter);    // suppliers, purchase-orders
 imsRouter.use('/',             imsStockTakesRouter);   // stock-takes
 imsRouter.use('/',             imsDepreciationRouter); // depreciation/schedules
