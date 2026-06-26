@@ -1,7 +1,7 @@
 # JAG Integrated Business Platform — Claude Session Context
 
 **Owner:** Robert Johnson-Attin | Barataria, Trinidad & Tobago
-**Architecture:** v1.9 | **Current Phase:** ALL PHASES COMPLETE — in production | **Updated:** 2026-06-24 (session 26)
+**Architecture:** v1.9 | **Current Phase:** ALL PHASES COMPLETE — in production | **Updated:** 2026-06-26 (session 28)
 
 ---
 
@@ -108,6 +108,17 @@ Custom `app.*` GUC parameters revert to `''` (empty string) **not NULL** at sess
 1. Always use `NULLIF(current_setting('app.xxx', true), '')::uuid` in RLS policies — never raw `current_setting(...)::uuid`
 2. Always use the correct RLS wrapper for each database: `withTenantRLS` for `jag_commercial`/`jag_entertainment`/`jag_core`; `withOwnerRLS` for `jag_family`/`jag_properties`
 
+### Insurance consolidation — single source of truth (session 28)
+`fin_insurance_policies` (jag_family) is the **only** insurance table. There is no `prop_insurance` table and no insurance columns on `ims_vehicles`.
+
+- **Linking policies to assets:** `insured_asset_ref UUID` is a soft cross-DB reference (no FK per STD-01). Set to `property.id` for property insurance, `vehicle.id` for vehicle insurance.
+- **`insured_asset_type`:** ENUM (`PROPERTY`, `VEHICLE`, `OTHER`) — always set when `insured_asset_ref` is provided.
+- **Per-section UI:** Properties Insurance tab and Vehicles 🛡 Insurance tab both query `GET /finance/insurance/policies?insured_asset_ref=<id>`. Finance Insurance shows all policies (no filter).
+- **Policy types available:** PROPERTY, VEHICLE, LIABILITY, LIFE, HEALTH, BUSINESS_INTERRUPTION, MARINE, PROFESSIONAL_INDEMNITY, SURETY_BOND, PERFORMANCE_BOND, BUILDING, CONTENTS, FLOOD, FIRE, COMPREHENSIVE, OTHER.
+- **`sub_type`:** optional free-text refinement (e.g. "All-risks", "Third-party only", "TWOC").
+- **`coverage_amount` and `premium_amount` must be positive** (Zod `.positive()`) — never pass 0; frontend defaults to 1 when blank.
+- **Frontend `AddPropertyInsuranceModal`** and **`VehicleInsuranceTab`** both use plain `async/await` (not `useMutation`) to ensure errors surface — `useMutation` with `onError` was silently swallowing errors in this codebase.
+
 ### response.ts dual-mode helpers
 `ok()` and `err()` in `src/lib/response.ts` support **two calling conventions**:
 - Old routes (most of codebase): `ok(res, data, status?)` → sends response directly
@@ -137,7 +148,7 @@ Violations cause silent inflation: a $5M TTD investment stored correctly in the 
 
 Never let items appear in both sums. The previous bug counted `is_asset = true` items in both totals (fixed 2026-06-17).
 
-### GPS vehicle tracking — self-hosted Traccar (session 27, deployed 2026-06-25)
+### GPS vehicle tracking — self-hosted Traccar (sessions 27–29, fully live 2026-06-26)
 GPS for the vehicle fleet (TKSTAR units: TK918-4GSA / TK905B-4G / JTK905B-4G, plus a Q8) is delivered by a **self-hosted Traccar** container — NOT a column of lat/lng in jag_commercial. **Traccar is the source of truth** for positions/history/geofences/events; **jag-api is a thin proxy** over Traccar's REST API (`src/lib/traccar.ts`). Devices report **directly** to Traccar over the internet, so a JAG-app outage never stops collection — Traccar's own UI (`traccar.jagcorporate.com`) + the **Traccar Manager** phone app are an independent fallback.
 - **TWO PROTOCOLS IN THE FLEET (learned empirically at cutover) — model determines protocol, port, AND uniqueId format:**
   - **TK905B-4G / JTK905B-4G → JT808** (`7e…7e` binary) → Traccar **`jt808`** decoder (container port **5015**), published as **host 5013 → container 5015**. uniqueId = **12-digit ZERO-PADDED** (serial `9590028504` → **`009590028504`**). SMS devices `adminip123456 <ip> 5013`.
@@ -149,7 +160,7 @@ GPS for the vehicle fleet (TKSTAR units: TK918-4GSA / TK905B-4G / JTK905B-4G, pl
 - **Data model:** a tracker is a **reusable asset that moves between vehicles** (disposed-vehicle reassignment + spares), so it's modelled as a registry row (`gps_trackers`, migration 036, tenant RLS) with a changeable `vehicle_id` assignment — never a fixed column on `ims_vehicles`. `traccar_device_id` is Traccar's numeric id, captured after the device first connects. `ims_vehicles.sim_number` is left in place (expand-not-drop).
 - **Backend:** `routes/ims/vms-gps.ts` mounted at `/` under `/api/v1/ims` (full paths `/vehicles/:id/gps/*`, `/gps/fleet`, `/gps/trackers`). Per-vehicle gps handlers resolve the ASSIGNED tracker → its `traccar_device_id` → Traccar. Geofence WKT is built server-side (`CIRCLE (lat lng, radius)` — **lat lng order** per Traccar). `routes/internal/traccar-event.ts` (Bearer `TRACCAR_EVENT_TOKEN`, Docker-network-only) receives Traccar's event-forward POSTs, maps deviceId→vehicle via a single-tenant lookup (IMS = JAG_HOLDINGS tenant), and calls `enqueueNotification()` → JAG bell.
 - **Frontend:** `components/ims/VehicleGps.tsx` — `VehicleGpsTab` (Leaflet + OSM tiles; live marker w/ 20s `refetchInterval`, history polyline, circle-geofence create/delete, events list; assign-tracker picker when none assigned), `FleetMapModal`, `TrackersModal` (registry). Mounted in `pages/Inventory.tsx` Vehicles tab (📍 GPS modal tab + 🗺 Fleet Map / 📡 GPS Trackers toolbar buttons). Markers use `CircleMarker` (SVG) to dodge Leaflet's broken default-icon assets; Caddy jag-web CSP `img-src` extended for `https://*.tile.openstreetmap.org`. UI is English (matches the untranslated VMS modal) — i18n deferred.
-- **Infra (LIVE on VM):** `docker-compose.yml` `traccar` service (own `traccar` DB on native PG, owner `traccar_app`; config via `CONFIG_USE_ENVIRONMENT_VARIABLES`; `LOGGER_CONSOLE=true` → logs to stdout/Loki; ports **`0.0.0.0:5013→5015` (jt808) + `0.0.0.0:5023→5023` (gt06)**, 8082 web localhost→Caddy). **Oracle Security List opened TCP 5013 + 5023** (done; verified reachable). Native PG `pg_hba.conf` needed a `host traccar traccar_app 172.16.0.0/12 scram-sha-256` rule (Traccar crashed without it). Env in `/opt/jag/jag-infra/.env`: `TRACCAR_DB_URL/USER/PASSWORD`, `TRACCAR_URL/USER`, `TRACCAR_PASSWORD` (admin acct `robertjohnsonattin@gmail.com`, password in `.env`), `TRACCAR_EVENT_TOKEN`. **AVOID restarting Traccar once devices are connected** — battery units back off and won't reconnect until they next move. **Cutover is a re-point, not a data migration** — devices report to ONE server, so repointing kills the Winnies app; past mytkstar history doesn't migrate. Full procedure: `jag-infra/traccar/RUNBOOK.md`. **Status 2026-06-25:** code+infra deployed; Oracle ports open; PDZ 7719 + 3 TK918 (TEF 5411/PBH 2854/TDM 9497) registered (Traccar ids 1–4, padded uniqueIds) + assigned; **first live position pending a unit being driven outdoors** (all battery/sleep).
+- **Infra (LIVE on VM):** `docker-compose.yml` `traccar` service (own `traccar` DB on native PG, owner `traccar_app`; config via `CONFIG_USE_ENVIRONMENT_VARIABLES`; `LOGGER_CONSOLE=true` → logs to stdout/Loki; ports **`0.0.0.0:5013→5015` (jt808) + `0.0.0.0:5023→5093` (watch)**, 8082 web localhost→Caddy). **Oracle Security List opened TCP 5013 + 5023** (done; verified reachable). Native PG `pg_hba.conf` needed a `host traccar traccar_app 172.16.0.0/12 scram-sha-256` rule (Traccar crashed without it). Env in `/opt/jag/jag-infra/.env`: `TRACCAR_DB_URL/USER/PASSWORD`, `TRACCAR_URL/USER`, `TRACCAR_PASSWORD` (admin acct `robertjohnsonattin@gmail.com`, password `JAGFleet`), `TRACCAR_EVENT_TOKEN`. **AVOID restarting Traccar once devices are connected** — battery units back off and won't reconnect until they next move. **Cutover is a re-point, not a data migration** — devices report to ONE server, so repointing kills the Winnies app; past mytkstar history doesn't migrate. Full procedure: `jag-infra/traccar/RUNBOOK.md`. **Status 2026-06-26 (session 29):** ALL 5 SIM devices live — PDZ 7719/PBH 2854/TDM 9497/PDT 761(spare) reporting; TEF 5411 battery depleted mid-cutover (plugged to charge, will auto-reconnect). TK918s report 1–5s when moving (real-time routes); TK905B (PDZ 7719) reports ~30–60 min heartbeat only — pending `upload123456 30` + `sleep123456 1` + `dormancy123456 3600` SMS after trial runs. **CRITICAL — TRACCAR_PASSWORD sync:** if the Traccar UI admin password is ever changed, MUST also update `TRACCAR_PASSWORD` in `/opt/jag/jag-infra/.env` and run `docker compose up -d --force-recreate api` — a mismatch causes all GPS proxy calls to silently fail with 401. **History tab:** `FitBounds` component in `VehicleGps.tsx` auto-zooms map to route extent on history load; polyline weight 3→5 (commit `487558d`).
 
 ### React date inputs — PG DATE/TIMESTAMP values
 PostgreSQL `DATE`/`TIMESTAMP` columns may arrive from the API as ISO datetime strings (`'2025-12-31T00:00:00.000Z'`). A browser `<input type="date">` cannot display ISO datetime format — it shows empty placeholder but still submits the full string, failing Zod's `^\d{4}-\d{2}-\d{2}$` regex.
@@ -474,7 +485,7 @@ All financial documents (loan statements, investment portfolios, insurance polic
 | GL new entry | `components/ledger/JournalEntries.tsx` | `+ New Entry` button + `NewEntryModal` — entity/date/description/reference, dynamic line items (account picker per entity, Dr/Cr toggle, amount), running balance indicator, saves as DRAFT; `glApi.createEntry()` added to `api/gl.ts` |
 | Finance credit cards | `routes/finance/credit-cards.ts` | `fin_credit_cards` CRUD; GET/POST/PATCH/DELETE; `is_active` soft-delete; used by mobile expense form card picker |
 | IMS locations POST | `routes/ims/items.ts` | `POST /ims/locations` added |
-| Properties insurance | `routes/properties/insurance.ts` | Policy CRUD |
+| Properties insurance | ~~`routes/properties/insurance.ts`~~ — **REMOVED session 28**; property insurance now stored in `fin_insurance_policies` (jag_family) with `insured_asset_ref = property.id`; Properties panel Insurance tab queries Finance Insurance API filtered by `insured_asset_ref` | Consolidated into fin_insurance_policies |
 | Properties tax | `routes/properties/property-tax.ts` | Tax records + pay |
 | Properties inspections | `routes/properties/inspections.ts` | Inspection log |
 | Properties units | `routes/properties/units.ts` | Unit CRUD |
@@ -545,7 +556,7 @@ All financial documents (loan statements, investment portfolios, insurance polic
 | `022_punch_incidents_quality.sql` | jabco_punch_list_items (IDENTIFIED→RECTIFIED→VERIFIED), jabco_site_incidents, jabco_quality_inspections; all RLS |
 | `023_project_closeout_fields.sql` | handover_document_url TEXT on jabco_projects |
 | `028_crm_interaction_calendar_event_id.sql` | `calendar_event_id TEXT` on `crm_interactions` — stores Google Calendar event ID for follow-up date sync |
-| `029_vehicle_calendar_service_log.sql` | `cal_service_event_id`, `cal_insurance_event_id`, `cal_registration_event_id TEXT` on `ims_vehicles`; `ims_vehicle_service_log` append-only table (vehicle_id FK, service_date, mileage_km, service_type, description, cost_ttd, performed_by, next_service_date); RLS tenant policy |
+| `029_vehicle_calendar_service_log.sql` | `cal_service_event_id`, `cal_insurance_event_id`, `cal_registration_event_id TEXT` on `ims_vehicles` (NOTE: `cal_insurance_event_id` was dropped by migration 037 in session 28); `ims_vehicle_service_log` append-only table; RLS tenant policy |
 | `030_vms_vehicle_enhancements.sql` | `status` ENUM (ACTIVE/IN_MAINTENANCE/OFF_ROAD/DISPOSED), `dep_expense_account_code`, `acc_dep_account_code`, `disposal_value` on `ims_vehicles`; RLS tenant policy |
 | `031_vms_work_orders_pm.sql` | `vms_work_orders` (wo_number seq, wo_type, status machine, totals); `vms_work_order_items` (PART/LABOUR/CONSUMABLE/SUBLET, line_total computed); `vms_pm_schedules` (DAYS/KM/HOURS intervals, last/next due tracking); all RLS |
 | `032_vms_fuel_operating_costs.sql` | `vms_fuel_logs` (litres, price_per_litre, total_cost_ttd, full_tank flag); `vms_operating_costs` (TOLL/PARKING/CLEANING/ACCESSORIES/ADMIN/OTHER); both RLS |
@@ -553,6 +564,7 @@ All financial documents (loan statements, investment portfolios, insurance polic
 | `034_vms_disposal_gl.sql` | `dep_expense_gl_account_id`, `acc_dep_gl_account_id` on `ims_depreciation_schedules`; `journal_entry_id` on `ims_depreciation_entries`; `vms_disposals` table (disposal_type, cost/dep/nbv snapshot, sale_price_ttd, gain_loss_ttd, tco_snapshot JSONB, journal_entry_id); UNIQUE(vehicle_id); RLS |
 | `035_item_disposal_columns.sql` | `disposed_at TIMESTAMPTZ`, `disposal_type VARCHAR(20)` CHECK IN ('SALE','WRITE_OFF','TRANSFER'), `disposal_notes TEXT`, `sale_price_ttd NUMERIC(15,2)`, `buyer_name VARCHAR(200)`, `disposal_gl_entry_id UUID` added to `ims_items`; ran via psql on VM |
 | `036_gps_trackers.sql` | `gps_trackers` registry (device_serial, model, protocol, traccar_device_id, sim_phone, status UNASSIGNED/ASSIGNED/RETIRED, vehicle_id soft-ref ON DELETE SET NULL, last_seen_at); tenant RLS; unique(tenant,device_serial); GRANT jag_app. Backs the GPS/Traccar integration — see "GPS vehicle tracking" rule |
+| `037_gps_battery_log.sql` | `gps_battery_log` table (tenant_id, tracker_id FK gps_trackers, traccar_device_id, battery_level SMALLINT 0–100, is_charging BOOL, recorded_at); tenant RLS; GRANT jag_app. Populated hourly by `gps-battery-monitor.sh` cron + `POST /internal/gps/battery-sync` |
 
 ### Phase 7 Migrations (jag_family)
 
@@ -567,12 +579,13 @@ All financial documents (loan statements, investment portfolios, insurance polic
 | `013_debit_card_payment_method.sql` | `ALTER TYPE expense_payment_method ADD VALUE 'DEBIT_CARD'` — enum extension for debit card support |
 | `016_insurance_calendar_event_id.sql` | `calendar_event_id TEXT` on `fin_insurance_policies` — stores Google Calendar event ID for expiry date |
 | `017_ownership_stakes.sql` | `fam_ownership_stakes` beneficial-ownership cap table (family_member_id, subject_kind ENTITY/PROPERTY/ITEM, subject_id, subject_label, ownership_percent CHECK 0-100); owner RLS; unique(member,kind,subject). Owned by postgres, GRANT to jag_app. Applied via psql on VM, registered in `__migrations` |
+| `018_insurance_consolidation.sql` | **Session 28** — `ALTER TYPE insurance_policy_type ADD VALUE` for BUILDING, CONTENTS, FLOOD, FIRE, COMPREHENSIVE, SURETY_BOND, PERFORMANCE_BOND; `sub_type VARCHAR(50)` column added to `fin_insurance_policies`; all 4 RLS policies hardened with `NULLIF(..., '')::uuid`. Ran via `sudo -u postgres psql` (ALTER TYPE cannot run inside transaction). `insured_asset_ref UUID` used as soft cross-DB ref to link policies to properties or vehicles |
 
 ### Phase 7 Migrations (jag_properties)
 
 | File | Changes |
 |---|---|
-| `003_insurance.sql` | prop_insurance_policies |
+| `003_insurance.sql` | `prop_insurance` table — **DROPPED by migration 034 (session 28)**; property insurance now in `fin_insurance_policies` with `insured_asset_ref = property.id` |
 | `004_property_tax.sql` | prop_property_tax |
 | `005_inspections.sql` | prop_inspections |
 | `006_lease_deposit_refund.sql` | deposit refund fields on prop_lease_agreements |
@@ -603,6 +616,7 @@ All financial documents (loan statements, investment portfolios, insurance polic
 | `030_unit_stale_alert_col.sql` | stale_alert_sent_at on prop_units for dedup |
 | `031_unit_photos.sql` | `listing_description TEXT` on prop_units; `prop_unit_photos` table (owner_id, unit_id FK, object_key, display_order, caption) — MinIO `jag-photos` bucket; RLS |
 | `032_inspection_calendar_event_id.sql` | `calendar_event_id TEXT` on `prop_inspections` — stores Google Calendar event ID for inspection_date |
+| `034_drop_prop_insurance.sql` | **Session 28** — `DROP TABLE IF EXISTS prop_insurance`; insurance consolidated into `fin_insurance_policies` (jag_family) |
 
 ### VM Cron Scripts (`jag-infra/scripts/`)
 
@@ -617,6 +631,7 @@ All financial documents (loan statements, investment portfolios, insurance polic
 | `renewal-notices.sh` | 08:00 | 04:00 | Send D-60/D-30/D-14 WhatsApp renewal notices for expiring leases |
 | `sla-monitor.sh` | */30 * | every 30 min | Mark open maintenance tickets where SLA hours exceeded; creates BREACH update log |
 | `stale-listing-alert.sh` | 09:00 | 05:00 | WhatsApp alert to Robert for units LISTED >14 days without a booked viewing; deduped via `stale_alert_sent_at` on prop_units |
+| `gps-battery-monitor.sh` | 0 * * * * | every hour | Poll Traccar positions API for batteryLevel on all non-RETIRED trackers; insert into `gps_battery_log`; fire low-battery JAG notification (≤20%, deduped 8h) |
 | `setup-minio-policy.sh` | one-time | — | Create `jag-app-buckets` IAM policy + attach to jag_app user; re-run after MinIO data wipe |
 | `fdw-rotate-password.sh` | manual | — | Resync FDW USER MAPPING passwords after jag_app PG credential rotation |
 
@@ -725,7 +740,7 @@ adb install -r app/build/outputs/apk/release/app-release.apk
 
 ## OPEN ITEMS
 
-- **GPS vehicle tracking (Traccar) — CODE COMPLETE 2026-06-24 (session 27), awaiting infra cutover**: Self-hosted Traccar integration built end-to-end and typechecked/built clean (jag-api `tsc --noEmit` ✓, jag-web `npm run build` ✓). **Code done:** migration `036_gps_trackers.sql`; `lib/traccar.ts`; `routes/ims/vms-gps.ts` (+ mount); `routes/internal/traccar-event.ts` (+ mount); frontend types/api + `components/ims/VehicleGps.tsx` (GPS tab, Fleet Map, Trackers registry) wired into Inventory; `docker-compose.yml` traccar service; Caddyfile (traccar subdomain + CSP); `jag-infra/traccar/RUNBOOK.md`. **NOT yet deployed/committed** (no live Traccar to test against yet). **Operational steps remaining (Robert + VM, per RUNBOOK):** (1) provision `traccar` DB on native PG; (2) add `TRACCAR_*` env to `/opt/jag/jag-infra/.env`; (3) **open Oracle Security List + ufw TCP 5013 + 5023**; (4) Cloudflare DNS `traccar.jagcorporate.com`; (5) `docker compose up -d traccar` + create admin acct → set `TRACCAR_USER/PASSWORD`; (6) deploy api+web; (7) SMS-repoint each device `adminip123456 150.136.151.64 5013|5023` and capture Traccar device id; (8) register/assign trackers in JAG → GPS Trackers. **Fleet:** 5 SIM-active (PDZ 7719 / TEF 5411 / PBH 2854 / TDM 9497 + ex-PDT 761 unassigned) + 2 spares (no SIM). Cutover ends Winnies/mytkstar use (single-server devices). See "GPS vehicle tracking" implementation rule + [[project-gps-traccar]].
+- ~~**GPS vehicle tracking (Traccar)**~~ — **FULLY LIVE 2026-06-26 (sessions 27–29)**: Traccar deployed + all 5 SIM devices live. Battery monitoring (session 28): `gps_battery_log` table (migration 037), hourly cron (`gps-battery-monitor.sh`), battery bars + sparkline in Trackers modal. **Session 29 ops fixes:** TRACCAR_PASSWORD mismatch (Robert changed Traccar UI password to `JAGFleet` but .env still had old value → all GPS proxy calls returning 401 silently; fixed by updating .env + force-recreating api); TEF 5411 battery died mid-cutover (charging, will auto-reconnect when driven); GPS history route now auto-zooms to extent (`FitBounds` component, commit `487558d`); fuel log field name mismatch fixed in `api/ims.ts` — Zod `.strict()` requires `log_date`/`cost_per_litre_ttd`/`odometer_km`/`is_full_tank`/`idempotency_key`, commit `2edb013`. **Pending:** PDZ 7719 reporting interval config (`upload123456 30` + `sleep123456 1` + `dormancy123456 3600`) deferred after trial runs; Q8 + JTK905B spare need SIMs + 3rd Oracle port (gt06) when provisioned. See [[project-gps-traccar]].
 - **Secrets hygiene — ROTATED 2026-06-24 (mostly resolved)**: live credentials were historically committed to git (CLAUDE.md table — scrubbed to ‹SECRETS VAULT›). All 6 truly-exposed secrets were **rotated** on production so the leaked copies (in git history + private repo + script fallbacks) are now **dead/inert**: KC `jag-api` client secret, KC admin password, MinIO root + jag_app keys, PG `postgres` + `jag_app` passwords. New values live only in `/opt/jag/jag-infra/.env` (compose interpolation) + `/opt/jag/jag-infra/.cron-secrets` (chmod 600, sourced by crontab — inline cron secrets removed). FDW user mappings refreshed for the jag_app rotation. Verified end-to-end (5/5 DBs, FDW, auth, file ops, health 200).
   - **`MINIO_KMS_SECRET_KEY` — ROTATED 2026-06-24** via full re-encryption migration (8 objects downloaded plaintext → key swapped → re-uploaded under new key → md5-verified identical). **CRITICAL GOTCHA:** rotating the KMS key **wipes MinIO's IAM store** (users + policies are KMS-encrypted → "failed to decrypt ciphertext" after swap). Recovery: recreate the `jag-app-buckets` policy + `jag_app` user with a fresh secret, update `MINIO_SECRET_KEY` in `.env`, restart api (done). Root user survives (env-based). See MinIO operational notes.
   - **Exceptions (still open):** (a) Mobile **keystore password** — deferred (low urgency; only affects future signed Android builds). (b) Operational-script **hardcoded fallbacks** (`${KC_CLIENT_SECRET:-FIjMq…}` etc.) still hold the **now-dead** old values in git — harmless (cron sources `.cron-secrets` which overrides them); optional cosmetic cleanup. (c) Old git history retains the dead values — no rewrite needed since they're inert.
