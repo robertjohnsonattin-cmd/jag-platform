@@ -25,7 +25,7 @@ const DATE_RE    = /^\d{4}-\d{2}-\d{2}$/;
 const optDate    = z.string().regex(DATE_RE).nullable().optional();
 
 const CreateEmployeeSchema = z.object({
-  employee_number:    z.string().min(1).max(30),
+  employee_number:    z.string().max(30).optional(),
   first_name:         z.string().min(1).max(100),
   last_name:          z.string().min(1).max(100),
   preferred_name:     z.string().max(100).optional(),
@@ -45,9 +45,9 @@ const CreateEmployeeSchema = z.object({
   department_id:      z.string().uuid().optional(),
   manager_id:         z.string().uuid().optional(),
   employment_type:    z.enum(['FULL_TIME','PART_TIME','CONTRACT','CASUAL']).default('FULL_TIME'),
-  hire_date:          z.string().regex(DATE_RE),
+  hire_date:          z.string().regex(DATE_RE).optional(),
   probation_end_date: optDate,
-  base_salary_ttd:    z.number().min(0).default(0),
+  base_salary_ttd:    z.coerce.number().min(0).default(0),
   pay_frequency:      z.enum(['MONTHLY','BIWEEKLY','WEEKLY']).default('MONTHLY'),
   bank_name:          z.string().max(200).optional(),
   bank_branch:        z.string().max(200).optional(),
@@ -155,11 +155,23 @@ hrEmployeesRouter.post('/', async (req: Request, res: Response, next: NextFuncti
 
   const d = parsed.data;
   const { tenantId, userId } = req.rlsCtx;
+  const today = new Date().toISOString().slice(0, 10);
 
   try {
     const client = await commercialPool.connect();
     try {
       const row = await withTenantRLS(client, req.rlsCtx, async (c) => {
+        // Auto-generate employee number if not provided
+        let empNumber = d.employee_number?.trim() || '';
+        if (!empNumber) {
+          const { rows: [seq] } = await c.query<{ n: string }>(
+            `SELECT LPAD(COALESCE(MAX(SUBSTRING(employee_number FROM 'EMP-(\\d+)')::int), 0) + 1, 4, '0') AS n
+             FROM hr_employees WHERE tenant_id = $1 AND employee_number LIKE 'EMP-%'`,
+            [tenantId],
+          );
+          empNumber = `EMP-${seq.n}`;
+        }
+
         const emp = await c.query(
           `INSERT INTO hr_employees
              (tenant_id, employee_number, first_name, last_name, preferred_name,
@@ -172,12 +184,12 @@ hrEmployeesRouter.post('/', async (req: Request, res: Response, next: NextFuncti
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,
                    $18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32)
            RETURNING *`,
-          [tenantId, d.employee_number, d.first_name, d.last_name, d.preferred_name ?? null,
+          [tenantId, empNumber, d.first_name, d.last_name, d.preferred_name ?? null,
            d.date_of_birth ?? null, d.gender ?? null, d.nationality ?? null,
            d.id_type ?? null, d.id_number ?? null, d.nis_number ?? null, d.birs_tax_id ?? null,
            d.address ?? null, d.city ?? null, d.email ?? null, d.phone ?? null, d.phone2 ?? null,
            d.position_id ?? null, d.department_id ?? null, d.manager_id ?? null, d.employment_type,
-           d.hire_date, d.probation_end_date ?? null, d.base_salary_ttd, d.pay_frequency,
+           d.hire_date ?? today, d.probation_end_date ?? null, d.base_salary_ttd, d.pay_frequency,
            d.bank_name ?? null, d.bank_branch ?? null, d.account_number ?? null, d.account_type ?? null,
            d.notes ?? null, d.crm_contact_id ?? null, userId],
         ).then((r) => r.rows[0]);
@@ -188,7 +200,7 @@ hrEmployeesRouter.post('/', async (req: Request, res: Response, next: NextFuncti
              (tenant_id, employee_id, effective_date, change_type,
               new_position, new_salary_ttd, change_reason, changed_by)
            VALUES ($1,$2,$3,'HIRE',$4,$5,'Initial hire',$6)`,
-          [tenantId, emp.id, d.hire_date, d.position_id ?? null, d.base_salary_ttd, userId],
+          [tenantId, emp.id, d.hire_date ?? today, d.position_id ?? null, d.base_salary_ttd, userId],
         );
 
         return emp;
