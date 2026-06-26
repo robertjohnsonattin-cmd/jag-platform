@@ -346,7 +346,17 @@ export const imsApi = {
     mileage_km?: number; fuel_type?: string; station_name?: string;
     full_tank?: boolean; notes?: string;
   }): Promise<FuelLog> =>
-    client.post(`/ims/vehicles/${vehicleId}/fuel-logs`, data),
+    client.post(`/ims/vehicles/${vehicleId}/fuel-logs`, {
+      log_date:           data.fill_date,
+      litres:             data.litres,
+      cost_per_litre_ttd: data.price_per_litre,
+      odometer_km:        data.mileage_km,
+      fuel_type:          data.fuel_type,
+      station_name:       data.station_name,
+      is_full_tank:       data.full_tank ?? true,
+      notes:              data.notes,
+      idempotency_key:    crypto.randomUUID(),
+    }),
 
   deleteFuelLog: (vehicleId: string, logId: string): Promise<{ deleted: boolean }> =>
     client.delete(`/ims/vehicles/${vehicleId}/fuel-logs/${logId}`),
