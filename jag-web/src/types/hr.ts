@@ -11,6 +11,7 @@ export interface HrDepartment {
   parent_dept_id: string | null;
   manager_employee_id: string | null;
   manager_name?: string;
+  employee_count?: number;
   is_active: boolean;
   created_at: string;
   updated_at: string;

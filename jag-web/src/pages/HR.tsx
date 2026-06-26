@@ -102,6 +102,7 @@ function EmployeesTab({ entityId }: { entityId: string }) {
   const { t } = useTranslation()
   const qc = useQueryClient()
   const a = useMemo(() => hrApiFor(entityId), [entityId])
+  const [empSubTab, setEmpSubTab] = useState<'employees'|'departments'|'positions'>('employees')
   const [selected, setSelected] = useState<HrEmployee | null>(null)
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
@@ -113,6 +114,12 @@ function EmployeesTab({ entityId }: { entityId: string }) {
   const [error, setError] = useState('')
   const [form, setForm] = useState({ first_name:'', last_name:'', employee_number:'', employment_type:'FULL_TIME', hire_date:'', base_salary_ttd:'', pay_frequency:'MONTHLY', position_id:'', department_id:'' })
   const [termForm, setTermForm] = useState({ termination_date:'', termination_reason:'' })
+  // Dept management
+  const [showAddDept, setShowAddDept] = useState(false)
+  const [deptForm, setDeptForm] = useState({ name:'', code:'' })
+  // Position management
+  const [showAddPos, setShowAddPos] = useState(false)
+  const [posForm, setPosForm] = useState({ name:'', code:'', department_id:'', min_salary_ttd:'', max_salary_ttd:'' })
 
   const { data: employees = [] } = useQuery({ queryKey: ['hr-employees', entityId, search, statusFilter], queryFn: () => a.getEmployees({ search: search || undefined, status: statusFilter || undefined, limit: 200 }) })
   const { data: depts = [] } = useQuery({ queryKey: ['hr-departments', entityId], queryFn: () => a.getDepartments() })
@@ -144,8 +151,164 @@ function EmployeesTab({ entityId }: { entityId: string }) {
     finally { setSaving(false) }
   }
 
+  async function handleAddDept() {
+    setSaving(true); setError('')
+    try {
+      await a.createDepartment(deptForm)
+      setShowAddDept(false); setDeptForm({ name:'', code:'' })
+      void qc.invalidateQueries({ queryKey: ['hr-departments', entityId] })
+    } catch (e: unknown) { setError((e as Error).message) }
+    finally { setSaving(false) }
+  }
+
+  async function handleDeleteDept(id: string) {
+    try { await a.deleteDepartment(id); void qc.invalidateQueries({ queryKey: ['hr-departments', entityId] }) }
+    catch (e: unknown) { setError((e as Error).message) }
+  }
+
+  async function handleAddPos() {
+    setSaving(true); setError('')
+    try {
+      await a.createPosition({ ...posForm, department_id: posForm.department_id || undefined, min_salary_ttd: posForm.min_salary_ttd ? parseFloat(posForm.min_salary_ttd) : undefined, max_salary_ttd: posForm.max_salary_ttd ? parseFloat(posForm.max_salary_ttd) : undefined })
+      setShowAddPos(false); setPosForm({ name:'', code:'', department_id:'', min_salary_ttd:'', max_salary_ttd:'' })
+      void qc.invalidateQueries({ queryKey: ['hr-positions', entityId] })
+    } catch (e: unknown) { setError((e as Error).message) }
+    finally { setSaving(false) }
+  }
+
+  async function handleDeletePos(id: string) {
+    try { await a.deletePosition(id); void qc.invalidateQueries({ queryKey: ['hr-positions', entityId] }) }
+    catch (e: unknown) { setError((e as Error).message) }
+  }
+
   return (
-    <div className="flex flex-col md:flex-row gap-4 h-full">
+    <div className="flex flex-col gap-3">
+      {/* Sub-tab bar */}
+      <div className="flex gap-1 border-b border-slate-700">
+        {(['employees','departments','positions'] as const).map(st => (
+          <button key={st} onClick={() => setEmpSubTab(st)}
+            className={`pb-2 px-3 text-sm border-b-2 capitalize ${empSubTab === st ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400 hover:text-slate-200'}`}>
+            {t(`hr.sub_${st}`)}
+          </button>
+        ))}
+      </div>
+
+      {/* ── Departments panel ── */}
+      {empSubTab === 'departments' && (
+        <div>
+          <div className="flex justify-between items-center mb-3">
+            <p className="text-sm text-slate-400">{t('hr.departmentsHint')}</p>
+            <button className={btnPrimary} onClick={() => setShowAddDept(true)}>+ {t('hr.addDepartment')}</button>
+          </div>
+          {error && <p className="text-red-400 text-sm mb-3">{error}</p>}
+          <div className="overflow-x-auto rounded-lg border border-slate-700">
+            <table className="w-full text-sm">
+              <thead><tr className="border-b border-slate-700 text-slate-400 text-left">
+                <th className="py-2 px-3">{t('common.name')}</th>
+                <th className="py-2 px-3">{t('hr.code')}</th>
+                <th className="py-2 px-3">{t('hr.employees')}</th>
+                <th className="py-2 px-3"></th>
+              </tr></thead>
+              <tbody>
+                {(depts as HrDepartment[]).map(d => (
+                  <tr key={d.id} className="border-b border-slate-700/50 hover:bg-slate-800/50">
+                    <td className="py-2 px-3 text-slate-100 font-medium">{d.name}</td>
+                    <td className="py-2 px-3 text-slate-400">{d.code ?? '—'}</td>
+                    <td className="py-2 px-3 text-slate-400">{d.employee_count ?? 0}</td>
+                    <td className="py-2 px-3 text-right">
+                      <button className="text-xs text-red-400 hover:underline" onClick={() => void handleDeleteDept(d.id)}>{t('common.delete')}</button>
+                    </td>
+                  </tr>
+                ))}
+                {depts.length === 0 && <tr><td colSpan={4} className="py-4 text-center text-slate-500 italic">{t('common.noRecords')}</td></tr>}
+              </tbody>
+            </table>
+          </div>
+
+          {showAddDept && (
+            <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+              <div className="bg-slate-800 rounded-xl p-5 w-full max-w-sm border border-slate-600">
+                <h3 className="text-lg font-semibold text-slate-100 mb-4">{t('hr.addDepartment')}</h3>
+                {error && <p className="text-red-400 text-sm mb-3">{error}</p>}
+                <div className="space-y-3">
+                  <Field label={t('common.name')}><input className={cls} value={deptForm.name} onChange={e => setDeptForm(f => ({ ...f, name: e.target.value }))} /></Field>
+                  <Field label={`${t('hr.code')} (${t('common.optional')})`}><input className={cls} value={deptForm.code} onChange={e => setDeptForm(f => ({ ...f, code: e.target.value }))} /></Field>
+                </div>
+                <div className="flex justify-end gap-2 mt-4">
+                  <button className={btnSecondary} onClick={() => setShowAddDept(false)}>{t('common.cancel')}</button>
+                  <button className={btnPrimary} onClick={handleAddDept} disabled={saving || !deptForm.name}>{saving ? t('common.saving') : t('common.save')}</button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Positions panel ── */}
+      {empSubTab === 'positions' && (
+        <div>
+          <div className="flex justify-between items-center mb-3">
+            <p className="text-sm text-slate-400">{t('hr.positionsHint')}</p>
+            <button className={btnPrimary} onClick={() => setShowAddPos(true)}>+ {t('hr.addPosition')}</button>
+          </div>
+          {error && <p className="text-red-400 text-sm mb-3">{error}</p>}
+          <div className="overflow-x-auto rounded-lg border border-slate-700">
+            <table className="w-full text-sm">
+              <thead><tr className="border-b border-slate-700 text-slate-400 text-left">
+                <th className="py-2 px-3">{t('common.name')}</th>
+                <th className="py-2 px-3">{t('hr.code')}</th>
+                <th className="py-2 px-3">{t('hr.department')}</th>
+                <th className="py-2 px-3">{t('hr.salaryRange')}</th>
+                <th className="py-2 px-3"></th>
+              </tr></thead>
+              <tbody>
+                {(positions as HrPosition[]).map(p => (
+                  <tr key={p.id} className="border-b border-slate-700/50 hover:bg-slate-800/50">
+                    <td className="py-2 px-3 text-slate-100 font-medium">{p.name}</td>
+                    <td className="py-2 px-3 text-slate-400">{p.code ?? '—'}</td>
+                    <td className="py-2 px-3 text-slate-400">{(depts as HrDepartment[]).find(d => d.id === p.department_id)?.name ?? '—'}</td>
+                    <td className="py-2 px-3 text-slate-400">{p.min_salary_ttd ? `$${parseFloat(String(p.min_salary_ttd)).toLocaleString()} – $${parseFloat(String(p.max_salary_ttd ?? p.min_salary_ttd)).toLocaleString()}` : '—'}</td>
+                    <td className="py-2 px-3 text-right">
+                      <button className="text-xs text-red-400 hover:underline" onClick={() => void handleDeletePos(p.id)}>{t('common.delete')}</button>
+                    </td>
+                  </tr>
+                ))}
+                {positions.length === 0 && <tr><td colSpan={5} className="py-4 text-center text-slate-500 italic">{t('common.noRecords')}</td></tr>}
+              </tbody>
+            </table>
+          </div>
+
+          {showAddPos && (
+            <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+              <div className="bg-slate-800 rounded-xl p-5 w-full max-w-sm border border-slate-600">
+                <h3 className="text-lg font-semibold text-slate-100 mb-4">{t('hr.addPosition')}</h3>
+                {error && <p className="text-red-400 text-sm mb-3">{error}</p>}
+                <div className="space-y-3">
+                  <Field label={t('common.name')}><input className={cls} value={posForm.name} onChange={e => setPosForm(f => ({ ...f, name: e.target.value }))} /></Field>
+                  <Field label={`${t('hr.code')} (${t('common.optional')})`}><input className={cls} value={posForm.code} onChange={e => setPosForm(f => ({ ...f, code: e.target.value }))} /></Field>
+                  <Field label={`${t('hr.department')} (${t('common.optional')})`}>
+                    <select className={cls} value={posForm.department_id} onChange={e => setPosForm(f => ({ ...f, department_id: e.target.value }))}>
+                      <option value="">— {t('hr.noDepartment')} —</option>
+                      {(depts as HrDepartment[]).map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+                    </select>
+                  </Field>
+                  <div className="grid grid-cols-2 gap-2">
+                    <Field label={t('hr.minSalary')}><input type="number" className={cls} value={posForm.min_salary_ttd} onChange={e => setPosForm(f => ({ ...f, min_salary_ttd: e.target.value }))} /></Field>
+                    <Field label={t('hr.maxSalary')}><input type="number" className={cls} value={posForm.max_salary_ttd} onChange={e => setPosForm(f => ({ ...f, max_salary_ttd: e.target.value }))} /></Field>
+                  </div>
+                </div>
+                <div className="flex justify-end gap-2 mt-4">
+                  <button className={btnSecondary} onClick={() => setShowAddPos(false)}>{t('common.cancel')}</button>
+                  <button className={btnPrimary} onClick={handleAddPos} disabled={saving || !posForm.name}>{saving ? t('common.saving') : t('common.save')}</button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Employees panel ── */}
+      {empSubTab === 'employees' && <div className="flex flex-col md:flex-row gap-4">
       {/* List */}
       <div className={`${selected ? 'hidden md:flex' : 'flex'} flex-col w-full md:w-72 shrink-0`}>
         <div className="flex gap-2 mb-3">
@@ -341,6 +504,7 @@ function EmployeesTab({ entityId }: { entityId: string }) {
           </div>
         </div>
       )}
+      </div>}
     </div>
   )
 }
