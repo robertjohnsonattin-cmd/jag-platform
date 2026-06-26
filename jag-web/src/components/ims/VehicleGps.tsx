@@ -20,6 +20,17 @@ function Recenter({ lat, lng, zoom }: { lat: number; lng: number; zoom?: number 
   return null
 }
 
+function FitBounds({ points }: { points: [number, number][] }) {
+  const map = useMap()
+  useEffect(() => {
+    if (points.length < 2) return
+    const lats = points.map(p => p[0])
+    const lngs = points.map(p => p[1])
+    map.fitBounds([[Math.min(...lats), Math.min(...lngs)], [Math.max(...lats), Math.max(...lngs)]], { padding: [32, 32] })
+  }, [points, map])
+  return null
+}
+
 function fmtTime(iso: string | null): string {
   if (!iso) return '—'
   return new Date(iso).toLocaleString('en-GB', { timeZone: 'America/Port_of_Spain' })
@@ -152,8 +163,9 @@ export function VehicleGpsTab({ vehicleId, registration }: { vehicleId: string; 
 
           {mode === 'history' && histPoints.length > 0 && (
             <>
+              <FitBounds points={histPoints.map(p => [p.latitude, p.longitude] as [number, number])} />
               <Polyline positions={histPoints.map(p => [p.latitude, p.longitude] as [number, number])}
-                pathOptions={{ color: '#f97316', weight: 3 }} />
+                pathOptions={{ color: '#f97316', weight: 5 }} />
               <CircleMarker center={[histPoints[0].latitude, histPoints[0].longitude]} radius={6}
                 pathOptions={{ color: '#22c55e', fillColor: '#22c55e', fillOpacity: 0.9 }}>
                 <Popup>Start · {fmtTime(histPoints[0].fix_time)}</Popup>
