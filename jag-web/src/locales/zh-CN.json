@@ -2670,6 +2670,7 @@
   "hr": {
     "title": "人力资源",
     "subtitle": "员工、薪资、假期、绩效、招聘、培训、纪律与考勤",
+    "company": "公司",
     "tab_employees": "员工",
     "tab_payroll": "薪资",
     "tab_leave": "假期",

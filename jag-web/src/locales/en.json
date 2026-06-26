@@ -2671,6 +2671,7 @@
   "hr": {
     "title": "Human Resources",
     "subtitle": "Employees, payroll, leave, performance, recruitment, training, disciplinary & attendance",
+    "company": "Company",
     "tab_employees": "Employees",
     "tab_payroll": "Payroll",
     "tab_leave": "Leave",

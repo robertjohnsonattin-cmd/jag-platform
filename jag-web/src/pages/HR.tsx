@@ -1,7 +1,7 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
-import { hrApi } from '../api/hr'
+import { hrApiFor } from '../api/hr'
 import { fmtTTD, fmtDate } from '../lib/entities'
 import type {
   HrEmployee, HrDepartment, HrPosition,
@@ -14,6 +14,17 @@ import type {
   HrTimesheet,
   EmployeeStatus, DisciplinarySeverity, ApplicationStage,
 } from '../types/hr'
+
+// ── Entity list (all 7 JAG entities) ─────────────────────────────────────────
+const HR_ENTITIES = [
+  { id: '00000000-0000-0000-0001-000000000001', name: 'JAG Holdings' },
+  { id: '00000000-0000-0000-0001-000000000002', name: 'JABCO' },
+  { id: '00000000-0000-0000-0001-000000000003', name: 'JAG Properties' },
+  { id: '00000000-0000-0000-0001-000000000004', name: 'JAG Entertainment' },
+  { id: '00000000-0000-0000-0001-000000000005', name: 'JAG Finance' },
+  { id: '00000000-0000-0000-0001-000000000006', name: 'DragonBridge' },
+  { id: '00000000-0000-0000-0001-000000000007', name: 'NLCB' },
+]
 
 // ── Shared constants ──────────────────────────────────────────────────────────
 const MONTHS = [
@@ -87,9 +98,10 @@ type Tab = typeof TABS[number]
 // ═══════════════════════════════════════════════════════════════════════════════
 // EMPLOYEES TAB
 // ═══════════════════════════════════════════════════════════════════════════════
-function EmployeesTab() {
+function EmployeesTab({ entityId }: { entityId: string }) {
   const { t } = useTranslation()
   const qc = useQueryClient()
+  const a = useMemo(() => hrApiFor(entityId), [entityId])
   const [selected, setSelected] = useState<HrEmployee | null>(null)
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
@@ -102,21 +114,21 @@ function EmployeesTab() {
   const [form, setForm] = useState({ first_name:'', last_name:'', employee_number:'', employment_type:'FULL_TIME', hire_date:'', base_salary_ttd:'', pay_frequency:'MONTHLY', position_id:'', department_id:'' })
   const [termForm, setTermForm] = useState({ termination_date:'', termination_reason:'' })
 
-  const { data: employees = [] } = useQuery({ queryKey: ['hr-employees', search, statusFilter], queryFn: () => hrApi.getEmployees({ search: search || undefined, status: statusFilter || undefined, limit: 200 }) })
-  const { data: depts = [] } = useQuery({ queryKey: ['hr-departments'], queryFn: () => hrApi.getDepartments() })
-  const { data: positions = [] } = useQuery({ queryKey: ['hr-positions'], queryFn: () => hrApi.getPositions() })
-  const { data: contacts = [] } = useQuery({ queryKey: ['hr-emergency-contacts', selected?.id], queryFn: () => hrApi.getEmergencyContacts(selected!.id), enabled: !!selected && detailTab === 'contacts' })
-  const { data: history = [] } = useQuery({ queryKey: ['hr-employment-history', selected?.id], queryFn: () => hrApi.getEmploymentHistory(selected!.id), enabled: !!selected && detailTab === 'history' })
+  const { data: employees = [] } = useQuery({ queryKey: ['hr-employees', entityId, search, statusFilter], queryFn: () => a.getEmployees({ search: search || undefined, status: statusFilter || undefined, limit: 200 }) })
+  const { data: depts = [] } = useQuery({ queryKey: ['hr-departments', entityId], queryFn: () => a.getDepartments() })
+  const { data: positions = [] } = useQuery({ queryKey: ['hr-positions', entityId], queryFn: () => a.getPositions() })
+  const { data: contacts = [] } = useQuery({ queryKey: ['hr-emergency-contacts', entityId, selected?.id], queryFn: () => a.getEmergencyContacts(selected!.id), enabled: !!selected && detailTab === 'contacts' })
+  const { data: history = [] } = useQuery({ queryKey: ['hr-employment-history', entityId, selected?.id], queryFn: () => a.getEmploymentHistory(selected!.id), enabled: !!selected && detailTab === 'history' })
 
   const invalidate = () => {
-    void qc.invalidateQueries({ queryKey: ['hr-employees'] })
-    if (selected) void qc.invalidateQueries({ queryKey: ['hr-employment-history', selected.id] })
+    void qc.invalidateQueries({ queryKey: ['hr-employees', entityId] })
+    if (selected) void qc.invalidateQueries({ queryKey: ['hr-employment-history', entityId, selected.id] })
   }
 
   async function handleAdd() {
     setSaving(true); setError('')
     try {
-      await hrApi.createEmployee({ ...form, base_salary_ttd: form.base_salary_ttd || undefined, position_id: form.position_id || undefined, department_id: form.department_id || undefined })
+      await a.createEmployee({ ...form, base_salary_ttd: form.base_salary_ttd || undefined, position_id: form.position_id || undefined, department_id: form.department_id || undefined })
       setShowAdd(false); invalidate()
     } catch (e: unknown) { setError((e as Error).message) }
     finally { setSaving(false) }
@@ -126,7 +138,7 @@ function EmployeesTab() {
     if (!selected) return
     setSaving(true); setError('')
     try {
-      await hrApi.terminateEmployee(selected.id, termForm)
+      await a.terminateEmployee(selected.id, termForm)
       setShowTerminate(false); setSelected(null); invalidate()
     } catch (e: unknown) { setError((e as Error).message) }
     finally { setSaving(false) }
@@ -324,7 +336,7 @@ function EmployeesTab() {
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
           <div className="bg-slate-800 rounded-xl p-5 w-full max-w-lg border border-slate-600 max-h-[90vh] overflow-y-auto">
             <h3 className="text-lg font-semibold text-slate-100 mb-4">{t('common.edit')}: {selected.first_name} {selected.last_name}</h3>
-            <EditEmployeeForm employee={selected} depts={depts} positions={positions} onClose={() => setShowEdit(false)}
+            <EditEmployeeForm employee={selected} depts={depts} positions={positions} api={a} onClose={() => setShowEdit(false)}
               onSaved={() => { setShowEdit(false); invalidate() }} />
           </div>
         </div>
@@ -333,7 +345,9 @@ function EmployeesTab() {
   )
 }
 
-function EditEmployeeForm({ employee, depts, positions, onClose, onSaved }: { employee: HrEmployee; depts: HrDepartment[]; positions: HrPosition[]; onClose: () => void; onSaved: () => void }) {
+type HrApiType = ReturnType<typeof hrApiFor>
+
+function EditEmployeeForm({ employee, depts, positions, api: a, onClose, onSaved }: { employee: HrEmployee; depts: HrDepartment[]; positions: HrPosition[]; api: HrApiType; onClose: () => void; onSaved: () => void }) {
   const { t } = useTranslation()
   const [form, setForm] = useState({
     first_name: employee.first_name, last_name: employee.last_name,
@@ -353,7 +367,7 @@ function EditEmployeeForm({ employee, depts, positions, onClose, onSaved }: { em
     setSaving(true); setError('')
     try {
       const payload = { ...form, base_salary_ttd: form.base_salary_ttd || undefined, position_id: form.position_id || undefined, department_id: form.department_id || undefined }
-      await hrApi.updateEmployee(employee.id, payload)
+      await a.updateEmployee(employee.id, payload)
       onSaved()
     } catch (e: unknown) { setError((e as Error).message) }
     finally { setSaving(false) }
@@ -406,9 +420,10 @@ function EditEmployeeForm({ employee, depts, positions, onClose, onSaved }: { em
 // ═══════════════════════════════════════════════════════════════════════════════
 // PAYROLL TAB
 // ═══════════════════════════════════════════════════════════════════════════════
-function PayrollTab() {
+function PayrollTab({ entityId }: { entityId: string }) {
   const { t } = useTranslation()
   const qc = useQueryClient()
+  const a = useMemo(() => hrApiFor(entityId), [entityId])
   const now = new Date()
   const [selectedRun, setSelectedRun] = useState<HrPayrollRun | null>(null)
   const [showNew, setShowNew] = useState(false)
@@ -416,14 +431,14 @@ function PayrollTab() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
-  const { data: runs = [] } = useQuery({ queryKey: ['hr-payroll-runs'], queryFn: () => hrApi.getPayrollRuns({ limit: 50 }) })
-  const { data: entries = [] } = useQuery({ queryKey: ['hr-payroll-entries', selectedRun?.id], queryFn: () => hrApi.getPayrollEntries(selectedRun!.id), enabled: !!selectedRun })
+  const { data: runs = [] } = useQuery({ queryKey: ['hr-payroll-runs', entityId], queryFn: () => a.getPayrollRuns({ limit: 50 }) })
+  const { data: entries = [] } = useQuery({ queryKey: ['hr-payroll-entries', entityId, selectedRun?.id], queryFn: () => a.getPayrollEntries(selectedRun!.id), enabled: !!selectedRun })
 
   async function handleCreate() {
     setSaving(true); setError('')
     try {
-      const run = await hrApi.createPayrollRun({ period_month: parseInt(newForm.period_month), period_year: parseInt(newForm.period_year), pay_date: newForm.pay_date || undefined })
-      setShowNew(false); setSelectedRun(run); void qc.invalidateQueries({ queryKey: ['hr-payroll-runs'] })
+      const run = await a.createPayrollRun({ period_month: parseInt(newForm.period_month), period_year: parseInt(newForm.period_year), pay_date: newForm.pay_date || undefined })
+      setShowNew(false); setSelectedRun(run); void qc.invalidateQueries({ queryKey: ['hr-payroll-runs', entityId] })
     } catch (e: unknown) { setError((e as Error).message) }
     finally { setSaving(false) }
   }
@@ -432,10 +447,10 @@ function PayrollTab() {
     if (!selectedRun) return
     setSaving(true); setError('')
     try {
-      const updated = await hrApi.calculatePayrollRun(selectedRun.id)
+      const updated = await a.calculatePayrollRun(selectedRun.id)
       setSelectedRun(updated)
-      void qc.invalidateQueries({ queryKey: ['hr-payroll-runs'] })
-      void qc.invalidateQueries({ queryKey: ['hr-payroll-entries', selectedRun.id] })
+      void qc.invalidateQueries({ queryKey: ['hr-payroll-runs', entityId] })
+      void qc.invalidateQueries({ queryKey: ['hr-payroll-entries', entityId, selectedRun.id] })
     } catch (e: unknown) { setError((e as Error).message) }
     finally { setSaving(false) }
   }
@@ -444,8 +459,8 @@ function PayrollTab() {
     if (!selectedRun) return
     setSaving(true); setError('')
     try {
-      const updated = await hrApi.finalizePayrollRun(selectedRun.id)
-      setSelectedRun(updated); void qc.invalidateQueries({ queryKey: ['hr-payroll-runs'] })
+      const updated = await a.finalizePayrollRun(selectedRun.id)
+      setSelectedRun(updated); void qc.invalidateQueries({ queryKey: ['hr-payroll-runs', entityId] })
     } catch (e: unknown) { setError((e as Error).message) }
     finally { setSaving(false) }
   }
@@ -554,9 +569,10 @@ function PayrollTab() {
 // ═══════════════════════════════════════════════════════════════════════════════
 // LEAVE TAB
 // ═══════════════════════════════════════════════════════════════════════════════
-function LeaveTab() {
+function LeaveTab({ entityId }: { entityId: string }) {
   const { t } = useTranslation()
   const qc = useQueryClient()
+  const a = useMemo(() => hrApiFor(entityId), [entityId])
   const [leaveSubTab, setLeaveSubTab] = useState<'requests'|'balances'|'types'>('requests')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -565,28 +581,28 @@ function LeaveTab() {
   const [reqForm, setReqForm] = useState({ employee_id:'', leave_type_id:'', start_date:'', end_date:'', days_requested:'', reason:'' })
   const [typeForm, setTypeForm] = useState({ name:'', code:'', days_per_year:'', is_paid: true, carry_over_days:'0', requires_approval: true })
 
-  const { data: requests = [] } = useQuery({ queryKey: ['hr-leave-requests'], queryFn: () => hrApi.getLeaveRequests({ limit: 100 }) })
-  const { data: balances = [] } = useQuery({ queryKey: ['hr-leave-balances'], queryFn: () => hrApi.getLeaveBalances({ limit: 200 }) })
-  const { data: types = [] } = useQuery({ queryKey: ['hr-leave-types'], queryFn: () => hrApi.getLeaveTypes() })
-  const { data: employees = [] } = useQuery({ queryKey: ['hr-employees-active'], queryFn: () => hrApi.getEmployees({ status: 'ACTIVE', limit: 200 }) })
+  const { data: requests = [] } = useQuery({ queryKey: ['hr-leave-requests', entityId], queryFn: () => a.getLeaveRequests({ limit: 100 }) })
+  const { data: balances = [] } = useQuery({ queryKey: ['hr-leave-balances', entityId], queryFn: () => a.getLeaveBalances({ limit: 200 }) })
+  const { data: types = [] } = useQuery({ queryKey: ['hr-leave-types', entityId], queryFn: () => a.getLeaveTypes() })
+  const { data: employees = [] } = useQuery({ queryKey: ['hr-employees-active', entityId], queryFn: () => a.getEmployees({ status: 'ACTIVE', limit: 200 }) })
 
   async function handleApprove(req: HrLeaveRequest) {
     setSaving(true)
-    try { await hrApi.approveLeave(req.id); void qc.invalidateQueries({ queryKey: ['hr-leave-requests'] }) }
+    try { await a.approveLeave(req.id); void qc.invalidateQueries({ queryKey: ['hr-leave-requests', entityId] }) }
     finally { setSaving(false) }
   }
 
   async function handleReject(req: HrLeaveRequest) {
     setSaving(true)
-    try { await hrApi.rejectLeave(req.id, { rejection_reason: 'Rejected' }); void qc.invalidateQueries({ queryKey: ['hr-leave-requests'] }) }
+    try { await a.rejectLeave(req.id, { rejection_reason: 'Rejected' }); void qc.invalidateQueries({ queryKey: ['hr-leave-requests', entityId] }) }
     finally { setSaving(false) }
   }
 
   async function handleAddRequest() {
     setSaving(true); setError('')
     try {
-      await hrApi.createLeaveRequest({ ...reqForm, days_requested: parseFloat(reqForm.days_requested) })
-      setShowAddRequest(false); void qc.invalidateQueries({ queryKey: ['hr-leave-requests'] })
+      await a.createLeaveRequest({ ...reqForm, days_requested: parseFloat(reqForm.days_requested) })
+      setShowAddRequest(false); void qc.invalidateQueries({ queryKey: ['hr-leave-requests', entityId] })
     } catch (e: unknown) { setError((e as Error).message) }
     finally { setSaving(false) }
   }
@@ -594,8 +610,8 @@ function LeaveTab() {
   async function handleAddType() {
     setSaving(true); setError('')
     try {
-      await hrApi.createLeaveType({ ...typeForm, days_per_year: parseFloat(typeForm.days_per_year), carry_over_days: parseFloat(typeForm.carry_over_days) })
-      setShowAddType(false); void qc.invalidateQueries({ queryKey: ['hr-leave-types'] })
+      await a.createLeaveType({ ...typeForm, days_per_year: parseFloat(typeForm.days_per_year), carry_over_days: parseFloat(typeForm.carry_over_days) })
+      setShowAddType(false); void qc.invalidateQueries({ queryKey: ['hr-leave-types', entityId] })
     } catch (e: unknown) { setError((e as Error).message) }
     finally { setSaving(false) }
   }
@@ -754,17 +770,18 @@ function LeaveTab() {
 // ═══════════════════════════════════════════════════════════════════════════════
 // PERFORMANCE TAB
 // ═══════════════════════════════════════════════════════════════════════════════
-function PerformanceTab() {
+function PerformanceTab({ entityId }: { entityId: string }) {
   const { t } = useTranslation()
   const qc = useQueryClient()
+  const a = useMemo(() => hrApiFor(entityId), [entityId])
   const [showAdd, setShowAdd] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const now = new Date()
   const [form, setForm] = useState({ employee_id:'', review_period:'ANNUAL', review_year: String(now.getFullYear()), review_date:'', overall_rating:'', goals_met_rating:'', competency_rating:'', attendance_rating:'', strengths:'', areas_for_improvement:'', goals_next_period:'' })
 
-  const { data: reviews = [] } = useQuery({ queryKey: ['hr-reviews'], queryFn: () => hrApi.getReviews({ limit: 100 }) })
-  const { data: employees = [] } = useQuery({ queryKey: ['hr-employees-active'], queryFn: () => hrApi.getEmployees({ status: 'ACTIVE', limit: 200 }) })
+  const { data: reviews = [] } = useQuery({ queryKey: ['hr-reviews', entityId], queryFn: () => a.getReviews({ limit: 100 }) })
+  const { data: employees = [] } = useQuery({ queryKey: ['hr-employees-active', entityId], queryFn: () => a.getEmployees({ status: 'ACTIVE', limit: 200 }) })
 
   const REVIEW_STATUS: Record<string, string> = {
     DRAFT:        'bg-slate-700 text-slate-300 border-slate-500',
@@ -776,8 +793,8 @@ function PerformanceTab() {
     setSaving(true); setError('')
     try {
       const payload = { ...form, review_year: parseInt(form.review_year), overall_rating: parseInt(form.overall_rating) || undefined, goals_met_rating: parseInt(form.goals_met_rating) || undefined, competency_rating: parseInt(form.competency_rating) || undefined, attendance_rating: parseInt(form.attendance_rating) || undefined }
-      await hrApi.createReview(payload)
-      setShowAdd(false); void qc.invalidateQueries({ queryKey: ['hr-reviews'] })
+      await a.createReview(payload)
+      setShowAdd(false); void qc.invalidateQueries({ queryKey: ['hr-reviews', entityId] })
     } catch (e: unknown) { setError((e as Error).message) }
     finally { setSaving(false) }
   }
@@ -809,8 +826,8 @@ function PerformanceTab() {
                 <td className="px-3 py-2"><Badge text={rev.status} cls={REVIEW_STATUS[rev.status] ?? 'bg-slate-700 text-slate-300 border-slate-500'} /></td>
                 <td className="px-3 py-2">
                   <div className="flex gap-2">
-                    {rev.status === 'DRAFT' && <button className="text-xs text-blue-400 hover:underline" onClick={async () => { await hrApi.submitReview(rev.id); void qc.invalidateQueries({ queryKey: ['hr-reviews'] }) }}>{t('hr.submit')}</button>}
-                    {rev.status === 'SUBMITTED' && <button className="text-xs text-green-400 hover:underline" onClick={async () => { await hrApi.acknowledgeReview(rev.id); void qc.invalidateQueries({ queryKey: ['hr-reviews'] }) }}>{t('hr.acknowledge')}</button>}
+                    {rev.status === 'DRAFT' && <button className="text-xs text-blue-400 hover:underline" onClick={async () => { await a.submitReview(rev.id); void qc.invalidateQueries({ queryKey: ['hr-reviews', entityId] }) }}>{t('hr.submit')}</button>}
+                    {rev.status === 'SUBMITTED' && <button className="text-xs text-green-400 hover:underline" onClick={async () => { await a.acknowledgeReview(rev.id); void qc.invalidateQueries({ queryKey: ['hr-reviews', entityId] }) }}>{t('hr.acknowledge')}</button>}
                   </div>
                 </td>
               </tr>
@@ -867,9 +884,10 @@ function PerformanceTab() {
 // ═══════════════════════════════════════════════════════════════════════════════
 // RECRUITMENT TAB
 // ═══════════════════════════════════════════════════════════════════════════════
-function RecruitmentTab() {
+function RecruitmentTab({ entityId }: { entityId: string }) {
   const { t } = useTranslation()
   const qc = useQueryClient()
+  const a = useMemo(() => hrApiFor(entityId), [entityId])
   const [selectedPosting, setSelectedPosting] = useState<HrJobPosting | null>(null)
   const [showAddPosting, setShowAddPosting] = useState(false)
   const [showAddApp, setShowAddApp] = useState(false)
@@ -878,8 +896,8 @@ function RecruitmentTab() {
   const [postingForm, setPostingForm] = useState({ title:'', employment_type:'FULL_TIME', location:'', vacancies:'1', posted_date:'', closing_date:'', description:'' })
   const [appForm, setAppForm] = useState({ applicant_name:'', email:'', phone:'', source:'WALK_IN', years_experience:'0', cv_url:'', notes:'' })
 
-  const { data: postings = [] } = useQuery({ queryKey: ['hr-postings'], queryFn: () => hrApi.getJobPostings({ limit: 100 }) })
-  const { data: applications = [] } = useQuery({ queryKey: ['hr-applications', selectedPosting?.id], queryFn: () => hrApi.getApplications({ job_posting_id: selectedPosting!.id, limit: 100 }), enabled: !!selectedPosting })
+  const { data: postings = [] } = useQuery({ queryKey: ['hr-postings', entityId], queryFn: () => a.getJobPostings({ limit: 100 }) })
+  const { data: applications = [] } = useQuery({ queryKey: ['hr-applications', entityId, selectedPosting?.id], queryFn: () => a.getApplications({ job_posting_id: selectedPosting!.id, limit: 100 }), enabled: !!selectedPosting })
 
   const POSTING_STATUS: Record<string, string> = {
     DRAFT:     'bg-slate-700 text-slate-300 border-slate-500',
@@ -892,8 +910,8 @@ function RecruitmentTab() {
   async function handleAddPosting() {
     setSaving(true); setError('')
     try {
-      await hrApi.createJobPosting({ ...postingForm, vacancies: parseInt(postingForm.vacancies) })
-      setShowAddPosting(false); void qc.invalidateQueries({ queryKey: ['hr-postings'] })
+      await a.createJobPosting({ ...postingForm, vacancies: parseInt(postingForm.vacancies) })
+      setShowAddPosting(false); void qc.invalidateQueries({ queryKey: ['hr-postings', entityId] })
     } catch (e: unknown) { setError((e as Error).message) }
     finally { setSaving(false) }
   }
@@ -902,15 +920,15 @@ function RecruitmentTab() {
     if (!selectedPosting) return
     setSaving(true); setError('')
     try {
-      await hrApi.createApplication({ ...appForm, job_posting_id: selectedPosting.id, years_experience: parseInt(appForm.years_experience) })
-      setShowAddApp(false); void qc.invalidateQueries({ queryKey: ['hr-applications', selectedPosting.id] })
+      await a.createApplication({ ...appForm, job_posting_id: selectedPosting.id, years_experience: parseInt(appForm.years_experience) })
+      setShowAddApp(false); void qc.invalidateQueries({ queryKey: ['hr-applications', entityId, selectedPosting.id] })
     } catch (e: unknown) { setError((e as Error).message) }
     finally { setSaving(false) }
   }
 
   async function advance(app: HrJobApplication) {
-    await hrApi.advanceApplication(app.id)
-    void qc.invalidateQueries({ queryKey: ['hr-applications', selectedPosting?.id] })
+    await a.advanceApplication(app.id)
+    void qc.invalidateQueries({ queryKey: ['hr-applications', entityId, selectedPosting?.id] })
   }
 
   return (
@@ -1025,24 +1043,25 @@ function RecruitmentTab() {
 // ═══════════════════════════════════════════════════════════════════════════════
 // TRAINING TAB
 // ═══════════════════════════════════════════════════════════════════════════════
-function TrainingTab() {
+function TrainingTab({ entityId }: { entityId: string }) {
   const { t } = useTranslation()
   const qc = useQueryClient()
+  const a = useMemo(() => hrApiFor(entityId), [entityId])
   const [showAdd, setShowAdd] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [showExpiring, setShowExpiring] = useState(false)
   const [form, setForm] = useState({ employee_id:'', training_name:'', training_type_id:'', provider:'', training_date:'', expiry_date:'', cost_ttd:'', status:'COMPLETED', notes:'' })
 
-  const { data: records = [] } = useQuery({ queryKey: ['hr-training', showExpiring], queryFn: () => hrApi.getTrainingRecords({ expiring: showExpiring || undefined, limit: 200 }) })
-  const { data: types = [] } = useQuery({ queryKey: ['hr-training-types'], queryFn: () => hrApi.getTrainingTypes() })
-  const { data: employees = [] } = useQuery({ queryKey: ['hr-employees-active'], queryFn: () => hrApi.getEmployees({ status: 'ACTIVE', limit: 200 }) })
+  const { data: records = [] } = useQuery({ queryKey: ['hr-training', entityId, showExpiring], queryFn: () => a.getTrainingRecords({ expiring: showExpiring || undefined, limit: 200 }) })
+  const { data: types = [] } = useQuery({ queryKey: ['hr-training-types', entityId], queryFn: () => a.getTrainingTypes() })
+  const { data: employees = [] } = useQuery({ queryKey: ['hr-employees-active', entityId], queryFn: () => a.getEmployees({ status: 'ACTIVE', limit: 200 }) })
 
   async function handleAdd() {
     setSaving(true); setError('')
     try {
-      await hrApi.createTrainingRecord({ ...form, cost_ttd: form.cost_ttd ? parseFloat(form.cost_ttd) : undefined, training_type_id: form.training_type_id || undefined, expiry_date: form.expiry_date || undefined })
-      setShowAdd(false); void qc.invalidateQueries({ queryKey: ['hr-training'] })
+      await a.createTrainingRecord({ ...form, cost_ttd: form.cost_ttd ? parseFloat(form.cost_ttd) : undefined, training_type_id: form.training_type_id || undefined, expiry_date: form.expiry_date || undefined })
+      setShowAdd(false); void qc.invalidateQueries({ queryKey: ['hr-training', entityId] })
     } catch (e: unknown) { setError((e as Error).message) }
     finally { setSaving(false) }
   }
@@ -1124,22 +1143,23 @@ function TrainingTab() {
 // ═══════════════════════════════════════════════════════════════════════════════
 // DISCIPLINARY TAB
 // ═══════════════════════════════════════════════════════════════════════════════
-function DisciplinaryTab() {
+function DisciplinaryTab({ entityId }: { entityId: string }) {
   const { t } = useTranslation()
   const qc = useQueryClient()
+  const a = useMemo(() => hrApiFor(entityId), [entityId])
   const [showAdd, setShowAdd] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [form, setForm] = useState({ employee_id:'', incident_date:'', incident_type:'MISCONDUCT', severity:'VERBAL_WARNING', description:'', action_taken:'', investigation_conducted: false, union_involved: false })
 
-  const { data: records = [] } = useQuery({ queryKey: ['hr-disciplinary'], queryFn: () => hrApi.getDisciplinaryRecords({ limit: 100 }) })
-  const { data: employees = [] } = useQuery({ queryKey: ['hr-employees-active'], queryFn: () => hrApi.getEmployees({ status: 'ACTIVE', limit: 200 }) })
+  const { data: records = [] } = useQuery({ queryKey: ['hr-disciplinary', entityId], queryFn: () => a.getDisciplinaryRecords({ limit: 100 }) })
+  const { data: employees = [] } = useQuery({ queryKey: ['hr-employees-active', entityId], queryFn: () => a.getEmployees({ status: 'ACTIVE', limit: 200 }) })
 
   async function handleAdd() {
     setSaving(true); setError('')
     try {
-      await hrApi.createDisciplinaryRecord(form)
-      setShowAdd(false); void qc.invalidateQueries({ queryKey: ['hr-disciplinary'] })
+      await a.createDisciplinaryRecord(form)
+      setShowAdd(false); void qc.invalidateQueries({ queryKey: ['hr-disciplinary', entityId] })
     } catch (e: unknown) { setError((e as Error).message) }
     finally { setSaving(false) }
   }
@@ -1163,7 +1183,7 @@ function DisciplinaryTab() {
                 <td className="px-3 py-2">
                   {rec.acknowledged_by_employee
                     ? <span className="text-green-400 text-xs">✓ {fmtDate(rec.acknowledged_at ?? '')}</span>
-                    : <button className="text-xs text-yellow-400 hover:underline" onClick={async () => { await hrApi.acknowledgeDisciplinaryRecord(rec.id); void qc.invalidateQueries({ queryKey: ['hr-disciplinary'] }) }}>{t('hr.markAcknowledged')}</button>
+                    : <button className="text-xs text-yellow-400 hover:underline" onClick={async () => { await a.acknowledgeDisciplinaryRecord(rec.id); void qc.invalidateQueries({ queryKey: ['hr-disciplinary', entityId] }) }}>{t('hr.markAcknowledged')}</button>
                   }
                 </td>
               </tr>
@@ -1223,9 +1243,10 @@ function DisciplinaryTab() {
 // ═══════════════════════════════════════════════════════════════════════════════
 // ATTENDANCE TAB
 // ═══════════════════════════════════════════════════════════════════════════════
-function AttendanceTab() {
+function AttendanceTab({ entityId }: { entityId: string }) {
   const { t } = useTranslation()
   const qc = useQueryClient()
+  const a = useMemo(() => hrApiFor(entityId), [entityId])
   const [selectedTs, setSelectedTs] = useState<HrTimesheet | null>(null)
   const [showAddTs, setShowAddTs] = useState(false)
   const [showAddEntry, setShowAddEntry] = useState(false)
@@ -1234,15 +1255,15 @@ function AttendanceTab() {
   const [tsForm, setTsForm] = useState({ employee_id:'', week_start_date:'', week_end_date:'' })
   const [entryForm, setEntryForm] = useState({ employee_id:'', timesheet_id:'', entry_date:'', hours_worked:'8', is_overtime: false, entry_type:'REGULAR', notes:'' })
 
-  const { data: timesheets = [] } = useQuery({ queryKey: ['hr-timesheets'], queryFn: () => hrApi.getTimesheets({ limit: 100 }) })
-  const { data: entries = [] } = useQuery({ queryKey: ['hr-time-entries', selectedTs?.id], queryFn: () => hrApi.getTimeEntries({ timesheet_id: selectedTs!.id, limit: 100 }), enabled: !!selectedTs })
-  const { data: employees = [] } = useQuery({ queryKey: ['hr-employees-active'], queryFn: () => hrApi.getEmployees({ status: 'ACTIVE', limit: 200 }) })
+  const { data: timesheets = [] } = useQuery({ queryKey: ['hr-timesheets', entityId], queryFn: () => a.getTimesheets({ limit: 100 }) })
+  const { data: entries = [] } = useQuery({ queryKey: ['hr-time-entries', entityId, selectedTs?.id], queryFn: () => a.getTimeEntries({ timesheet_id: selectedTs!.id, limit: 100 }), enabled: !!selectedTs })
+  const { data: employees = [] } = useQuery({ queryKey: ['hr-employees-active', entityId], queryFn: () => a.getEmployees({ status: 'ACTIVE', limit: 200 }) })
 
   async function handleAddTs() {
     setSaving(true); setError('')
     try {
-      const ts = await hrApi.createTimesheet(tsForm)
-      setShowAddTs(false); setSelectedTs(ts); void qc.invalidateQueries({ queryKey: ['hr-timesheets'] })
+      const ts = await a.createTimesheet(tsForm)
+      setShowAddTs(false); setSelectedTs(ts); void qc.invalidateQueries({ queryKey: ['hr-timesheets', entityId] })
     } catch (e: unknown) { setError((e as Error).message) }
     finally { setSaving(false) }
   }
@@ -1250,17 +1271,17 @@ function AttendanceTab() {
   async function handleAddEntry() {
     setSaving(true); setError('')
     try {
-      await hrApi.createTimeEntry({ ...entryForm, hours_worked: parseFloat(entryForm.hours_worked), timesheet_id: entryForm.timesheet_id || undefined })
-      setShowAddEntry(false); if (selectedTs) void qc.invalidateQueries({ queryKey: ['hr-time-entries', selectedTs.id] })
+      await a.createTimeEntry({ ...entryForm, hours_worked: parseFloat(entryForm.hours_worked), timesheet_id: entryForm.timesheet_id || undefined })
+      setShowAddEntry(false); if (selectedTs) void qc.invalidateQueries({ queryKey: ['hr-time-entries', entityId, selectedTs.id] })
     } catch (e: unknown) { setError((e as Error).message) }
     finally { setSaving(false) }
   }
 
   async function patchStatus(action: 'submit'|'approve'|'reject', ts: HrTimesheet) {
-    if (action === 'submit') await hrApi.submitTimesheet(ts.id)
-    else if (action === 'approve') await hrApi.approveTimesheet(ts.id)
-    else await hrApi.rejectTimesheet(ts.id, { rejection_reason: 'Rejected' })
-    void qc.invalidateQueries({ queryKey: ['hr-timesheets'] })
+    if (action === 'submit') await a.submitTimesheet(ts.id)
+    else if (action === 'approve') await a.approveTimesheet(ts.id)
+    else await a.rejectTimesheet(ts.id, { rejection_reason: 'Rejected' })
+    void qc.invalidateQueries({ queryKey: ['hr-timesheets', entityId] })
   }
 
   const TS_STATUS: Record<string, string> = {
@@ -1390,11 +1411,26 @@ function AttendanceTab() {
 export default function HR() {
   const { t } = useTranslation()
   const [activeTab, setActiveTab] = useState<Tab>('employees')
+  const [selectedEntityId, setSelectedEntityId] = useState(HR_ENTITIES[0].id)
 
   return (
     <div className="p-4 md:p-6 max-w-full">
-      <h1 className="text-2xl font-bold text-slate-100 mb-1">{t('hr.title')}</h1>
-      <p className="text-sm text-slate-400 mb-5">{t('hr.subtitle')}</p>
+      <div className="flex flex-wrap items-start gap-4 mb-5">
+        <div className="flex-1 min-w-0">
+          <h1 className="text-2xl font-bold text-slate-100 mb-1">{t('hr.title')}</h1>
+          <p className="text-sm text-slate-400">{t('hr.subtitle')}</p>
+        </div>
+        <div className="flex-shrink-0">
+          <label className="text-xs text-slate-400 block mb-1">{t('hr.company')}</label>
+          <select
+            className="bg-slate-700 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            value={selectedEntityId}
+            onChange={e => setSelectedEntityId(e.target.value)}
+          >
+            {HR_ENTITIES.map(ent => <option key={ent.id} value={ent.id}>{ent.name}</option>)}
+          </select>
+        </div>
+      </div>
 
       <div className="flex overflow-x-auto border-b border-slate-700 mb-5 gap-1">
         {TABS.map(tab => (
@@ -1406,14 +1442,14 @@ export default function HR() {
       </div>
 
       <div className="min-h-0">
-        {activeTab === 'employees'   && <EmployeesTab />}
-        {activeTab === 'payroll'     && <PayrollTab />}
-        {activeTab === 'leave'       && <LeaveTab />}
-        {activeTab === 'performance' && <PerformanceTab />}
-        {activeTab === 'recruitment' && <RecruitmentTab />}
-        {activeTab === 'training'    && <TrainingTab />}
-        {activeTab === 'disciplinary'&& <DisciplinaryTab />}
-        {activeTab === 'attendance'  && <AttendanceTab />}
+        {activeTab === 'employees'   && <EmployeesTab entityId={selectedEntityId} />}
+        {activeTab === 'payroll'     && <PayrollTab entityId={selectedEntityId} />}
+        {activeTab === 'leave'       && <LeaveTab entityId={selectedEntityId} />}
+        {activeTab === 'performance' && <PerformanceTab entityId={selectedEntityId} />}
+        {activeTab === 'recruitment' && <RecruitmentTab entityId={selectedEntityId} />}
+        {activeTab === 'training'    && <TrainingTab entityId={selectedEntityId} />}
+        {activeTab === 'disciplinary'&& <DisciplinaryTab entityId={selectedEntityId} />}
+        {activeTab === 'attendance'  && <AttendanceTab entityId={selectedEntityId} />}
       </div>
     </div>
   )
