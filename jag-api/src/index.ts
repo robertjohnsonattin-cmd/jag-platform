@@ -133,6 +133,7 @@ import { dragonbridgeRouter }    from './routes/dragonbridge/index';
 import { entertainmentRouter }   from './routes/entertainment/index';
 import { financeRouter }         from './routes/finance/index';
 import { filesRouter }           from './routes/files/index';
+import { hrRouter }              from './routes/hr/index';
 
 app.use('/api/v1/auth',          authRouter);
 app.use('/api/v1/me',            meRouter);
@@ -155,6 +156,7 @@ app.use('/api/v1/dragonbridge',   dragonbridgeRouter);
 app.use('/api/v1/entertainment', entertainmentRouter);
 app.use('/api/v1/finance',       financeRouter);
 app.use('/api/v1/files',         filesRouter);
+app.use('/api/v1/hr',            hrRouter);
 
 import { adminCalendarBackfillRouter } from './routes/admin/calendar-backfill';
 app.use('/api/v1/admin/calendar', adminCalendarBackfillRouter);

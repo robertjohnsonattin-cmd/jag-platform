@@ -23,6 +23,7 @@ import BrianPortal from './pages/BrianPortal'
 import Lifestyle from './pages/Lifestyle'
 import Reports from './pages/Reports'
 import Export from './pages/Export'
+import HR from './pages/HR'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -66,6 +67,7 @@ function AppRoutes() {
           <Route path="family" element={<Family />} />
           <Route path="ownership" element={<Ownership />} />
           <Route path="lifestyle" element={<Lifestyle />} />
+          <Route path="hr" element={<HR />} />
           <Route path="brian-admin" element={<BrianAdmin />} />
         </Route>
       </Routes>
