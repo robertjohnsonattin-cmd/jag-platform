@@ -27,4 +27,10 @@ export interface Expense {
   idempotency_key: string
   created_at: string
   updated_at: string
+  linked_record_type: string | null
+  linked_record_id: string | null
+  linked_record_label: string | null
+  fuel_litres: string | null
+  fuel_odometer_km: number | null
+  fuel_type: string | null
 }

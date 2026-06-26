@@ -3,6 +3,10 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { expensesApi } from '../api/expenses'
 import { glApi } from '../api/gl'
+import { imsApi } from '../api/ims'
+import { financeApi } from '../api/finance'
+import { propertiesApi } from '../api/properties'
+import { familyApi } from '../api/family'
 import { fmtTTD, fmtDate, entityName } from '../lib/entities'
 import type { Expense } from '../types/expenses'
 import ConfirmDeleteModal from '../components/ui/ConfirmDeleteModal'
@@ -56,6 +60,13 @@ function Row({ label, value }: { label: string; value: React.ReactNode }) {
   )
 }
 
+// ── Category → link type mapping ─────────────────────────────────────────────
+
+const VEHICLE_CATEGORIES    = new Set(['FUEL','MAINTENANCE','TRANSPORT','INSURANCE'])
+const POLICY_CATEGORIES     = new Set(['INSURANCE'])
+const PROPERTY_CATEGORIES   = new Set(['MAINTENANCE','UTILITIES','TAX_PAYMENT'])
+const FAMILY_CATEGORIES     = new Set(['PERSONAL_EXPENSE','MEDICAL','EDUCATION','CHARITY'])
+
 // ── Create Expense Modal ──────────────────────────────────────────────────────
 
 function CreateModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
@@ -71,6 +82,56 @@ function CreateModal({ onClose, onCreated }: { onClose: () => void; onCreated: (
     category: 'OPERATING_EXPENSE',
     notes: '',
   })
+  const [linkType, setLinkType]   = useState<'VEHICLE'|'INSURANCE_POLICY'|'PROPERTY'|'FAMILY_MEMBER'|''>('')
+  const [linkedId, setLinkedId]   = useState('')
+  const [linkedLabel, setLinkedLabel] = useState('')
+  const [fuelLitres, setFuelLitres]   = useState('')
+  const [fuelOdo, setFuelOdo]         = useState('')
+  const [fuelType, setFuelType]       = useState('PETROL')
+
+  // Fetch contextual picker data based on category
+  const showVehiclePicker  = VEHICLE_CATEGORIES.has(form.category)
+  const showPolicyPicker   = POLICY_CATEGORIES.has(form.category)
+  const showPropertyPicker = PROPERTY_CATEGORIES.has(form.category)
+  const showFamilyPicker   = FAMILY_CATEGORIES.has(form.category)
+
+  const { data: vehiclesData } = useQuery({
+    queryKey: ['expense-picker-vehicles'],
+    queryFn: () => imsApi.getVehicles({ limit: 200 }),
+    enabled: showVehiclePicker,
+  })
+  const { data: policies = [] } = useQuery({
+    queryKey: ['expense-picker-policies'],
+    queryFn: () => financeApi.getPolicies({ is_active: 'true' }),
+    enabled: showPolicyPicker,
+  })
+  const { data: propertiesArr = [] } = useQuery({
+    queryKey: ['expense-picker-properties'],
+    queryFn: () => propertiesApi.getProperties({ limit: 200 }),
+    enabled: showPropertyPicker,
+  })
+  const { data: members = [] } = useQuery({
+    queryKey: ['expense-picker-family'],
+    queryFn: () => familyApi.list(),
+    enabled: showFamilyPicker,
+  })
+
+  const vehicles   = vehiclesData?.vehicles ?? []
+  const properties = propertiesArr
+
+  // Reset link state when category changes in a way that the current linkType is no longer relevant
+  const handleCategoryChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const cat = e.target.value
+    setForm(f => ({ ...f, category: cat }))
+    setLinkType('')
+    setLinkedId('')
+    setLinkedLabel('')
+  }
+
+  const handleLinkSelect = (id: string, label: string) => {
+    setLinkedId(id)
+    setLinkedLabel(label)
+  }
 
   const { mutate: create, isPending, error } = useMutation({
     mutationFn: () => expensesApi.createExpense({
@@ -85,6 +146,12 @@ function CreateModal({ onClose, onCreated }: { onClose: () => void; onCreated: (
       category: form.category,
       notes: form.notes || undefined,
       idempotency_key: crypto.randomUUID(),
+      linked_record_type: (linkType && linkedId) ? linkType : undefined,
+      linked_record_id:   (linkType && linkedId) ? linkedId : undefined,
+      linked_record_label:(linkType && linkedId) ? linkedLabel : undefined,
+      fuel_litres:     (form.category === 'FUEL' && fuelLitres) ? Number(fuelLitres) : undefined,
+      fuel_odometer_km:(form.category === 'FUEL' && fuelOdo) ? Number(fuelOdo) : undefined,
+      fuel_type:       form.category === 'FUEL' ? fuelType : undefined,
     }),
     onSuccess: () => { onCreated(); onClose() },
   })
@@ -93,14 +160,14 @@ function CreateModal({ onClose, onCreated }: { onClose: () => void; onCreated: (
     setForm(f => ({ ...f, [k]: e.target.value }))
 
   return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
-      <div className="bg-slate-800 border border-slate-700 rounded-xl w-full max-w-lg p-6 shadow-2xl">
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 overflow-y-auto py-6">
+      <div className="bg-slate-800 border border-slate-700 rounded-xl w-full max-w-lg p-6 shadow-2xl mx-4">
         <h2 className="text-lg font-semibold mb-5">{t('expenses.createTitle')}</h2>
 
         <div className="space-y-3">
           <Field label={t('expenses.entityField')}>
             <select value={form.owner_entity_id} onChange={set('owner_entity_id')} className={cls}>
-              {ENTITY_OPTIONS.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
+              {ENTITY_OPTIONS.map(ent => <option key={ent.id} value={ent.id}>{ent.name}</option>)}
             </select>
           </Field>
           <div className="grid grid-cols-2 gap-3">
@@ -121,7 +188,7 @@ function CreateModal({ onClose, onCreated }: { onClose: () => void; onCreated: (
               <input value={form.payee_name} onChange={set('payee_name')} placeholder={t('expenses.payeeOptional')} className={cls} />
             </Field>
             <Field label={t('expenses.categoryField')}>
-              <select value={form.category} onChange={set('category')} className={cls}>
+              <select value={form.category} onChange={handleCategoryChange} className={cls}>
                 {CATEGORIES.map(c => <option key={c}>{c}</option>)}
               </select>
             </Field>
@@ -139,6 +206,142 @@ function CreateModal({ onClose, onCreated }: { onClose: () => void; onCreated: (
           <Field label={t('expenses.notesField')}>
             <textarea value={form.notes} onChange={set('notes')} rows={2} className={`${cls} resize-none`} />
           </Field>
+
+          {/* ── Contextual link section ─────────────────────────────────────── */}
+          {(showVehiclePicker || showPolicyPicker || showPropertyPicker || showFamilyPicker) && (
+            <div className="border-t border-slate-700 pt-3 space-y-3">
+              <p className="text-xs text-slate-400 font-medium">Link to record (optional)</p>
+
+              {/* Link type selector when multiple options apply */}
+              {showVehiclePicker && showPolicyPicker && (
+                <div className="flex gap-2">
+                  {(['VEHICLE','INSURANCE_POLICY'] as const).map(lt => (
+                    <button
+                      key={lt}
+                      type="button"
+                      onClick={() => { setLinkType(lt); setLinkedId(''); setLinkedLabel('') }}
+                      className={`px-3 py-1 text-xs rounded border transition-colors ${linkType === lt ? 'bg-blue-700 border-blue-500 text-white' : 'border-slate-600 text-slate-400 hover:border-slate-400'}`}
+                    >
+                      {lt === 'VEHICLE' ? 'Vehicle' : 'Insurance Policy'}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {showVehiclePicker && showPropertyPicker && !showPolicyPicker && (
+                <div className="flex gap-2">
+                  {(['VEHICLE','PROPERTY'] as const).map(lt => (
+                    <button
+                      key={lt}
+                      type="button"
+                      onClick={() => { setLinkType(lt); setLinkedId(''); setLinkedLabel('') }}
+                      className={`px-3 py-1 text-xs rounded border transition-colors ${linkType === lt ? 'bg-blue-700 border-blue-500 text-white' : 'border-slate-600 text-slate-400 hover:border-slate-400'}`}
+                    >
+                      {lt === 'VEHICLE' ? 'Vehicle' : 'Property'}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {/* Vehicle picker */}
+              {(linkType === 'VEHICLE' || (showVehiclePicker && !showPolicyPicker && !showPropertyPicker && linkType === '')) && (
+                <Field label="Vehicle">
+                    <select
+                      value={linkedId}
+                      onChange={e => {
+                        const veh = vehicles.find(v => v.id === e.target.value)
+                        handleLinkSelect(e.target.value, veh ? `${veh.registration_number ?? ''} ${veh.make ?? ''} ${veh.model ?? ''}`.trim() : '')
+                        setLinkType('VEHICLE')
+                      }}
+                      className={cls}
+                    >
+                      <option value="">— No vehicle —</option>
+                      {vehicles.map(v => (
+                        <option key={v.id} value={v.id}>
+                          {v.registration_number ? `${v.registration_number} · ` : ''}{v.make} {v.model}
+                        </option>
+                      ))}
+                    </select>
+                </Field>
+              )}
+
+              {/* Insurance policy picker */}
+              {linkType === 'INSURANCE_POLICY' && (
+                <Field label="Insurance Policy">
+                  <select
+                    value={linkedId}
+                    onChange={e => {
+                      const pol = policies.find(p => p.id === e.target.value)
+                      handleLinkSelect(e.target.value, pol ? `${pol.policy_number ?? ''} ${pol.insurer_name ?? ''}`.trim() : '')
+                    }}
+                    className={cls}
+                  >
+                    <option value="">— No policy —</option>
+                    {policies.map(p => (
+                      <option key={p.id} value={p.id}>
+                        {p.policy_number ? `${p.policy_number} · ` : ''}{p.insurer_name} ({p.policy_type})
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+              )}
+
+              {/* Property picker */}
+              {linkType === 'PROPERTY' && (
+                <Field label="Property">
+                  <select
+                    value={linkedId}
+                    onChange={e => {
+                      const prop = properties.find(p => p.id === e.target.value)
+                      handleLinkSelect(e.target.value, prop?.name ?? '')
+                    }}
+                    className={cls}
+                  >
+                    <option value="">— No property —</option>
+                    {properties.map(p => (
+                      <option key={p.id} value={p.id}>{p.name}</option>
+                    ))}
+                  </select>
+                </Field>
+              )}
+
+              {/* Family member picker */}
+              {showFamilyPicker && !showVehiclePicker && !showPropertyPicker && (
+                <Field label="Family member">
+                  <select
+                    value={linkedId}
+                    onChange={e => {
+                      const m = members.find(fm => fm.id === e.target.value)
+                      handleLinkSelect(e.target.value, m ? `${m.first_name} ${m.last_name}` : '')
+                      setLinkType('FAMILY_MEMBER')
+                    }}
+                    className={cls}
+                  >
+                    <option value="">— No person —</option>
+                    {members.map(m => (
+                      <option key={m.id} value={m.id}>{m.first_name} {m.last_name}</option>
+                    ))}
+                  </select>
+                </Field>
+              )}
+
+              {/* Fuel-specific extra fields */}
+              {form.category === 'FUEL' && linkType === 'VEHICLE' && linkedId && (
+                <div className="grid grid-cols-3 gap-2">
+                  <Field label="Litres">
+                    <input type="number" min="0" step="0.01" value={fuelLitres} onChange={e => setFuelLitres(e.target.value)} placeholder="e.g. 40" className={cls} />
+                  </Field>
+                  <Field label="Odometer km">
+                    <input type="number" min="0" step="1" value={fuelOdo} onChange={e => setFuelOdo(e.target.value)} placeholder="optional" className={cls} />
+                  </Field>
+                  <Field label="Fuel type">
+                    <select value={fuelType} onChange={e => setFuelType(e.target.value)} className={cls}>
+                      <option>PETROL</option><option>DIESEL</option><option>CNG</option><option>ELECTRIC</option>
+                    </select>
+                  </Field>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {error && <p className="text-red-400 text-xs mt-3">{(error as Error).message}</p>}
@@ -362,6 +565,22 @@ function DetailPanel({ expense, onClose }: { expense: Expense; onClose: () => vo
         )}
         {expense.receipt_filename && (
           <Row label={t('expenses.detailReceipt')} value={<span className="text-blue-400 text-xs">{expense.receipt_filename}</span>} />
+        )}
+        {expense.linked_record_type && (
+          <Row
+            label={expense.linked_record_type === 'VEHICLE' ? 'Vehicle' :
+                   expense.linked_record_type === 'INSURANCE_POLICY' ? 'Policy' :
+                   expense.linked_record_type === 'PROPERTY' ? 'Property' : 'Person'}
+            value={<span className="text-amber-300 text-xs">{expense.linked_record_label ?? expense.linked_record_id?.slice(0,8)}</span>}
+          />
+        )}
+        {expense.fuel_litres && (
+          <Row label="Fuel" value={
+            <span className="text-xs text-slate-300">
+              {parseFloat(expense.fuel_litres).toFixed(1)}L {expense.fuel_type ?? ''}
+              {expense.fuel_odometer_km ? ` · ${expense.fuel_odometer_km.toLocaleString()} km` : ''}
+            </span>
+          } />
         )}
       </div>
 

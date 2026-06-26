@@ -12,14 +12,58 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import { z } from 'zod';
 import multer from 'multer';
-import { withOwnerRLS } from '../../middleware/rls';
-import { familyPool, corePool } from '../../db/index';
+import { withOwnerRLS, withTenantRLS } from '../../middleware/rls';
+import { familyPool, corePool, commercialPool } from '../../db/index';
 import { logger } from '../../lib/logger';
 import { ok, err } from '../../lib/response';
 import { enqueueNotification } from '../../lib/notifications';
 import { minioClient, ensureBucket, mediaObjectKey, BUCKET_RECEIPTS } from '../../lib/minio';
 
 export const expensesRouter = Router();
+
+// ── Auto fuel-log helper ───────────────────────────────────────────────────────
+// Called fire-and-forget when a FUEL expense is created with a vehicle link.
+// Inserts a vms_fuel_logs row using reference_type='EXPENSE' for traceability.
+
+async function autoInsertFuelLog(opts: {
+  vehicleId:    string;
+  tenantId:     string;
+  expenseId:    string;
+  logDate:      string;
+  litres:       number;
+  totalCostTtd: number;
+  odometerKm?:  number;
+  fuelType:     string;
+  stationName?: string;
+  description:  string;
+  userId:       string;
+}): Promise<void> {
+  const { vehicleId, tenantId, expenseId, logDate, litres, totalCostTtd,
+          odometerKm, fuelType, stationName, description, userId } = opts;
+  const costPerLitre = litres > 0 ? totalCostTtd / litres : 0;
+  const client = await commercialPool.connect();
+  try {
+    await withTenantRLS(client, { tenantId, userId, ownerId: userId, isOwner: true }, (c) =>
+      c.query(
+        `INSERT INTO vms_fuel_logs
+           (tenant_id, vehicle_id, log_date, odometer_km, litres,
+            cost_per_litre_ttd, total_cost_ttd, fuel_type, station_name,
+            is_full_tank, reference_type, reference_id, notes, idempotency_key, created_by)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,false,'EXPENSE',$10,$11,$12,$13)`,
+        [tenantId, vehicleId, logDate, odometerKm ?? null, litres,
+         costPerLitre, totalCostTtd, fuelType, stationName ?? null,
+         expenseId, description,
+         `exp-${expenseId}`,
+         userId],
+      ),
+    );
+    logger.info({ entity: 'VMS', action: 'FUEL_LOG_AUTO_CREATED', vehicle_id: vehicleId, expense_id: expenseId });
+  } catch (e) {
+    logger.warn({ entity: 'VMS', action: 'FUEL_LOG_AUTO_CREATE_FAILED', expense_id: expenseId, error: String(e) });
+  } finally {
+    client.release();
+  }
+}
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -55,21 +99,30 @@ const ExpenseQuerySchema = z.object({
   offset:          z.coerce.number().int().min(0).default(0),
 }).strict();
 
+const LINKED_RECORD_TYPES = ['VEHICLE','INSURANCE_POLICY','PROPERTY','FAMILY_MEMBER'] as const;
+const FUEL_TYPES = ['PETROL','DIESEL','CNG','ELECTRIC'] as const;
+
 const CreateExpenseSchema = z.object({
-  owner_entity_id:     z.string().uuid(),
-  expense_date:        z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  description:         z.string().min(1).max(2000),
-  payee_name:          z.string().max(200).optional(),
-  amount:              z.number().positive(),
-  currency:            z.string().length(3).default('TTD'),
-  amount_ttd:          z.number().positive(),
-  fx_rate_used:        z.number().positive().optional(),
-  payment_method:      z.enum(PAYMENT_METHODS).default('BANK_TRANSFER'),
-  category:            z.enum(CATEGORIES).default('OPERATING_EXPENSE'),
-  gl_debit_account_id: z.string().uuid().optional(),
-  notes:               z.string().max(2000).optional(),
-  card_id:             z.string().uuid().optional(),
-  idempotency_key:     z.string().min(1).max(500),
+  owner_entity_id:      z.string().uuid(),
+  expense_date:         z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  description:          z.string().min(1).max(2000),
+  payee_name:           z.string().max(200).optional(),
+  amount:               z.number().positive(),
+  currency:             z.string().length(3).default('TTD'),
+  amount_ttd:           z.number().positive(),
+  fx_rate_used:         z.number().positive().optional(),
+  payment_method:       z.enum(PAYMENT_METHODS).default('BANK_TRANSFER'),
+  category:             z.enum(CATEGORIES).default('OPERATING_EXPENSE'),
+  gl_debit_account_id:  z.string().uuid().optional(),
+  notes:                z.string().max(2000).optional(),
+  card_id:              z.string().uuid().optional(),
+  idempotency_key:      z.string().min(1).max(500),
+  linked_record_type:   z.enum(LINKED_RECORD_TYPES).optional(),
+  linked_record_id:     z.string().uuid().optional(),
+  linked_record_label:  z.string().max(500).optional(),
+  fuel_litres:          z.number().positive().optional(),
+  fuel_odometer_km:     z.number().int().min(0).optional(),
+  fuel_type:            z.enum(FUEL_TYPES).optional(),
 }).strict();
 
 const UpdateExpenseSchema = z.object({
@@ -81,10 +134,16 @@ const UpdateExpenseSchema = z.object({
   amount_ttd:          z.number().positive().optional(),
   fx_rate_used:        z.number().positive().optional(),
   payment_method:      z.enum(PAYMENT_METHODS).optional(),
-  category:            z.enum(CATEGORIES).optional(),
-  gl_debit_account_id: z.string().uuid().optional(),
-  notes:               z.string().max(2000).optional(),
-  card_id:             z.string().uuid().optional(),
+  category:             z.enum(CATEGORIES).optional(),
+  gl_debit_account_id:  z.string().uuid().optional(),
+  notes:                z.string().max(2000).optional(),
+  card_id:              z.string().uuid().optional(),
+  linked_record_type:   z.enum(LINKED_RECORD_TYPES).optional(),
+  linked_record_id:     z.string().uuid().optional(),
+  linked_record_label:  z.string().max(500).optional(),
+  fuel_litres:          z.number().positive().optional(),
+  fuel_odometer_km:     z.number().int().min(0).optional(),
+  fuel_type:            z.enum(FUEL_TYPES).optional(),
 }).strict().refine(d => Object.keys(d).length > 0, { message: 'At least one field required.' });
 
 const ApproveExpenseSchema = z.object({
@@ -122,7 +181,9 @@ expensesRouter.get('/', async (req: Request, res: Response, next: NextFunction):
                   amount, currency, amount_ttd, fx_rate_used, payment_method, category,
                   gl_debit_account_id, gl_credit_account_id, status, submitted_at,
                   approved_by, approved_at, rejection_reason, journal_entry_id,
-                  receipt_path, receipt_filename, notes, idempotency_key, created_at, updated_at
+                  receipt_path, receipt_filename, notes, idempotency_key, created_at, updated_at,
+                  linked_record_type, linked_record_id, linked_record_label,
+                  fuel_litres, fuel_odometer_km, fuel_type
            FROM   fin_expenses ${clause}
            ORDER  BY expense_date DESC, created_at DESC
            LIMIT  ${push(limit)} OFFSET ${push(offset)}`,
@@ -159,17 +220,39 @@ expensesRouter.post('/', async (req: Request, res: Response, next: NextFunction)
           `INSERT INTO fin_expenses
              (owner_id, owner_entity_id, submitted_by, expense_date, description, payee_name,
               amount, currency, amount_ttd, fx_rate_used, payment_method, category,
-              gl_debit_account_id, notes, idempotency_key, card_id)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+              gl_debit_account_id, notes, idempotency_key, card_id,
+              linked_record_type, linked_record_id, linked_record_label,
+              fuel_litres, fuel_odometer_km, fuel_type)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)
            RETURNING *`,
           [ownerId, b.owner_entity_id, userId, b.expense_date, b.description,
            b.payee_name ?? null, b.amount, b.currency, b.amount_ttd,
            b.fx_rate_used ?? null, b.payment_method, b.category,
            b.gl_debit_account_id ?? null, b.notes ?? null, b.idempotency_key,
-           b.card_id ?? null],
+           b.card_id ?? null,
+           b.linked_record_type ?? null, b.linked_record_id ?? null, b.linked_record_label ?? null,
+           b.fuel_litres ?? null, b.fuel_odometer_km ?? null, b.fuel_type ?? null],
         ).then(r => r.rows[0]);
       });
       logger.info({ entity: 'EXPENSE', action: 'CREATED', user_id: ownerId, record_id: rec.id });
+
+      // Auto-sync fuel log when a FUEL expense is linked to a vehicle with litres provided
+      if (b.category === 'FUEL' && b.linked_record_type === 'VEHICLE' && b.linked_record_id && b.fuel_litres) {
+        void autoInsertFuelLog({
+          vehicleId:      b.linked_record_id,
+          tenantId:       b.owner_entity_id,
+          expenseId:      rec.id,
+          logDate:        b.expense_date,
+          litres:         b.fuel_litres,
+          totalCostTtd:   b.amount_ttd,
+          odometerKm:     b.fuel_odometer_km,
+          fuelType:       b.fuel_type ?? 'PETROL',
+          stationName:    b.payee_name,
+          description:    b.description,
+          userId,
+        });
+      }
+
       ok(res, rec, 201);
     } catch (e: unknown) {
       if (e instanceof Error) {
@@ -247,9 +330,15 @@ expensesRouter.patch('/:id', async (req: Request, res: Response, next: NextFunct
         if (b.fx_rate_used        !== undefined) sets.push(`fx_rate_used = ${push(b.fx_rate_used)}`);
         if (b.payment_method      !== undefined) sets.push(`payment_method = ${push(b.payment_method)}`);
         if (b.category            !== undefined) sets.push(`category = ${push(b.category)}`);
-        if (b.gl_debit_account_id !== undefined) sets.push(`gl_debit_account_id = ${push(b.gl_debit_account_id)}`);
-        if (b.notes               !== undefined) sets.push(`notes = ${push(b.notes)}`);
-        if (b.card_id             !== undefined) sets.push(`card_id = ${push(b.card_id)}`);
+        if (b.gl_debit_account_id  !== undefined) sets.push(`gl_debit_account_id = ${push(b.gl_debit_account_id)}`);
+        if (b.notes                !== undefined) sets.push(`notes = ${push(b.notes)}`);
+        if (b.card_id              !== undefined) sets.push(`card_id = ${push(b.card_id)}`);
+        if (b.linked_record_type   !== undefined) sets.push(`linked_record_type = ${push(b.linked_record_type)}`);
+        if (b.linked_record_id     !== undefined) sets.push(`linked_record_id = ${push(b.linked_record_id)}`);
+        if (b.linked_record_label  !== undefined) sets.push(`linked_record_label = ${push(b.linked_record_label)}`);
+        if (b.fuel_litres          !== undefined) sets.push(`fuel_litres = ${push(b.fuel_litres)}`);
+        if (b.fuel_odometer_km     !== undefined) sets.push(`fuel_odometer_km = ${push(b.fuel_odometer_km)}`);
+        if (b.fuel_type            !== undefined) sets.push(`fuel_type = ${push(b.fuel_type)}`);
         params.push(id);
         return c.query(
           `UPDATE fin_expenses SET ${sets.join(', ')} WHERE id = $${params.length} RETURNING *`,

@@ -2970,33 +2970,42 @@ function VehicleInsuranceTab({ vehicleId, ownerEntity }: { vehicleId: string; ow
     queryFn: () => financeApi.getPolicies({ insured_asset_ref: vehicleId }),
   })
 
-  const { mutate, isPending } = useMutation({
-    mutationFn: () => financeApi.createPolicy({
-      owner_entity_id: ENTITY_MAP[ownerEntity] ?? '00000000-0000-0000-0001-000000000001',
-      policy_type: form.policy_type as Parameters<typeof financeApi.createPolicy>[0]['policy_type'],
-      sub_type: form.sub_type || undefined,
-      insured_asset_type: 'VEHICLE' as const,
-      insured_asset_ref: vehicleId,
-      policy_number: form.policy_number || `VEH-${Date.now()}`,
-      insurer_name: form.insurer_name,
-      broker_name: form.broker_name || undefined,
-      coverage_amount: parseFloat(form.coverage_amount) || 0,
-      coverage_amount_ttd: parseFloat(form.coverage_amount) || 0,
-      currency: 'TTD',
-      premium_amount: parseFloat(form.premium_amount) || 0,
-      premium_amount_ttd: parseFloat(form.premium_amount) || 0,
-      premium_frequency: form.premium_frequency as Parameters<typeof financeApi.createPolicy>[0]['premium_frequency'],
-      start_date: form.start_date,
-      expiry_date: form.expiry_date || new Date(Date.now() + 365*24*60*60*1000).toISOString().slice(0,10),
-      renewal_alert_days: 30,
-      notes: form.notes || undefined,
-    }),
-    onSuccess: () => {
+  const [saveError, setSaveError] = useState<string | null>(null)
+  const [isSaving, setIsSaving] = useState(false)
+
+  const handleSave = async () => {
+    setSaveError(null)
+    setIsSaving(true)
+    try {
+      await financeApi.createPolicy({
+        owner_entity_id: ENTITY_MAP[ownerEntity] ?? '00000000-0000-0000-0001-000000000001',
+        policy_type: form.policy_type as Parameters<typeof financeApi.createPolicy>[0]['policy_type'],
+        sub_type: form.sub_type || undefined,
+        insured_asset_type: 'VEHICLE' as const,
+        insured_asset_ref: vehicleId,
+        policy_number: form.policy_number || `VEH-${Date.now()}`,
+        insurer_name: form.insurer_name,
+        broker_name: form.broker_name || undefined,
+        coverage_amount: parseFloat(form.coverage_amount) || 1,
+        coverage_amount_ttd: parseFloat(form.coverage_amount) || 1,
+        currency: 'TTD',
+        premium_amount: parseFloat(form.premium_amount) || 1,
+        premium_amount_ttd: parseFloat(form.premium_amount) || 1,
+        premium_frequency: form.premium_frequency as Parameters<typeof financeApi.createPolicy>[0]['premium_frequency'],
+        start_date: form.start_date || new Date().toISOString().slice(0,10),
+        expiry_date: form.expiry_date || new Date(Date.now() + 365*24*60*60*1000).toISOString().slice(0,10),
+        renewal_alert_days: 30,
+        notes: form.notes || undefined,
+      })
       void qc.invalidateQueries({ queryKey: qk })
       setShowAdd(false)
       setForm(f => ({ ...f, policy_number:'', insurer_name:'', broker_name:'', coverage_amount:'', premium_amount:'', start_date:'', expiry_date:'', notes:'' }))
-    },
-  })
+    } catch (e: unknown) {
+      setSaveError(e instanceof Error ? e.message : 'Save failed — check all required fields.')
+    } finally {
+      setIsSaving(false)
+    }
+  }
 
   const fmtDate = (d: string | null) => d ? new Date(d).toLocaleDateString('en-TT') : '—'
   const fmtMoney = (v: string) => `$${parseFloat(v).toLocaleString('en-TT', { minimumFractionDigits: 2 })}`
@@ -3060,10 +3069,11 @@ function VehicleInsuranceTab({ vehicleId, ownerEntity }: { vehicleId: string; ow
               <input type="date" value={form.expiry_date} onChange={set('expiry_date')} className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:outline-none" />
             </div>
           </div>
+          {saveError && <p className="text-red-400 text-xs rounded bg-red-900/30 border border-red-700 px-3 py-2">{saveError}</p>}
           <div className="flex justify-end">
-            <button onClick={() => mutate()} disabled={!form.insurer_name || isPending}
+            <button onClick={() => void handleSave()} disabled={!form.insurer_name || isSaving}
               className="px-4 py-2 bg-orange-700 hover:bg-orange-600 disabled:opacity-50 text-white text-sm rounded-lg transition-colors">
-              {isPending ? 'Saving…' : 'Save Policy'}
+              {isSaving ? 'Saving…' : 'Save Policy'}
             </button>
           </div>
         </div>

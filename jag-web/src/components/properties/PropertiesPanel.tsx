@@ -1121,6 +1121,8 @@ const PROP_INS_TYPES = ['BUILDING','CONTENTS','COMPREHENSIVE','FLOOD','FIRE','LI
 function AddPropertyInsuranceModal({ propertyId, onClose, onCreated }: { propertyId: string; onClose: () => void; onCreated: () => void }) {
   const { t } = useTranslation()
   const OWNER_ENTITY = '00000000-0000-0000-0001-000000000003' // JAG_PROPERTIES
+  const [saveError, setSaveError] = useState<string | null>(null)
+  const [isSaving, setIsSaving] = useState(false)
   const [form, setForm] = useState({
     policy_type: 'BUILDING' as string, sub_type: '',
     policy_number: '', insurer_name: '', broker_name: '',
@@ -1130,29 +1132,38 @@ function AddPropertyInsuranceModal({ propertyId, onClose, onCreated }: { propert
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
     setForm(f => ({ ...f, [k]: e.target.value }))
 
-  const { mutate, isPending } = useMutation({
-    mutationFn: () => financeApi.createPolicy({
-      owner_entity_id: OWNER_ENTITY,
-      policy_type: form.policy_type as Parameters<typeof financeApi.createPolicy>[0]['policy_type'],
-      sub_type: form.sub_type || undefined,
-      insured_asset_type: 'PROPERTY' as const,
-      insured_asset_ref: propertyId,
-      policy_number: form.policy_number || `PROP-${Date.now()}`,
-      insurer_name: form.insurer_name,
-      broker_name: form.broker_name || undefined,
-      coverage_amount: parseFloat(form.coverage_amount) || 0,
-      coverage_amount_ttd: parseFloat(form.coverage_amount) || 0,
-      currency: 'TTD',
-      premium_amount: parseFloat(form.premium_amount) || 0,
-      premium_amount_ttd: parseFloat(form.premium_amount) || 0,
-      premium_frequency: form.premium_frequency as Parameters<typeof financeApi.createPolicy>[0]['premium_frequency'],
-      start_date: form.start_date,
-      expiry_date: form.expiry_date || new Date(Date.now() + 365*24*60*60*1000).toISOString().slice(0,10),
-      renewal_alert_days: 60,
-      notes: form.notes || undefined,
-    }),
-    onSuccess: () => { onCreated(); onClose() },
-  })
+  const handleSave = async () => {
+    setSaveError(null)
+    setIsSaving(true)
+    try {
+      await financeApi.createPolicy({
+        owner_entity_id: OWNER_ENTITY,
+        policy_type: form.policy_type as Parameters<typeof financeApi.createPolicy>[0]['policy_type'],
+        sub_type: form.sub_type || undefined,
+        insured_asset_type: 'PROPERTY' as const,
+        insured_asset_ref: propertyId,
+        policy_number: form.policy_number || `PROP-${Date.now()}`,
+        insurer_name: form.insurer_name,
+        broker_name: form.broker_name || undefined,
+        coverage_amount: parseFloat(form.coverage_amount) || 1,
+        coverage_amount_ttd: parseFloat(form.coverage_amount) || 1,
+        currency: 'TTD',
+        premium_amount: parseFloat(form.premium_amount) || 1,
+        premium_amount_ttd: parseFloat(form.premium_amount) || 1,
+        premium_frequency: form.premium_frequency as Parameters<typeof financeApi.createPolicy>[0]['premium_frequency'],
+        start_date: form.start_date || new Date().toISOString().slice(0,10),
+        expiry_date: form.expiry_date || new Date(Date.now() + 365*24*60*60*1000).toISOString().slice(0,10),
+        renewal_alert_days: 60,
+        notes: form.notes || undefined,
+      })
+      onCreated()
+      onClose()
+    } catch (e: unknown) {
+      setSaveError(e instanceof Error ? e.message : 'Save failed — check all required fields.')
+    } finally {
+      setIsSaving(false)
+    }
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
@@ -1218,10 +1229,11 @@ function AddPropertyInsuranceModal({ propertyId, onClose, onCreated }: { propert
             <label className="block text-xs text-slate-400 mb-1">Notes</label>
             <textarea rows={2} value={form.notes} onChange={set('notes')} className={cls + ' resize-none'} />
           </div>
+          {saveError && <p className="text-red-400 text-xs rounded bg-red-900/30 border border-red-700 px-3 py-2">{saveError}</p>}
           <div className="flex justify-end pt-2">
-            <button onClick={() => mutate()} disabled={!form.insurer_name || isPending}
+            <button onClick={() => void handleSave()} disabled={!form.insurer_name || isSaving}
               className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-sm rounded-lg transition-colors">
-              {isPending ? t('propertiesPanel.addingLabel') : t('propertiesPanel.addPolicy')}
+              {isSaving ? t('propertiesPanel.addingLabel') : t('propertiesPanel.addPolicy')}
             </button>
           </div>
         </div>

@@ -33,6 +33,12 @@ export const expensesApi = {
     category: string
     notes?: string
     idempotency_key: string
+    linked_record_type?: string
+    linked_record_id?: string
+    linked_record_label?: string
+    fuel_litres?: number
+    fuel_odometer_km?: number
+    fuel_type?: string
   }) => api.post<Expense>('/finance/expenses', body),
 
   submit: (id: string) =>
