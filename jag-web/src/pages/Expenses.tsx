@@ -121,13 +121,16 @@ function CreateModal({ onClose, onCreated }: { onClose: () => void; onCreated: (
   const vehicles   = vehiclesData?.vehicles ?? []
   const properties = propertiesArr
 
-  // Reset link state when category changes in a way that the current linkType is no longer relevant
   const handleCategoryChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const cat = e.target.value
     setForm(f => ({ ...f, category: cat }))
-    setLinkType('')
     setLinkedId('')
     setLinkedLabel('')
+    // Auto-select link type for single-option categories; leave '' for multi-option so user picks via toggle
+    if (['FUEL','TRANSPORT'].includes(cat))                            setLinkType('VEHICLE')
+    else if (['UTILITIES','TAX_PAYMENT'].includes(cat))               setLinkType('PROPERTY')
+    else if (['PERSONAL_EXPENSE','MEDICAL','EDUCATION','CHARITY'].includes(cat)) setLinkType('FAMILY_MEMBER')
+    else                                                               setLinkType('')
   }
 
   const handleLinkSelect = (id: string, label: string) => {
@@ -245,14 +248,13 @@ function CreateModal({ onClose, onCreated }: { onClose: () => void; onCreated: (
               )}
 
               {/* Vehicle picker */}
-              {(linkType === 'VEHICLE' || (showVehiclePicker && !showPolicyPicker && !showPropertyPicker && linkType === '')) && (
+              {linkType === 'VEHICLE' && (
                 <Field label="Vehicle">
                     <select
                       value={linkedId}
                       onChange={e => {
                         const veh = vehicles.find(v => v.id === e.target.value)
                         handleLinkSelect(e.target.value, veh ? `${veh.registration_number ?? ''} ${veh.make ?? ''} ${veh.model ?? ''}`.trim() : '')
-                        setLinkType('VEHICLE')
                       }}
                       className={cls}
                     >
@@ -307,14 +309,13 @@ function CreateModal({ onClose, onCreated }: { onClose: () => void; onCreated: (
               )}
 
               {/* Family member picker */}
-              {showFamilyPicker && !showVehiclePicker && !showPropertyPicker && (
+              {linkType === 'FAMILY_MEMBER' && (
                 <Field label="Family member">
                   <select
                     value={linkedId}
                     onChange={e => {
                       const m = members.find(fm => fm.id === e.target.value)
                       handleLinkSelect(e.target.value, m ? `${m.first_name} ${m.last_name}` : '')
-                      setLinkType('FAMILY_MEMBER')
                     }}
                     className={cls}
                   >
