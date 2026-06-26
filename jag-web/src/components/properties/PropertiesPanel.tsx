@@ -2,11 +2,13 @@ import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { propertiesApi } from '../../api/properties'
+import { financeApi } from '../../api/finance'
 import { filesApi } from '../../api/files'
 import { useAuth } from '../../auth/AuthProvider'
 import { fmtTTD, fmtDate } from '../../lib/entities'
 import FileUpload from '../ui/FileUpload'
 import ConfirmDeleteModal from '../ui/ConfirmDeleteModal'
+import type { InsurancePolicy } from '../../types/finance'
 import type {
   Property, MaintenanceRequest, VendorInvoice,
   PropertyTaxRecord, Inspection,
@@ -1113,6 +1115,121 @@ function PayInvoiceModal({ propertyId, inv, onClose, onUpdated }: {
   )
 }
 
+// ─── Add Property Insurance Modal ────────────────────────────────────────────
+const PROP_INS_TYPES = ['BUILDING','CONTENTS','COMPREHENSIVE','FLOOD','FIRE','LIABILITY','OTHER'] as const
+
+function AddPropertyInsuranceModal({ propertyId, onClose, onCreated }: { propertyId: string; onClose: () => void; onCreated: () => void }) {
+  const { t } = useTranslation()
+  const OWNER_ENTITY = '00000000-0000-0000-0001-000000000003' // JAG_PROPERTIES
+  const [form, setForm] = useState({
+    policy_type: 'BUILDING' as string, sub_type: '',
+    policy_number: '', insurer_name: '', broker_name: '',
+    coverage_amount: '', premium_amount: '', premium_frequency: 'ANNUAL',
+    start_date: '', expiry_date: '', notes: '',
+  })
+  const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
+    setForm(f => ({ ...f, [k]: e.target.value }))
+
+  const { mutate, isPending } = useMutation({
+    mutationFn: () => financeApi.createPolicy({
+      owner_entity_id: OWNER_ENTITY,
+      policy_type: form.policy_type as Parameters<typeof financeApi.createPolicy>[0]['policy_type'],
+      sub_type: form.sub_type || undefined,
+      insured_asset_type: 'PROPERTY' as const,
+      insured_asset_ref: propertyId,
+      policy_number: form.policy_number || `PROP-${Date.now()}`,
+      insurer_name: form.insurer_name,
+      broker_name: form.broker_name || undefined,
+      coverage_amount: parseFloat(form.coverage_amount) || 0,
+      coverage_amount_ttd: parseFloat(form.coverage_amount) || 0,
+      currency: 'TTD',
+      premium_amount: parseFloat(form.premium_amount) || 0,
+      premium_amount_ttd: parseFloat(form.premium_amount) || 0,
+      premium_frequency: form.premium_frequency as Parameters<typeof financeApi.createPolicy>[0]['premium_frequency'],
+      start_date: form.start_date,
+      expiry_date: form.expiry_date || new Date(Date.now() + 365*24*60*60*1000).toISOString().slice(0,10),
+      renewal_alert_days: 60,
+      notes: form.notes || undefined,
+    }),
+    onSuccess: () => { onCreated(); onClose() },
+  })
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+      <div className="bg-slate-800 rounded-xl w-full max-w-lg max-h-[90vh] flex flex-col shadow-2xl">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-700 shrink-0">
+          <h2 className="text-sm font-semibold text-slate-100">{t('propertiesPanel.addInsurance')}</h2>
+          <button onClick={onClose} className="text-slate-500 hover:text-slate-300">✕</button>
+        </div>
+        <div className="flex-1 overflow-y-auto p-5 space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">Type *</label>
+              <select value={form.policy_type} onChange={set('policy_type')} className={cls}>
+                {PROP_INS_TYPES.map(tp => <option key={tp} value={tp}>{t(`insurance.policyTypes.${tp}`)}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">Sub-type</label>
+              <input value={form.sub_type} onChange={set('sub_type')} className={cls} placeholder="e.g. All-risks" />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">Insurer *</label>
+              <input value={form.insurer_name} onChange={set('insurer_name')} className={cls} placeholder="Guardian General" />
+            </div>
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">Policy Number</label>
+              <input value={form.policy_number} onChange={set('policy_number')} className={cls} placeholder="POL-2026-001" />
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">Broker</label>
+            <input value={form.broker_name} onChange={set('broker_name')} className={cls} placeholder="Optional" />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">Coverage (TTD)</label>
+              <input type="number" min="0" step="0.01" value={form.coverage_amount} onChange={set('coverage_amount')} className={cls} />
+            </div>
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">Premium (TTD)</label>
+              <input type="number" min="0" step="0.01" value={form.premium_amount} onChange={set('premium_amount')} className={cls} />
+            </div>
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">Frequency</label>
+              <select value={form.premium_frequency} onChange={set('premium_frequency')} className={cls}>
+                {['MONTHLY','QUARTERLY','SEMI_ANNUAL','ANNUAL','ONE_OFF'].map(f => <option key={f} value={f}>{f}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">Start Date</label>
+              <input type="date" value={form.start_date} onChange={set('start_date')} className={cls} />
+            </div>
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">Expiry Date</label>
+              <input type="date" value={form.expiry_date} onChange={set('expiry_date')} className={cls} />
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">Notes</label>
+            <textarea rows={2} value={form.notes} onChange={set('notes')} className={cls + ' resize-none'} />
+          </div>
+          <div className="flex justify-end pt-2">
+            <button onClick={() => mutate()} disabled={!form.insurer_name || isPending}
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-sm rounded-lg transition-colors">
+              {isPending ? t('propertiesPanel.addingLabel') : t('propertiesPanel.addPolicy')}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ─── Property Detail ──────────────────────────────────────────────────────────
 
 // ─── Add Tax Modal ────────────────────────────────────────────────────────────
@@ -2013,7 +2130,7 @@ function EditPropertyModal({ property, onClose, onSaved }: { property: Property;
   )
 }
 
-type DetailTab = 'overview' | 'leases' | 'payments' | 'maintenance' | 'utilities' | 'invoices' | 'tax' | 'inspections' | 'financials' | 'documents' | 'units'
+type DetailTab = 'overview' | 'leases' | 'payments' | 'maintenance' | 'utilities' | 'invoices' | 'insurance' | 'tax' | 'inspections' | 'financials' | 'documents' | 'units'
 
 function ValuationHistoryModal({ id, name, onClose }: { id: string; name: string; onClose: () => void }) {
   const { t } = useTranslation()
@@ -2129,6 +2246,7 @@ function PropertyDetail({ property, onDeleted }: { property: Property; onDeleted
   const [showAddUtility, setShowAddUtility] = useState(false)
   const [showAddInvoice, setShowAddInvoice] = useState(false)
   const [payingInvoice, setPayingInvoice] = useState<VendorInvoice | null>(null)
+  const [showAddInsurance, setShowAddInsurance] = useState(false)
   const [showAddTax, setShowAddTax] = useState(false)
   const [payingTax, setPayingTax] = useState<PropertyTaxRecord | null>(null)
   const [showAddInspection, setShowAddInspection] = useState(false)
@@ -2174,6 +2292,11 @@ function PropertyDetail({ property, onDeleted }: { property: Property; onDeleted
     queryKey: ['properties', property.id, 'invoices'],
     queryFn: () => propertiesApi.getVendorInvoices(property.id),
     enabled: detailTab === 'invoices',
+  })
+  const { data: insurance = [] } = useQuery({
+    queryKey: ['finance', 'insurance', 'policies', 'property', property.id],
+    queryFn: () => financeApi.getPolicies({ insured_asset_ref: property.id }),
+    enabled: detailTab === 'insurance',
   })
   const { data: taxRecords = [] } = useQuery({
     queryKey: ['properties', property.id, 'tax'],
@@ -2221,6 +2344,7 @@ function PropertyDetail({ property, onDeleted }: { property: Property; onDeleted
     { id: 'maintenance', label: t('propertiesPanel.detailTabs.maintenance') },
     { id: 'utilities',   label: t('propertiesPanel.detailTabs.utilities') },
     { id: 'invoices',    label: t('propertiesPanel.detailTabs.invoices') },
+    { id: 'insurance',   label: t('propertiesPanel.detailTabs.insurance') },
     { id: 'tax',         label: t('propertiesPanel.detailTabs.tax') },
     { id: 'inspections', label: t('propertiesPanel.detailTabs.inspections') },
     { id: 'units',       label: t('propertiesPanel.detailTabs.units') },
@@ -2615,6 +2739,48 @@ function PropertyDetail({ property, onDeleted }: { property: Property; onDeleted
         )}
       </div>
 
+        {/* Insurance Tab */}
+        {detailTab === 'insurance' && (
+          <div className="space-y-3">
+            <div className="flex justify-end">
+              <button onClick={() => setShowAddInsurance(true)}
+                className="px-3 py-1.5 text-xs bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors">
+                + Add Policy
+              </button>
+            </div>
+            {insurance.length === 0 && <Empty />}
+            {(insurance as InsurancePolicy[]).map(p => {
+              const days = Math.ceil((new Date(p.expiry_date).getTime() - Date.now()) / 86_400_000)
+              const expiring = days < 60
+              return (
+                <div key={p.id} className="bg-slate-700/40 rounded-lg p-3 border border-slate-600">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-sm font-medium text-slate-100">{p.insurer_name}</span>
+                        <span className="text-xs px-1.5 py-0.5 rounded bg-slate-600 text-slate-300">
+                          {t(`insurance.policyTypes.${p.policy_type}`)}
+                          {p.sub_type && ` — ${p.sub_type}`}
+                        </span>
+                        {!p.is_active && <span className="text-xs px-1.5 py-0.5 rounded bg-slate-700 text-slate-500">Inactive</span>}
+                        {p.is_active && expiring && <span className="text-xs px-1.5 py-0.5 rounded bg-red-900/60 text-red-300 border border-red-700">{t('propertiesPanel.expiringSoon')}</span>}
+                      </div>
+                      {p.policy_number && <p className="text-xs text-slate-400 mt-0.5 font-mono">{p.policy_number}</p>}
+                      <div className="grid grid-cols-2 gap-x-4 mt-1.5 text-xs text-slate-400">
+                        <span>{t('propertiesPanel.insurancePremium')} <span className="text-slate-200">{fmtTTD(p.premium_amount_ttd)} / {p.premium_frequency.toLowerCase()}</span></span>
+                        <span>{t('propertiesPanel.insuranceCoverage')} <span className="text-slate-200">{fmtTTD(p.coverage_amount_ttd)}</span></span>
+                        <span>{t('propertiesPanel.insuranceFrom')} <span className="text-slate-200">{fmtDate(p.start_date)}</span></span>
+                        <span className={expiring && p.is_active ? 'text-red-400' : ''}>{t('propertiesPanel.insuranceExpires')} <span className="text-slate-200">{fmtDate(p.expiry_date)}</span></span>
+                      </div>
+                      {p.notes && <p className="text-xs text-slate-500 mt-1">{p.notes}</p>}
+                    </div>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
+
         {/* Property Tax Tab */}
         {detailTab === 'tax' && (
           <div className="space-y-3">
@@ -2931,6 +3097,8 @@ function PropertyDetail({ property, onDeleted }: { property: Property; onDeleted
         onCreated={() => void qc.invalidateQueries({ queryKey: ['properties', property.id, 'invoices'] })} />}
       {payingInvoice    && <PayInvoiceModal propertyId={property.id} inv={payingInvoice} onClose={() => setPayingInvoice(null)}
         onUpdated={() => void qc.invalidateQueries({ queryKey: ['properties', property.id, 'invoices'] })} />}
+      {showAddInsurance && <AddPropertyInsuranceModal propertyId={property.id} onClose={() => setShowAddInsurance(false)}
+        onCreated={() => void qc.invalidateQueries({ queryKey: ['finance', 'insurance', 'policies', 'property', property.id] })} />}
       {showAddTax       && <AddTaxModal propertyId={property.id} onClose={() => setShowAddTax(false)}
         onCreated={() => void qc.invalidateQueries({ queryKey: ['properties', property.id, 'tax'] })} />}
       {payingTax        && <PayTaxModal propertyId={property.id} record={payingTax} onClose={() => setPayingTax(null)}

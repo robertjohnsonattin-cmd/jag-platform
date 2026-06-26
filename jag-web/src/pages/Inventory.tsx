@@ -2,6 +2,7 @@ import { useState, useCallback, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { imsApi } from '../api/ims'
+import { financeApi } from '../api/finance'
 import { glApi } from '../api/gl'
 import { tenantApi } from '../api/client'
 import ConfirmDeleteModal from '../components/ui/ConfirmDeleteModal'
@@ -17,6 +18,7 @@ import type {
   ComplianceDoc, VehicleDisposal,
 } from '../types/ims'
 import type { GlAccount } from '../types/gl'
+import type { InsurancePolicy } from '../types/finance'
 import { VEHICLE_OWNER_OPTIONS } from '../types/ims'
 import { ENTITY_NAMES } from '../lib/entities'
 
@@ -2935,9 +2937,182 @@ function VehicleDisposalTab({ vehicle }: { vehicle: Vehicle }) {
   )
 }
 
+// ── VMS: Vehicle Insurance Tab ────────────────────────────────────────────────
+
+
+const ENTITY_MAP: Record<string, string> = {
+  'JAG Holdings':      '00000000-0000-0000-0001-000000000001',
+  'JABCO':             '00000000-0000-0000-0001-000000000002',
+  'JAG Properties':    '00000000-0000-0000-0001-000000000003',
+  'JAG Entertainment': '00000000-0000-0000-0001-000000000004',
+  'JAG Finance':       '00000000-0000-0000-0001-000000000005',
+  'DragonBridge':      '00000000-0000-0000-0001-000000000006',
+  'Personal — Robert': '00000000-0000-0000-0001-000000000008',
+  'Personal — Brian':  '00000000-0000-0000-0001-000000000011',
+  'Personal — Phillip':'00000000-0000-0000-0001-000000000010',
+}
+
+function VehicleInsuranceTab({ vehicleId, ownerEntity }: { vehicleId: string; ownerEntity: string }) {
+  const qc = useQueryClient()
+  const [showAdd, setShowAdd] = useState(false)
+  const [form, setForm] = useState({
+    policy_type: 'VEHICLE' as string, sub_type: '',
+    policy_number: '', insurer_name: '', broker_name: '',
+    coverage_amount: '', premium_amount: '', premium_frequency: 'ANNUAL',
+    start_date: '', expiry_date: '', notes: '',
+  })
+  const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
+    setForm(f => ({ ...f, [k]: e.target.value }))
+  const qk = ['finance', 'insurance', 'policies', 'vehicle', vehicleId]
+
+  const { data: policies = [], isLoading } = useQuery({
+    queryKey: qk,
+    queryFn: () => financeApi.getPolicies({ insured_asset_ref: vehicleId }),
+  })
+
+  const { mutate, isPending } = useMutation({
+    mutationFn: () => financeApi.createPolicy({
+      owner_entity_id: ENTITY_MAP[ownerEntity] ?? '00000000-0000-0000-0001-000000000001',
+      policy_type: form.policy_type as Parameters<typeof financeApi.createPolicy>[0]['policy_type'],
+      sub_type: form.sub_type || undefined,
+      insured_asset_type: 'VEHICLE' as const,
+      insured_asset_ref: vehicleId,
+      policy_number: form.policy_number || `VEH-${Date.now()}`,
+      insurer_name: form.insurer_name,
+      broker_name: form.broker_name || undefined,
+      coverage_amount: parseFloat(form.coverage_amount) || 0,
+      coverage_amount_ttd: parseFloat(form.coverage_amount) || 0,
+      currency: 'TTD',
+      premium_amount: parseFloat(form.premium_amount) || 0,
+      premium_amount_ttd: parseFloat(form.premium_amount) || 0,
+      premium_frequency: form.premium_frequency as Parameters<typeof financeApi.createPolicy>[0]['premium_frequency'],
+      start_date: form.start_date,
+      expiry_date: form.expiry_date || new Date(Date.now() + 365*24*60*60*1000).toISOString().slice(0,10),
+      renewal_alert_days: 30,
+      notes: form.notes || undefined,
+    }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: qk })
+      setShowAdd(false)
+      setForm(f => ({ ...f, policy_number:'', insurer_name:'', broker_name:'', coverage_amount:'', premium_amount:'', start_date:'', expiry_date:'', notes:'' }))
+    },
+  })
+
+  const fmtDate = (d: string | null) => d ? new Date(d).toLocaleDateString('en-TT') : '—'
+  const fmtMoney = (v: string) => `$${parseFloat(v).toLocaleString('en-TT', { minimumFractionDigits: 2 })}`
+
+  return (
+    <div className="h-full overflow-y-auto p-5 space-y-4">
+      <div className="flex justify-end">
+        <button onClick={() => setShowAdd(s => !s)}
+          className="text-xs px-3 py-1.5 bg-orange-700 hover:bg-orange-600 text-white rounded-lg transition-colors">
+          {showAdd ? 'Cancel' : '+ Add Policy'}
+        </button>
+      </div>
+
+      {showAdd && (
+        <div className="bg-slate-700/50 rounded-lg p-4 border border-slate-600 space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">Type *</label>
+              <select value={form.policy_type} onChange={set('policy_type')} className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:outline-none">
+                {['VEHICLE','COMPREHENSIVE','LIABILITY','THIRD_PARTY','OTHER'].map(tp => <option key={tp} value={tp}>{tp.replace('_',' ')}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">Sub-type</label>
+              <input value={form.sub_type} onChange={set('sub_type')} className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:outline-none" placeholder="e.g. Comprehensive, TWOC" />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">Insurer *</label>
+              <input value={form.insurer_name} onChange={set('insurer_name')} className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:outline-none" />
+            </div>
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">Policy Number</label>
+              <input value={form.policy_number} onChange={set('policy_number')} className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:outline-none" />
+            </div>
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">Coverage (TTD)</label>
+              <input type="number" min="0" step="0.01" value={form.coverage_amount} onChange={set('coverage_amount')} className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:outline-none" />
+            </div>
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">Premium (TTD)</label>
+              <input type="number" min="0" step="0.01" value={form.premium_amount} onChange={set('premium_amount')} className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:outline-none" />
+            </div>
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">Frequency</label>
+              <select value={form.premium_frequency} onChange={set('premium_frequency')} className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:outline-none">
+                {['MONTHLY','QUARTERLY','SEMI_ANNUAL','ANNUAL','ONE_OFF'].map(f => <option key={f} value={f}>{f}</option>)}
+              </select>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">Start Date</label>
+              <input type="date" value={form.start_date} onChange={set('start_date')} className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:outline-none" />
+            </div>
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">Expiry Date</label>
+              <input type="date" value={form.expiry_date} onChange={set('expiry_date')} className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:outline-none" />
+            </div>
+          </div>
+          <div className="flex justify-end">
+            <button onClick={() => mutate()} disabled={!form.insurer_name || isPending}
+              className="px-4 py-2 bg-orange-700 hover:bg-orange-600 disabled:opacity-50 text-white text-sm rounded-lg transition-colors">
+              {isPending ? 'Saving…' : 'Save Policy'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {isLoading && <p className="text-slate-500 text-sm">Loading…</p>}
+      {!isLoading && policies.length === 0 && !showAdd && (
+        <p className="text-slate-500 text-sm text-center py-8">No insurance policies linked to this vehicle.</p>
+      )}
+      {(policies as InsurancePolicy[]).map(p => {
+        const days = Math.ceil((new Date(p.expiry_date).getTime() - Date.now()) / 86_400_000)
+        const expiring = days < 30
+        const expired = days < 0
+        return (
+          <div key={p.id} className="bg-slate-700/40 rounded-lg p-4 border border-slate-600">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="font-medium text-slate-100 text-sm">{p.insurer_name}</span>
+                  <span className="text-xs px-1.5 py-0.5 rounded bg-slate-600 text-slate-300">
+                    {p.policy_type.replace('_', ' ')}{p.sub_type ? ` — ${p.sub_type}` : ''}
+                  </span>
+                  {!p.is_active && <span className="text-xs text-slate-500">Inactive</span>}
+                  {p.is_active && expired && <span className="text-xs px-1.5 py-0.5 rounded bg-red-900 text-red-300">EXPIRED</span>}
+                  {p.is_active && !expired && expiring && <span className="text-xs px-1.5 py-0.5 rounded bg-orange-900 text-orange-300">Expiring soon</span>}
+                </div>
+                {p.policy_number && <p className="text-xs text-slate-400 font-mono mt-0.5">{p.policy_number}</p>}
+                <div className="grid grid-cols-2 gap-x-6 mt-2 text-xs text-slate-400">
+                  <span>Coverage: <span className="text-slate-200">{fmtMoney(p.coverage_amount_ttd)}</span></span>
+                  <span>Premium: <span className="text-slate-200">{fmtMoney(p.premium_amount_ttd)}/{p.premium_frequency.toLowerCase()}</span></span>
+                  <span>From: <span className="text-slate-200">{fmtDate(p.start_date)}</span></span>
+                  <span className={expired ? 'text-red-400' : expiring ? 'text-orange-400' : ''}>
+                    Expires: <span className="text-slate-200">{fmtDate(p.expiry_date)}</span>
+                    {p.is_active && ` (${expired ? 'EXPIRED' : `${days}d`})`}
+                  </span>
+                </div>
+                {p.notes && <p className="text-xs text-slate-500 mt-1">{p.notes}</p>}
+              </div>
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 // ── VMS: Manage Modal (container) ─────────────────────────────────────────────
 
-type VmsTab = 'photos' | 'maintenance' | 'service-log' | 'fuel-costs' | 'compliance' | 'disposal' | 'gps'
+type VmsTab = 'photos' | 'maintenance' | 'service-log' | 'fuel-costs' | 'compliance' | 'insurance' | 'disposal' | 'gps'
 
 function VehiclePhotosTab({ itemId }: { itemId: string }) {
   const { t } = useTranslation()
@@ -3017,6 +3192,7 @@ function VehicleManageModal({ vehicle, onClose }: { vehicle: Vehicle; onClose: (
     { key: 'service-log', label: 'Service Log' },
     { key: 'fuel-costs',  label: 'Fuel & Costs' },
     { key: 'compliance',  label: 'Compliance' },
+    { key: 'insurance',   label: '🛡 Insurance' },
     { key: 'gps',         label: '📍 GPS' },
     { key: 'disposal',    label: isDisposed ? 'Disposal Record' : 'Dispose' },
   ]
@@ -3052,6 +3228,7 @@ function VehicleManageModal({ vehicle, onClose }: { vehicle: Vehicle; onClose: (
           {tab === 'service-log' && <VehicleServiceLogTab  vehicle={vehicle} />}
           {tab === 'fuel-costs'  && <VehicleFuelCostsTab   vehicleId={vehicle.id} />}
           {tab === 'compliance'  && <VehicleComplianceTab  vehicleId={vehicle.id} />}
+          {tab === 'insurance'   && <VehicleInsuranceTab   vehicleId={vehicle.id} ownerEntity={vehicle.owner_entity ?? vehicle.fleet_type ?? ''} />}
           {tab === 'gps'         && <VehicleGpsTab         vehicleId={vehicle.id} registration={vehicle.registration_number} />}
           {tab === 'disposal'    && <VehicleDisposalTab    vehicle={vehicle} />}
         </div>
