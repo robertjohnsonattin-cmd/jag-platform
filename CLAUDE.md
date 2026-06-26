@@ -1,7 +1,7 @@
 # JAG Integrated Business Platform — Claude Session Context
 
 **Owner:** Robert Johnson-Attin | Barataria, Trinidad & Tobago
-**Architecture:** v1.9 | **Current Phase:** ALL PHASES COMPLETE — in production | **Updated:** 2026-06-26 (session 28)
+**Architecture:** v1.9 | **Current Phase:** ALL PHASES COMPLETE — in production | **Updated:** 2026-06-26 (session 29)
 
 ---
 
@@ -683,6 +683,8 @@ Path 2 local extraction — reads PDFs from local hard drive, Ollama extracts, p
 | `/login` | Keycloak PKCE login; auto-redirects if refresh token exists |
 | `/expense-form` | Quick expense entry — amount, currency, category, payment method, payee, card picker, receipt photo; auto-submits on save |
 | `/expenses` | Expense list (50 most recent); DRAFT items show Submit button |
+
+**Note:** JAG Mobile has NO VMS, vehicle, or GPS screens. Vehicle management (work orders, fuel logs, compliance, disposal) and GPS tracking are **web-browser-only** (`jagcorporate.com` on phone browser). The independent GPS fallback on mobile is the **Traccar Manager** app (connects directly to `traccar.jagcorporate.com`).
 
 ### Auth Pattern
 - First login: PKCE browser redirect → tokens stored in SecureStore (`jag_access_token`, `jag_refresh_token`, `jag_id_token`)
