@@ -2,7 +2,7 @@
 // Map tiles: OpenStreetMap (free). Markers use CircleMarker (pure SVG) to avoid
 // Leaflet's broken default-icon asset issue under the bundler.
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, useCallback } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { MapContainer, TileLayer, CircleMarker, Circle, Polyline, Popup, useMap } from 'react-leaflet'
 import 'leaflet/dist/leaflet.css'
@@ -388,6 +388,7 @@ export function TrackersModal({ onClose }: { onClose: () => void }) {
                   <th className="text-left px-3 py-2">Model</th>
                   <th className="text-left px-3 py-2">SIM</th>
                   <th className="text-left px-3 py-2">Traccar ID</th>
+                  <th className="text-left px-3 py-2">Battery</th>
                   <th className="text-left px-3 py-2">Status</th>
                   <th className="text-left px-3 py-2">Vehicle</th>
                   <th className="text-left px-3 py-2">Actions</th>
@@ -398,7 +399,7 @@ export function TrackersModal({ onClose }: { onClose: () => void }) {
                   <TrackerRow key={tr.id} tracker={tr} vehicles={vehicles} onChange={refresh} />
                 ))}
                 {trackers.length === 0 && (
-                  <tr><td colSpan={7} className="px-3 py-6 text-center text-slate-500">No trackers registered.</td></tr>
+                  <tr><td colSpan={8} className="px-3 py-6 text-center text-slate-500">No trackers registered.</td></tr>
                 )}
               </tbody>
             </table>
@@ -409,15 +410,118 @@ export function TrackersModal({ onClose }: { onClose: () => void }) {
   )
 }
 
+function BatteryBar({ level, charging }: { level: number; charging: boolean }) {
+  const color = charging ? 'bg-blue-500' : level > 50 ? 'bg-green-500' : level > 20 ? 'bg-amber-400' : 'bg-red-500'
+  return (
+    <div className="flex items-center gap-1.5">
+      <div className="w-16 h-2 bg-slate-700 rounded-full overflow-hidden">
+        <div className={`h-full rounded-full ${color}`} style={{ width: `${level}%` }} />
+      </div>
+      <span className={`text-[11px] tabular-nums ${level <= 20 && !charging ? 'text-red-400 font-medium' : 'text-slate-300'}`}>
+        {level}%{charging ? ' ⚡' : ''}
+      </span>
+    </div>
+  )
+}
+
+function BatteryDetailPanel({ tracker }: { tracker: GpsTracker }) {
+  const { data, isLoading } = useQuery({
+    queryKey: ['tracker-battery', tracker.id],
+    queryFn: () => imsApi.getTrackerBattery(tracker.id),
+    staleTime: 60_000,
+  })
+
+  if (isLoading) return <td colSpan={8} className="px-6 pb-3 text-xs text-slate-500">Loading battery data…</td>
+  if (!data || data.latest_level === null) {
+    return <td colSpan={8} className="px-6 pb-3 text-xs text-slate-500">No battery readings yet. Data will appear after the next hourly sync.</td>
+  }
+
+  const { discharge_pct_per_hour, estimated_hours_remaining, readings } = data
+
+  // Mini sparkline: last 24 readings (24h), oldest → newest left to right
+  const spark = [...readings].reverse().slice(-24)
+  const sparkW = 120
+  const sparkH = 28
+  const pts = spark.map((r, i) => {
+    const x = spark.length < 2 ? sparkW / 2 : (i / (spark.length - 1)) * sparkW
+    const y = sparkH - (r.battery_level / 100) * sparkH
+    return `${x.toFixed(1)},${y.toFixed(1)}`
+  }).join(' ')
+
+  return (
+    <td colSpan={8} className="px-6 pb-3">
+      <div className="flex flex-wrap items-start gap-6 text-xs text-slate-300">
+        {spark.length > 1 && (
+          <div>
+            <p className="text-slate-500 mb-1">24h trend</p>
+            <svg width={sparkW} height={sparkH} className="overflow-visible">
+              <polyline points={pts} fill="none" stroke="#f97316" strokeWidth="1.5" />
+              {spark.map((r, i) => {
+                const x = spark.length < 2 ? sparkW / 2 : (i / (spark.length - 1)) * sparkW
+                const y = sparkH - (r.battery_level / 100) * sparkH
+                return r.is_charging
+                  ? <circle key={i} cx={x} cy={y} r={2} fill="#3b82f6" />
+                  : null
+              })}
+            </svg>
+            <p className="text-slate-600 text-[10px] mt-0.5">⚡ = charging</p>
+          </div>
+        )}
+        <div className="space-y-1">
+          {discharge_pct_per_hour !== null && (
+            <p>Discharge rate: <span className="text-white">{discharge_pct_per_hour}%/hr</span></p>
+          )}
+          {estimated_hours_remaining !== null && (
+            <p>Est. remaining: <span className={`font-medium ${estimated_hours_remaining < 8 ? 'text-red-400' : estimated_hours_remaining < 24 ? 'text-amber-400' : 'text-green-400'}`}>
+              {estimated_hours_remaining < 24
+                ? `${estimated_hours_remaining}h`
+                : `${Math.floor(estimated_hours_remaining / 24)}d ${estimated_hours_remaining % 24}h`}
+            </span></p>
+          )}
+          {readings.length > 0 && (
+            <p className="text-slate-500">Last reading: {fmtTime(readings[0].recorded_at)}</p>
+          )}
+          {discharge_pct_per_hour === null && (
+            <p className="text-slate-500">Discharge rate: not enough data yet (needs 2+ non-charging readings within 24h)</p>
+          )}
+        </div>
+        <div>
+          <p className="text-slate-500 mb-1">Recommended settings</p>
+          {discharge_pct_per_hour !== null ? (
+            discharge_pct_per_hour > 5 ? (
+              <p className="text-amber-300">High drain ({discharge_pct_per_hour}%/hr) — send: <span className="font-mono">upload123456 120</span></p>
+            ) : discharge_pct_per_hour > 2 ? (
+              <p className="text-slate-200">Moderate drain — send: <span className="font-mono">upload123456 60</span></p>
+            ) : (
+              <p className="text-green-300">Low drain — current settings are efficient</p>
+            )
+          ) : (
+            <p className="text-slate-500">—</p>
+          )}
+        </div>
+      </div>
+    </td>
+  )
+}
+
 function TrackerRow({ tracker, vehicles, onChange }:
   { tracker: GpsTracker; vehicles: Vehicle[]; onChange: () => void }) {
   const [editTid, setEditTid] = useState(false)
   const [tidVal, setTidVal] = useState(tracker.traccar_device_id?.toString() ?? '')
+  const [showBattery, setShowBattery] = useState(false)
 
-  const assign = async (vehicleId: string) => {
+  // Fetch battery inline so the level shows in the table without expanding
+  const { data: bat } = useQuery({
+    queryKey: ['tracker-battery', tracker.id],
+    queryFn: () => imsApi.getTrackerBattery(tracker.id),
+    staleTime: 300_000,
+    enabled: tracker.status !== 'RETIRED' && tracker.traccar_device_id !== null,
+  })
+
+  const assign = useCallback(async (vehicleId: string) => {
     await imsApi.updateTracker(tracker.id, vehicleId ? { vehicle_id: vehicleId } : { vehicle_id: null })
     onChange()
-  }
+  }, [tracker.id, onChange])
   const saveTid = async () => {
     await imsApi.updateTracker(tracker.id, { traccar_device_id: tidVal ? Number(tidVal) : null })
     setEditTid(false); onChange()
@@ -426,49 +530,65 @@ function TrackerRow({ tracker, vehicles, onChange }:
   const del = async () => { if (confirm(`Delete tracker ${tracker.device_serial}?`)) { await imsApi.deleteTracker(tracker.id); onChange() } }
 
   return (
-    <tr className="border-t border-slate-700 text-slate-300">
-      <td className="px-3 py-2 font-mono">{tracker.device_serial}</td>
-      <td className="px-3 py-2">{tracker.model ?? '—'}</td>
-      <td className="px-3 py-2">{tracker.sim_phone ?? '—'}</td>
-      <td className="px-3 py-2">
-        {editTid ? (
-          <span className="flex items-center gap-1">
-            <input value={tidVal} onChange={e => setTidVal(e.target.value)} type="number"
-              className="w-20 bg-slate-900 border border-slate-600 rounded px-1 py-0.5 text-white" />
-            <button onClick={saveTid} className="text-green-400">✓</button>
-            <button onClick={() => setEditTid(false)} className="text-slate-500">✕</button>
+    <>
+      <tr className="border-t border-slate-700 text-slate-300">
+        <td className="px-3 py-2 font-mono">{tracker.device_serial}</td>
+        <td className="px-3 py-2">{tracker.model ?? '—'}</td>
+        <td className="px-3 py-2">{tracker.sim_phone ?? '—'}</td>
+        <td className="px-3 py-2">
+          {editTid ? (
+            <span className="flex items-center gap-1">
+              <input value={tidVal} onChange={e => setTidVal(e.target.value)} type="number"
+                className="w-20 bg-slate-900 border border-slate-600 rounded px-1 py-0.5 text-white" />
+              <button onClick={saveTid} className="text-green-400">✓</button>
+              <button onClick={() => setEditTid(false)} className="text-slate-500">✕</button>
+            </span>
+          ) : (
+            <button onClick={() => setEditTid(true)} className="hover:text-orange-400">
+              {tracker.traccar_device_id ?? <span className="text-slate-500">set…</span>}
+            </button>
+          )}
+        </td>
+        <td className="px-3 py-2">
+          {bat?.latest_level != null ? (
+            <button onClick={() => setShowBattery(s => !s)} className="hover:opacity-80 transition-opacity">
+              <BatteryBar level={bat.latest_level} charging={bat.is_charging ?? false} />
+            </button>
+          ) : (
+            <span className="text-slate-600 text-[11px]">no data</span>
+          )}
+        </td>
+        <td className="px-3 py-2">
+          <span className={`px-1.5 py-0.5 rounded text-[11px] ${
+            tracker.status === 'ASSIGNED' ? 'bg-green-900 text-green-300' :
+            tracker.status === 'RETIRED' ? 'bg-slate-700 text-slate-400' : 'bg-amber-900 text-amber-300'}`}>
+            {tracker.status}
           </span>
-        ) : (
-          <button onClick={() => setEditTid(true)} className="hover:text-orange-400">
-            {tracker.traccar_device_id ?? <span className="text-slate-500">set…</span>}
-          </button>
-        )}
-      </td>
-      <td className="px-3 py-2">
-        <span className={`px-1.5 py-0.5 rounded text-[11px] ${
-          tracker.status === 'ASSIGNED' ? 'bg-green-900 text-green-300' :
-          tracker.status === 'RETIRED' ? 'bg-slate-700 text-slate-400' : 'bg-amber-900 text-amber-300'}`}>
-          {tracker.status}
-        </span>
-      </td>
-      <td className="px-3 py-2">
-        {tracker.status !== 'RETIRED' && (
-          <select value={tracker.vehicle_id ?? ''} onChange={e => assign(e.target.value)}
-            className="bg-slate-900 border border-slate-600 rounded px-1.5 py-1 text-white max-w-[12rem]">
-            <option value="">— unassigned —</option>
-            {vehicles.map(v => (
-              <option key={v.id} value={v.id}>{v.registration_number}</option>
-            ))}
-          </select>
-        )}
-      </td>
-      <td className="px-3 py-2">
-        <div className="flex items-center gap-2">
-          {tracker.status !== 'RETIRED' && <button onClick={retire} className="text-amber-400 hover:text-amber-300">Retire</button>}
-          <button onClick={del} className="text-red-400 hover:text-red-300">Delete</button>
-        </div>
-      </td>
-    </tr>
+        </td>
+        <td className="px-3 py-2">
+          {tracker.status !== 'RETIRED' && (
+            <select value={tracker.vehicle_id ?? ''} onChange={e => assign(e.target.value)}
+              className="bg-slate-900 border border-slate-600 rounded px-1.5 py-1 text-white max-w-[12rem]">
+              <option value="">— unassigned —</option>
+              {vehicles.map(v => (
+                <option key={v.id} value={v.id}>{v.registration_number}</option>
+              ))}
+            </select>
+          )}
+        </td>
+        <td className="px-3 py-2">
+          <div className="flex items-center gap-2">
+            {tracker.status !== 'RETIRED' && <button onClick={retire} className="text-amber-400 hover:text-amber-300">Retire</button>}
+            <button onClick={del} className="text-red-400 hover:text-red-300">Delete</button>
+          </div>
+        </td>
+      </tr>
+      {showBattery && (
+        <tr className="bg-slate-900/40 border-t border-slate-800">
+          <BatteryDetailPanel tracker={tracker} />
+        </tr>
+      )}
+    </>
   )
 }
 

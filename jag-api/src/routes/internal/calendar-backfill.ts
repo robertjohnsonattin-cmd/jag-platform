@@ -3,11 +3,13 @@
 // relevant date set but no calendar_event_id / cal_*_event_id yet.
 //
 // Targets:
-//   vehicles     — next_service_date → cal_service_event_id
-//                  insurance_expiry  → cal_insurance_event_id
-//                  registration_expiry → cal_registration_event_id
-//   inspections  — inspection_date → calendar_event_id
-//   insurance    — expiry_date     → calendar_event_id (fin_insurance_policies)
+//   vehicles     — next_service_date      → cal_service_event_id
+//                  registration_expiry    → cal_registration_event_id
+//   inspections  — inspection_date        → calendar_event_id
+//   insurance    — expiry_date            → calendar_event_id (fin_insurance_policies)
+//
+// Vehicle insurance calendar events are now managed through fin_insurance_policies
+// (insurance consolidated in jag_family — migration 018/037).
 //
 // Docker-network-only; no Keycloak auth (same pattern as crm-calendar-backfill).
 
@@ -43,22 +45,18 @@ async function backfillVehicles(): Promise<SectionResult> {
       c.query<{
         id: string;
         make: string; model: string; registration_number: string; owner_entity: string;
-        insurance_expiry: string | null; registration_expiry: string | null;
-        next_service_date: string | null; insurance_provider: string | null;
+        registration_expiry: string | null;
+        next_service_date: string | null;
         cal_service_event_id: string | null;
-        cal_insurance_event_id: string | null;
         cal_registration_event_id: string | null;
       }>(
         `SELECT id, make, model, registration_number, owner_entity,
-                insurance_expiry::text   AS insurance_expiry,
                 registration_expiry::text AS registration_expiry,
                 next_service_date::text  AS next_service_date,
-                insurance_provider,
-                cal_service_event_id, cal_insurance_event_id, cal_registration_event_id
+                cal_service_event_id, cal_registration_event_id
          FROM ims_vehicles
          WHERE (
            (next_service_date IS NOT NULL      AND cal_service_event_id IS NULL) OR
-           (insurance_expiry IS NOT NULL        AND cal_insurance_event_id IS NULL) OR
            (registration_expiry IS NOT NULL     AND cal_registration_event_id IS NULL)
          )`,
       ).then(r => r.rows),
@@ -78,16 +76,6 @@ async function backfillVehicles(): Promise<SectionResult> {
           updates['cal_service_event_id'] = evId;
           processed++;
         } else if (v.next_service_date) { skipped++; }
-
-        if (v.insurance_expiry && !v.cal_insurance_event_id) {
-          const evId = await createAllDayCalendarEvent({
-            title: `Vehicle Insurance Expiry: ${label}`,
-            description: `Insurance policy expires for ${label} (${v.insurance_provider ?? v.owner_entity})`,
-            date: v.insurance_expiry,
-          });
-          updates['cal_insurance_event_id'] = evId;
-          processed++;
-        } else if (v.insurance_expiry) { skipped++; }
 
         if (v.registration_expiry && !v.cal_registration_event_id) {
           const evId = await createAllDayCalendarEvent({

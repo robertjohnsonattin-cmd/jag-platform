@@ -9,7 +9,7 @@ import FileUpload from '../ui/FileUpload'
 import ConfirmDeleteModal from '../ui/ConfirmDeleteModal'
 import type {
   Property, MaintenanceRequest, VendorInvoice,
-  InsurancePolicy, PropertyTaxRecord, Inspection,
+  PropertyTaxRecord, Inspection,
   Lease, PropertyDocument,
   UtilityAccount, Unit, UnitPhoto, RentPayment, RentReceipt,
   PropertyValuationHistory,
@@ -1114,101 +1114,6 @@ function PayInvoiceModal({ propertyId, inv, onClose, onUpdated }: {
 }
 
 // ─── Property Detail ──────────────────────────────────────────────────────────
-// ─── Add Insurance Modal ──────────────────────────────────────────────────────
-function AddInsuranceModal({ propertyId, onClose, onCreated }: { propertyId: string; onClose: () => void; onCreated: () => void }) {
-  const { t } = useTranslation()
-  const [form, setForm] = useState({
-    insurance_type: 'BUILDING', insurer: '', policy_number: '',
-    premium_amount: '', premium_currency: 'TTD', premium_frequency: 'ANNUAL',
-    coverage_amount: '', start_date: '', expiry_date: '', auto_renew: false, notes: '',
-  })
-  const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
-    setForm(f => ({ ...f, [k]: e.target.value }))
-
-  const { mutate, isPending } = useMutation({
-    mutationFn: () => propertiesApi.createInsurance(propertyId, {
-      ...form,
-      premium_amount: form.premium_amount ? parseFloat(form.premium_amount) : undefined,
-      coverage_amount: form.coverage_amount ? parseFloat(form.coverage_amount) : undefined,
-      start_date: form.start_date || undefined,
-      expiry_date: form.expiry_date || undefined,
-      policy_number: form.policy_number || undefined,
-      notes: form.notes || undefined,
-      idempotency_key: crypto.randomUUID(),
-    }),
-    onSuccess: () => { onCreated(); onClose() },
-  })
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-      <div className="bg-slate-800 rounded-xl w-full max-w-lg max-h-[90vh] flex flex-col shadow-2xl">
-        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-700 shrink-0">
-          <h2 className="text-sm font-semibold text-slate-100">{t('propertiesPanel.addInsurance')}</h2>
-          <button onClick={onClose} className="text-slate-500 hover:text-slate-300">✕</button>
-        </div>
-        <div className="flex-1 overflow-y-auto p-5 space-y-3">
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs text-slate-400 mb-1">Type *</label>
-              <select value={form.insurance_type} onChange={set('insurance_type')} className={cls}>
-                {['BUILDING','CONTENTS','COMPREHENSIVE','LIABILITY','FLOOD','FIRE','OTHER'].map(t => <option key={t}>{t}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs text-slate-400 mb-1">Insurer *</label>
-              <input value={form.insurer} onChange={set('insurer')} className={cls} placeholder="Guardian General" />
-            </div>
-          </div>
-          <div>
-            <label className="block text-xs text-slate-400 mb-1">Policy Number</label>
-            <input value={form.policy_number} onChange={set('policy_number')} className={cls} placeholder="POL-2026-001" />
-          </div>
-          <div className="grid grid-cols-3 gap-3">
-            <div className="col-span-2">
-              <label className="block text-xs text-slate-400 mb-1">Annual Premium</label>
-              <input type="number" min="0" step="0.01" value={form.premium_amount} onChange={set('premium_amount')} className={cls} />
-            </div>
-            <div>
-              <label className="block text-xs text-slate-400 mb-1">Frequency</label>
-              <select value={form.premium_frequency} onChange={set('premium_frequency')} className={cls}>
-                {['MONTHLY','QUARTERLY','ANNUAL'].map(f => <option key={f}>{f}</option>)}
-              </select>
-            </div>
-          </div>
-          <div>
-            <label className="block text-xs text-slate-400 mb-1">Coverage Amount</label>
-            <input type="number" min="0" step="0.01" value={form.coverage_amount} onChange={set('coverage_amount')} className={cls} />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs text-slate-400 mb-1">Start Date</label>
-              <input type="date" value={form.start_date} onChange={set('start_date')} className={cls} />
-            </div>
-            <div>
-              <label className="block text-xs text-slate-400 mb-1">Expiry Date</label>
-              <input type="date" value={form.expiry_date} onChange={set('expiry_date')} className={cls} />
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <input type="checkbox" id="auto_renew" checked={form.auto_renew}
-              onChange={e => setForm(f => ({ ...f, auto_renew: e.target.checked }))} className="rounded" />
-            <label htmlFor="auto_renew" className="text-xs text-slate-300">{t('propertiesPanel.autoRenew')}</label>
-          </div>
-          <div>
-            <label className="block text-xs text-slate-400 mb-1">Notes</label>
-            <textarea rows={2} value={form.notes} onChange={set('notes')} className={cls + ' resize-none'} />
-          </div>
-          <div className="flex justify-end pt-2">
-            <button onClick={() => mutate()} disabled={!form.insurer || isPending}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-sm rounded-lg transition-colors">
-              {isPending ? t('propertiesPanel.addingLabel') : t('propertiesPanel.addPolicy')}
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  )
-}
 
 // ─── Add Tax Modal ────────────────────────────────────────────────────────────
 function AddTaxModal({ propertyId, onClose, onCreated }: { propertyId: string; onClose: () => void; onCreated: () => void }) {
@@ -1587,116 +1492,6 @@ function EditUnitModal({ propertyId, unit, onClose, onSaved }: { propertyId: str
         <div className="flex gap-2 mt-4">
           <button onClick={onClose} className="flex-1 py-1.5 text-xs rounded bg-slate-700 hover:bg-slate-600 text-slate-300">{t('common.cancel')}</button>
           <button onClick={() => mutate()} disabled={isPending || !form.unit_number}
-            className="flex-1 py-1.5 text-xs rounded bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white">
-            {isPending ? t('common.saving') : t('propertiesPanel.saveChanges')}
-          </button>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-// ─── Edit Insurance Modal ─────────────────────────────────────────────────────
-const INS_TYPES = ['BUILDING','CONTENTS','COMPREHENSIVE','LIABILITY','FLOOD','FIRE','OTHER'] as const
-const FREQ_TYPES = ['MONTHLY','QUARTERLY','ANNUAL'] as const
-
-function EditInsuranceModal({ propertyId, policy, onClose, onSaved }: { propertyId: string; policy: InsurancePolicy; onClose: () => void; onSaved: () => void }) {
-  const { t } = useTranslation()
-  const [form, setForm] = useState({
-    insurance_type: policy.insurance_type,
-    insurer: policy.insurer,
-    policy_number: policy.policy_number ?? '',
-    premium_amount: policy.premium_amount != null ? String(parseFloat(String(policy.premium_amount))) : '',
-    premium_frequency: policy.premium_frequency,
-    coverage_amount: policy.coverage_amount != null ? String(parseFloat(String(policy.coverage_amount))) : '',
-    start_date: policy.start_date ?? '',
-    expiry_date: policy.expiry_date ?? '',
-    auto_renew: policy.auto_renew,
-    notes: policy.notes ?? '',
-  })
-  const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
-    setForm(f => ({ ...f, [k]: e.target.value }))
-  const setCheck = (k: string) => (e: React.ChangeEvent<HTMLInputElement>) =>
-    setForm(f => ({ ...f, [k]: e.target.checked }))
-
-  const { mutate, isPending, error } = useMutation({
-    mutationFn: () => propertiesApi.updateInsurance(propertyId, policy.id, {
-      insurance_type: form.insurance_type,
-      insurer: form.insurer,
-      policy_number: form.policy_number || null,
-      premium_amount: form.premium_amount !== '' ? Number(form.premium_amount) : null,
-      premium_frequency: form.premium_frequency,
-      coverage_amount: form.coverage_amount !== '' ? Number(form.coverage_amount) : null,
-      start_date: form.start_date || null,
-      expiry_date: form.expiry_date || null,
-      auto_renew: form.auto_renew,
-      notes: form.notes || null,
-    }),
-    onSuccess: () => { onSaved(); onClose() },
-  })
-
-  return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
-      <div className="bg-slate-800 border border-slate-700 rounded-xl w-full max-w-lg p-5 shadow-2xl max-h-[90vh] overflow-y-auto">
-        <h2 className="text-sm font-semibold text-slate-100 mb-4">{t('propertiesPanel.editInsurance')}</h2>
-        <div className="space-y-3">
-          <div className="flex gap-3">
-            <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Type</label>
-              <select value={form.insurance_type} onChange={set('insurance_type')} className={cls}>
-                {INS_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
-              </select>
-            </div>
-            <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Insurer *</label>
-              <input value={form.insurer} onChange={set('insurer')} className={cls} />
-            </div>
-          </div>
-          <div className="flex gap-3">
-            <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Policy Number</label>
-              <input value={form.policy_number} onChange={set('policy_number')} className={cls} />
-            </div>
-            <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Frequency</label>
-              <select value={form.premium_frequency} onChange={set('premium_frequency')} className={cls}>
-                {FREQ_TYPES.map(f => <option key={f} value={f}>{f}</option>)}
-              </select>
-            </div>
-          </div>
-          <div className="flex gap-3">
-            <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Premium (TTD)</label>
-              <input type="number" step="0.01" min="0" value={form.premium_amount} onChange={set('premium_amount')} className={cls} />
-            </div>
-            <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Coverage (TTD)</label>
-              <input type="number" step="0.01" min="0" value={form.coverage_amount} onChange={set('coverage_amount')} className={cls} />
-            </div>
-          </div>
-          <div className="flex gap-3">
-            <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Start Date</label>
-              <input type="date" value={form.start_date} onChange={set('start_date')} className={cls} />
-            </div>
-            <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Expiry Date</label>
-              <input type="date" value={form.expiry_date} onChange={set('expiry_date')} className={cls} />
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <input type="checkbox" id="edit_ins_autorenew" checked={form.auto_renew} onChange={setCheck('auto_renew')} className="rounded" />
-            <label htmlFor="edit_ins_autorenew" className="text-xs text-slate-300">{t('propertiesPanel.autoRenew')}</label>
-          </div>
-          <div>
-            <label className="block text-xs text-slate-400 mb-1">Notes</label>
-            <textarea value={form.notes} onChange={set('notes')} rows={2} className={cls} />
-          </div>
-        </div>
-        {error && <p className="mt-2 text-xs text-red-400">{(error as Error).message}</p>}
-        <div className="flex gap-2 mt-4">
-          <button onClick={onClose} className="flex-1 py-1.5 text-xs rounded bg-slate-700 hover:bg-slate-600 text-slate-300">{t('common.cancel')}</button>
-          <button onClick={() => mutate()} disabled={isPending || !form.insurer}
             className="flex-1 py-1.5 text-xs rounded bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white">
             {isPending ? t('common.saving') : t('propertiesPanel.saveChanges')}
           </button>
@@ -2218,7 +2013,7 @@ function EditPropertyModal({ property, onClose, onSaved }: { property: Property;
   )
 }
 
-type DetailTab = 'overview' | 'leases' | 'payments' | 'maintenance' | 'utilities' | 'invoices' | 'insurance' | 'tax' | 'inspections' | 'financials' | 'documents' | 'units'
+type DetailTab = 'overview' | 'leases' | 'payments' | 'maintenance' | 'utilities' | 'invoices' | 'tax' | 'inspections' | 'financials' | 'documents' | 'units'
 
 function ValuationHistoryModal({ id, name, onClose }: { id: string; name: string; onClose: () => void }) {
   const { t } = useTranslation()
@@ -2334,7 +2129,6 @@ function PropertyDetail({ property, onDeleted }: { property: Property; onDeleted
   const [showAddUtility, setShowAddUtility] = useState(false)
   const [showAddInvoice, setShowAddInvoice] = useState(false)
   const [payingInvoice, setPayingInvoice] = useState<VendorInvoice | null>(null)
-  const [showAddInsurance, setShowAddInsurance] = useState(false)
   const [showAddTax, setShowAddTax] = useState(false)
   const [payingTax, setPayingTax] = useState<PropertyTaxRecord | null>(null)
   const [showAddInspection, setShowAddInspection] = useState(false)
@@ -2345,7 +2139,6 @@ function PropertyDetail({ property, onDeleted }: { property: Property; onDeleted
   const [managingListingUnit, setManagingListingUnit] = useState<Unit | null>(null)
   const [showAddUtilityAccount, setShowAddUtilityAccount] = useState(false)
   const [editingUtilityAccount, setEditingUtilityAccount] = useState<UtilityAccount | null>(null)
-  const [editingInsurance, setEditingInsurance] = useState<InsurancePolicy | null>(null)
   const [editingInspection, setEditingInspection] = useState<Inspection | null>(null)
   const [editingTax, setEditingTax] = useState<PropertyTaxRecord | null>(null)
   const [chargingLateFee, setChargingLateFee] = useState<RentPayment | null>(null)
@@ -2381,11 +2174,6 @@ function PropertyDetail({ property, onDeleted }: { property: Property; onDeleted
     queryKey: ['properties', property.id, 'invoices'],
     queryFn: () => propertiesApi.getVendorInvoices(property.id),
     enabled: detailTab === 'invoices',
-  })
-  const { data: insurance = [] } = useQuery({
-    queryKey: ['properties', property.id, 'insurance'],
-    queryFn: () => propertiesApi.getInsurance(property.id),
-    enabled: detailTab === 'insurance',
   })
   const { data: taxRecords = [] } = useQuery({
     queryKey: ['properties', property.id, 'tax'],
@@ -2433,7 +2221,6 @@ function PropertyDetail({ property, onDeleted }: { property: Property; onDeleted
     { id: 'maintenance', label: t('propertiesPanel.detailTabs.maintenance') },
     { id: 'utilities',   label: t('propertiesPanel.detailTabs.utilities') },
     { id: 'invoices',    label: t('propertiesPanel.detailTabs.invoices') },
-    { id: 'insurance',   label: t('propertiesPanel.detailTabs.insurance') },
     { id: 'tax',         label: t('propertiesPanel.detailTabs.tax') },
     { id: 'inspections', label: t('propertiesPanel.detailTabs.inspections') },
     { id: 'units',       label: t('propertiesPanel.detailTabs.units') },
@@ -2828,54 +2615,6 @@ function PropertyDetail({ property, onDeleted }: { property: Property; onDeleted
         )}
       </div>
 
-        {/* Insurance Tab */}
-        {detailTab === 'insurance' && (
-          <div className="space-y-3">
-            <div className="flex justify-end">
-              <button onClick={() => setShowAddInsurance(true)}
-                className="px-3 py-1.5 text-xs bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors">
-                + Add Policy
-              </button>
-            </div>
-            {insurance.length === 0 && <Empty />}
-            {insurance.map((p: InsurancePolicy) => {
-              const expiring = p.expiry_date && new Date(p.expiry_date) < new Date(Date.now() + 60 * 86400000)
-              return (
-                <div key={p.id} className="bg-slate-700/40 rounded-lg p-3 border border-slate-600">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-sm font-medium text-slate-100">{p.insurer}</span>
-                        <span className="text-xs px-1.5 py-0.5 rounded bg-slate-600 text-slate-300">{p.insurance_type}</span>
-                        {expiring && <span className="text-xs px-1.5 py-0.5 rounded bg-red-900/60 text-red-300 border border-red-700">{t('propertiesPanel.expiringSoon')}</span>}
-                      </div>
-                      {p.policy_number && <p className="text-xs text-slate-400 mt-0.5 font-mono">{p.policy_number}</p>}
-                      <div className="grid grid-cols-2 gap-x-4 mt-1.5 text-xs text-slate-400">
-                        {p.premium_amount && <span>{t('propertiesPanel.insurancePremium')} <span className="text-slate-200">{fmtTTD(p.premium_amount)} / {p.premium_frequency.toLowerCase()}</span></span>}
-                        {p.coverage_amount && <span>{t('propertiesPanel.insuranceCoverage')} <span className="text-slate-200">{fmtTTD(p.coverage_amount)}</span></span>}
-                        {p.start_date && <span>{t('propertiesPanel.insuranceFrom')} <span className="text-slate-200">{fmtDate(p.start_date)}</span></span>}
-                        {p.expiry_date && <span className={expiring ? 'text-red-400' : ''}>{t('propertiesPanel.insuranceExpires')} <span className="text-slate-200">{fmtDate(p.expiry_date)}</span></span>}
-                      </div>
-                      {p.notes && <p className="text-xs text-slate-500 mt-1">{p.notes}</p>}
-                    </div>
-                    <div className="flex gap-2 shrink-0 items-center">
-                      <button
-                        onClick={() => setEditingInsurance(p)}
-                        className="text-xs text-slate-500 hover:text-blue-400 transition-colors"
-                      >{t('propertiesPanel.edit')}</button>
-                      <button onClick={() => {
-                        propertiesApi.deleteInsurance(property.id, p.id).then(() =>
-                          void qc.invalidateQueries({ queryKey: ['properties', property.id, 'insurance'] })
-                        )
-                      }} className="text-slate-600 hover:text-red-400 text-xs transition-colors">✕</button>
-                    </div>
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        )}
-
         {/* Property Tax Tab */}
         {detailTab === 'tax' && (
           <div className="space-y-3">
@@ -3192,8 +2931,6 @@ function PropertyDetail({ property, onDeleted }: { property: Property; onDeleted
         onCreated={() => void qc.invalidateQueries({ queryKey: ['properties', property.id, 'invoices'] })} />}
       {payingInvoice    && <PayInvoiceModal propertyId={property.id} inv={payingInvoice} onClose={() => setPayingInvoice(null)}
         onUpdated={() => void qc.invalidateQueries({ queryKey: ['properties', property.id, 'invoices'] })} />}
-      {showAddInsurance && <AddInsuranceModal propertyId={property.id} onClose={() => setShowAddInsurance(false)}
-        onCreated={() => void qc.invalidateQueries({ queryKey: ['properties', property.id, 'insurance'] })} />}
       {showAddTax       && <AddTaxModal propertyId={property.id} onClose={() => setShowAddTax(false)}
         onCreated={() => void qc.invalidateQueries({ queryKey: ['properties', property.id, 'tax'] })} />}
       {payingTax        && <PayTaxModal propertyId={property.id} record={payingTax} onClose={() => setPayingTax(null)}
@@ -3223,8 +2960,6 @@ function PropertyDetail({ property, onDeleted }: { property: Property; onDeleted
         onSaved={() => void qc.invalidateQueries({ queryKey: ['properties', property.id, 'units'] })} />}
       {editingUtilityAccount && <EditUtilityAccountModal propertyId={property.id} account={editingUtilityAccount} onClose={() => setEditingUtilityAccount(null)}
         onSaved={() => void qc.invalidateQueries({ queryKey: ['properties', property.id, 'utility-accounts'] })} />}
-      {editingInsurance && <EditInsuranceModal propertyId={property.id} policy={editingInsurance} onClose={() => setEditingInsurance(null)}
-        onSaved={() => void qc.invalidateQueries({ queryKey: ['properties', property.id, 'insurance'] })} />}
       {editingInspection && <EditInspectionModal propertyId={property.id} inspection={editingInspection} onClose={() => setEditingInspection(null)}
         onSaved={() => void qc.invalidateQueries({ queryKey: ['properties', property.id, 'inspections'] })} />}
       {editingTax && <EditTaxModal propertyId={property.id} record={editingTax} onClose={() => setEditingTax(null)}

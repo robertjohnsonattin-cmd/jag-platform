@@ -470,4 +470,7 @@ export const imsApi = {
 
   deleteTracker: (tid: string): Promise<{ deleted: boolean }> =>
     client.delete(`/ims/gps/trackers/${tid}`),
+
+  getTrackerBattery: (tid: string): Promise<import('../types/ims').TrackerBattery> =>
+    client.get(`/ims/gps/trackers/${tid}/battery`),
 }

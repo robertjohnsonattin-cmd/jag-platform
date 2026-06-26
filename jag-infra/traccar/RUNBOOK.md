@@ -118,6 +118,27 @@ In the JAG web app: **Inventory → Vehicles → 📡 GPS Trackers**. For each d
 4. **Fallback test:** `docker compose stop api` → Traccar UI / Traccar Manager app still
    show live tracking (independent collection). `docker compose start api` to restore.
 
+## Battery monitoring
+
+An hourly cron polls Traccar for `batteryLevel` on every tracker and stores readings in
+`gps_battery_log` (jag_commercial). Low-battery (≤20%) fires a JAG notification bell alert
+(deduplicated to once per 8h per tracker).
+
+**Add to crontab on the VM** (`sudo crontab -e`):
+```
+0 * * * * bash /opt/jag/jag-infra/scripts/gps-battery-monitor.sh >> /var/log/jag-gps-battery.log 2>&1
+```
+
+View battery trends: **Inventory → Vehicles → 📡 GPS Trackers** → click a battery bar to expand
+discharge rate, sparkline, estimated hours remaining, and recommended upload interval.
+
+**Optimum upload intervals by drain rate:**
+| Drain | Interval | SMS command |
+|---|---|---|
+| >5%/hr | 120s | `upload123456 120` |
+| 2–5%/hr | 60s | `upload123456 60` |
+| <2%/hr | 30s | `upload123456 30` |
+
 ## Rollback (revert a device to the Winnies app)
 
 SMS the device its original server: `adminip123456 <mytkstar host> <port>`. Devices report

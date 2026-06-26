@@ -12,8 +12,10 @@ import type {
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const POLICY_TYPES: InsurancePolicyType[] = [
-  'PROPERTY','VEHICLE','LIABILITY','LIFE','HEALTH',
-  'BUSINESS_INTERRUPTION','MARINE','PROFESSIONAL_INDEMNITY','OTHER',
+  'BUILDING','CONTENTS','COMPREHENSIVE','FLOOD','FIRE',
+  'VEHICLE','LIABILITY','LIFE','HEALTH',
+  'BUSINESS_INTERRUPTION','MARINE','PROFESSIONAL_INDEMNITY',
+  'SURETY_BOND','PERFORMANCE_BOND','PROPERTY','OTHER',
 ]
 const ASSET_TYPES: InsuranceAssetType[] = ['VEHICLE','PROPERTY','BUSINESS','PERSON','OTHER']
 const PREM_FREQS: PremiumFrequency[] = ['MONTHLY','QUARTERLY','SEMI_ANNUAL','ANNUAL','ONE_OFF']
@@ -58,8 +60,9 @@ function AddPolicyModal({ onClose, onCreated }: { onClose: () => void; onCreated
     policy_number: '',
     insurer_name: '',
     broker_name: '',
-    policy_type: 'PROPERTY' as InsurancePolicyType,
+    policy_type: 'BUILDING' as InsurancePolicyType,
     insured_asset_type: 'PROPERTY' as InsuranceAssetType,
+    sub_type: '',
     coverage_amount: '',
     currency: 'TTD',
     premium_amount: '',
@@ -80,6 +83,7 @@ function AddPolicyModal({ onClose, onCreated }: { onClose: () => void; onCreated
       broker_name: form.broker_name || undefined,
       policy_type: form.policy_type,
       insured_asset_type: form.insured_asset_type,
+      sub_type: form.sub_type || undefined,
       coverage_amount: Number(form.coverage_amount),
       currency: form.currency || 'TTD',
       coverage_amount_ttd: Number(form.coverage_amount),
@@ -120,6 +124,10 @@ function AddPolicyModal({ onClose, onCreated }: { onClose: () => void; onCreated
                 {ASSET_TYPES.map(tp => <option key={tp} value={tp}>{t(`insurance.assetTypes.${tp}`)}</option>)}
               </select>
             </div>
+          </div>
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">{t('insurance.subType')} <span className="text-slate-500 text-xs">({t('common.optional')})</span></label>
+            <input value={form.sub_type} onChange={set('sub_type')} className={cls} placeholder="e.g. Third-party, All-risks, Comprehensive" />
           </div>
           <div>
             <label className="block text-xs text-slate-400 mb-1">{t('insurance.policyNumber')}</label>
@@ -238,7 +246,9 @@ function PolicyDetail({ policy, onClose }: { policy: InsurancePolicy; onClose: (
             <div>
               <h2 className="text-base font-semibold text-white">{policy.insurer_name} — {policy.policy_number}</h2>
               <p className="text-xs text-slate-400 mt-0.5">
-                {t(`insurance.policyTypes.${policy.policy_type}`)} · {entityName(policy.owner_entity_id)}
+                {t(`insurance.policyTypes.${policy.policy_type}`)}
+                {policy.sub_type && <span className="ml-1 text-slate-500">({policy.sub_type})</span>}
+                {' · '}{entityName(policy.owner_entity_id)}
               </p>
             </div>
             <button onClick={onClose} className="text-slate-500 hover:text-white text-sm px-2">✕</button>
@@ -652,7 +662,10 @@ export default function InsurancePanel() {
                       <p className="text-slate-100 font-medium">{p.insurer_name}</p>
                       <p className="text-xs text-slate-500">{p.policy_number}</p>
                     </td>
-                    <td className="px-4 py-3 text-slate-400">{t(`insurance.policyTypes.${p.policy_type}`)}</td>
+                    <td className="px-4 py-3 text-slate-400">
+                      {t(`insurance.policyTypes.${p.policy_type}`)}
+                      {p.sub_type && <span className="text-xs text-slate-500 ml-1">({p.sub_type})</span>}
+                    </td>
                     <td className="px-4 py-3 text-slate-400">{entityName(p.owner_entity_id)}</td>
                     <td className="px-4 py-3 text-right font-mono text-slate-200">{fmtTTD(p.coverage_amount_ttd)}</td>
                     <td className="px-4 py-3 text-right font-mono text-slate-400">

@@ -464,6 +464,22 @@ export interface GpsTracker {
   vehicle_name?: string | null
 }
 
+export interface BatteryReading {
+  battery_level: number
+  is_charging: boolean
+  recorded_at: string
+}
+
+export interface TrackerBattery {
+  tracker_id: string
+  latest_level: number | null
+  is_charging: boolean | null
+  last_recorded_at: string | null
+  discharge_pct_per_hour: number | null
+  estimated_hours_remaining: number | null
+  readings: BatteryReading[]
+}
+
 export interface GpsPosition {
   latitude: number
   longitude: number

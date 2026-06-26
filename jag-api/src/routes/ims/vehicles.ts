@@ -37,9 +37,6 @@ const CreateVehicleSchema = z.object({
   fuel_type:                z.enum(['PETROL','DIESEL','HYBRID','ELECTRIC','NONE']).default('PETROL'),
   vin:                      z.string().max(50).optional(),
   engine_number:            z.string().max(50).optional(),
-  insurance_policy_number:  z.string().max(100).optional(),
-  insurance_provider:       z.string().max(100).optional(),
-  insurance_expiry:         z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   registration_expiry:      z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   purchase_date:            z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   purchase_price:           z.number().min(0).optional(),
@@ -63,9 +60,6 @@ const PatchVehicleSchema = z.object({
   condition:               ConditionEnum.optional(),
   current_mileage_km:      z.number().int().min(0).optional(),
   unit_value:              z.number().min(0).optional(),
-  insurance_policy_number: z.string().max(100).optional(),
-  insurance_provider:      z.string().max(100).optional(),
-  insurance_expiry:        z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   registration_expiry:     z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   // Service log — when set, next_service_date is auto-computed
   last_service_date:       z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
@@ -138,8 +132,6 @@ imsVehiclesRouter.get('/', async (req: Request, res: Response, next: NextFunctio
           `SELECT v.id, v.owner_entity, v.fleet_type, v.registration_number, v.make, v.model,
                   v.year, v.colour, v.vehicle_type, v.fuel_type,
                   v.vin, v.engine_number,
-                  v.insurance_policy_number, v.insurance_provider,
-                  v.insurance_expiry::text    AS insurance_expiry,
                   v.registration_expiry::text AS registration_expiry,
                   v.purchase_date::text       AS purchase_date,
                   v.purchase_price,
@@ -149,7 +141,7 @@ imsVehiclesRouter.get('/', async (req: Request, res: Response, next: NextFunctio
                   v.service_interval_days,
                   v.sim_number,
                   v.ownership_type, v.engine_hours, v.status, v.notes, v.assigned_driver_name,
-                  v.cal_service_event_id, v.cal_insurance_event_id, v.cal_registration_event_id,
+                  v.cal_service_event_id, v.cal_registration_event_id,
                   v.last_modified_at, v.created_at,
                   i.id          AS item_id,
                   i.name        AS item_name,
@@ -214,12 +206,11 @@ imsVehiclesRouter.post('/', async (req: Request, res: Response, next: NextFuncti
              (tenant_id, item_id, owner_entity, fleet_type,
               registration_number, make, model, year,
               colour, vehicle_type, fuel_type, vin, engine_number,
-              insurance_policy_number, insurance_provider, insurance_expiry,
               registration_expiry, purchase_date, purchase_price, current_mileage_km,
               last_service_date, next_service_date, service_interval_days,
               sim_number, last_modified_by,
               ownership_type, engine_hours, status, notes, assigned_driver_name)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27)
            RETURNING id`,
           [
             tenantId, itemId,
@@ -228,8 +219,7 @@ imsVehiclesRouter.post('/', async (req: Request, res: Response, next: NextFuncti
             b.registration_number, b.make, b.model, b.year,
             b.colour ?? null, b.vehicle_type, b.fuel_type,
             b.vin ?? null, b.engine_number ?? null,
-            b.insurance_policy_number ?? null, b.insurance_provider ?? null,
-            b.insurance_expiry ?? null, b.registration_expiry ?? null,
+            b.registration_expiry ?? null,
             b.purchase_date ?? null, b.purchase_price ?? null, b.current_mileage_km ?? null,
             b.last_service_date ?? null, nextServiceDate, b.service_interval_days,
             b.sim_number ?? null, userId,
@@ -256,14 +246,6 @@ imsVehiclesRouter.post('/', async (req: Request, res: Response, next: NextFuncti
               date: nextServiceDate,
             });
             calUpdates['cal_service_event_id'] = evId;
-          }
-          if (b.insurance_expiry) {
-            const evId = await createAllDayCalendarEvent({
-              title: `Vehicle Insurance Expiry: ${label}`,
-              description: `Insurance policy expires for ${label} (${b.insurance_provider ?? b.owner_entity})`,
-              date: b.insurance_expiry,
-            });
-            calUpdates['cal_insurance_event_id'] = evId;
           }
           if (b.registration_expiry) {
             const evId = await createAllDayCalendarEvent({
@@ -314,17 +296,15 @@ imsVehiclesRouter.patch('/:id', async (req: Request, res: Response, next: NextFu
         const cur = await c.query<{
           service_interval_days: number; item_id: string;
           make: string; model: string; registration_number: string; owner_entity: string;
-          insurance_expiry: string | null; registration_expiry: string | null;
+          registration_expiry: string | null;
           next_service_date: string | null;
           cal_service_event_id: string | null;
-          cal_insurance_event_id: string | null;
           cal_registration_event_id: string | null;
         }>(
           `SELECT service_interval_days, item_id, make, model, registration_number, owner_entity,
-                  insurance_expiry::text   AS insurance_expiry,
                   registration_expiry::text AS registration_expiry,
                   next_service_date::text  AS next_service_date,
-                  cal_service_event_id, cal_insurance_event_id, cal_registration_event_id
+                  cal_service_event_id, cal_registration_event_id
            FROM ims_vehicles WHERE id = $1`,
           [vehicleId],
         );
@@ -339,10 +319,7 @@ imsVehiclesRouter.patch('/:id', async (req: Request, res: Response, next: NextFu
 
         if (b.owner_entity           !== undefined) { vCols.push(`owner_entity = ${vPush(b.owner_entity)}`); vCols.push(`fleet_type = ${vPush(b.owner_entity)}`); }
         if (b.colour                 !== undefined) vCols.push(`colour = ${vPush(b.colour)}`);
-        if (b.insurance_policy_number !== undefined) vCols.push(`insurance_policy_number = ${vPush(b.insurance_policy_number)}`);
-        if (b.insurance_provider      !== undefined) vCols.push(`insurance_provider = ${vPush(b.insurance_provider)}`);
-        if (b.insurance_expiry        !== undefined) vCols.push(`insurance_expiry = ${vPush(b.insurance_expiry)}`);
-        if (b.registration_expiry     !== undefined) vCols.push(`registration_expiry = ${vPush(b.registration_expiry)}`);
+        if (b.registration_expiry    !== undefined) vCols.push(`registration_expiry = ${vPush(b.registration_expiry)}`);
         if (b.current_mileage_km      !== undefined) vCols.push(`current_mileage_km = ${vPush(b.current_mileage_km)}`);
         if (b.service_interval_days   !== undefined) vCols.push(`service_interval_days = ${vPush(b.service_interval_days)}`);
         if (b.last_service_date       !== undefined) {
@@ -411,22 +388,6 @@ imsVehiclesRouter.patch('/:id', async (req: Request, res: Response, next: NextFu
                 calUpdates['cal_service_event_id'] = evId;
               } else {
                 calUpdates['cal_service_event_id'] = null;
-              }
-            }
-
-            if (b.insurance_expiry !== undefined) {
-              if (cv.cal_insurance_event_id) {
-                try { await deleteCalendarEvent(cv.cal_insurance_event_id); } catch { /* stale */ }
-              }
-              if (b.insurance_expiry) {
-                const evId = await createAllDayCalendarEvent({
-                  title: `Vehicle Insurance Expiry: ${label}`,
-                  description: `Insurance policy expires for ${label} (${cv.owner_entity})`,
-                  date: b.insurance_expiry,
-                });
-                calUpdates['cal_insurance_event_id'] = evId;
-              } else {
-                calUpdates['cal_insurance_event_id'] = null;
               }
             }
 

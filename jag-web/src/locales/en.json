@@ -834,7 +834,11 @@
     "amountClaimed": "Claimed Amount (TTD)",
     "insurerRef": "Insurer Reference # (optional)",
     "policyTypes": {
-      "PROPERTY": "Property",
+      "BUILDING": "Building",
+      "CONTENTS": "Contents",
+      "COMPREHENSIVE": "Comprehensive",
+      "FLOOD": "Flood",
+      "FIRE": "Fire",
       "VEHICLE": "Vehicle",
       "LIABILITY": "Liability",
       "LIFE": "Life",
@@ -842,8 +846,12 @@
       "BUSINESS_INTERRUPTION": "Business Interruption",
       "MARINE": "Marine",
       "PROFESSIONAL_INDEMNITY": "Prof. Indemnity",
+      "SURETY_BOND": "Surety Bond",
+      "PERFORMANCE_BOND": "Performance Bond",
+      "PROPERTY": "Property",
       "OTHER": "Other"
     },
+    "subType": "Sub-type (optional)",
     "assetTypes": {
       "VEHICLE": "Vehicle",
       "PROPERTY": "Property",

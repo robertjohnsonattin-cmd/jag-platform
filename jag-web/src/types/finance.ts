@@ -221,7 +221,10 @@ export interface Loan {
 
 export type InsurancePolicyType =
   | 'PROPERTY' | 'VEHICLE' | 'LIABILITY' | 'LIFE' | 'HEALTH'
-  | 'BUSINESS_INTERRUPTION' | 'MARINE' | 'PROFESSIONAL_INDEMNITY' | 'OTHER'
+  | 'BUSINESS_INTERRUPTION' | 'MARINE' | 'PROFESSIONAL_INDEMNITY'
+  | 'SURETY_BOND' | 'PERFORMANCE_BOND'
+  | 'BUILDING' | 'CONTENTS' | 'FLOOD' | 'FIRE' | 'COMPREHENSIVE'
+  | 'OTHER'
 
 export type InsuranceAssetType = 'VEHICLE' | 'PROPERTY' | 'BUSINESS' | 'PERSON' | 'OTHER'
 export type PremiumFrequency = 'MONTHLY' | 'QUARTERLY' | 'SEMI_ANNUAL' | 'ANNUAL' | 'ONE_OFF'
@@ -236,6 +239,8 @@ export interface InsurancePolicy {
   broker_name: string | null
   policy_type: InsurancePolicyType
   insured_asset_type: InsuranceAssetType
+  insured_asset_ref: string | null
+  sub_type: string | null
   coverage_amount: string
   coverage_amount_ttd: string
   premium_amount: string

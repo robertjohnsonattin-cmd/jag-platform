@@ -210,23 +210,6 @@ export interface UtilityBill {
   created_at: string
 }
 
-export interface InsurancePolicy {
-  id: string
-  property_id: string
-  insurance_type: 'BUILDING' | 'CONTENTS' | 'COMPREHENSIVE' | 'LIABILITY' | 'FLOOD' | 'FIRE' | 'OTHER'
-  insurer: string
-  policy_number: string | null
-  premium_amount: string | null
-  premium_currency: string
-  premium_frequency: 'MONTHLY' | 'QUARTERLY' | 'ANNUAL'
-  coverage_amount: string | null
-  start_date: string | null
-  expiry_date: string | null
-  auto_renew: boolean
-  notes: string | null
-  created_at: string
-}
-
 export interface PropertyTaxRecord {
   id: string
   property_id: string

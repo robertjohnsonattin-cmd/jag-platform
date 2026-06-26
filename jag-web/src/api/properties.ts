@@ -2,7 +2,7 @@ import { api } from './client'
 import type {
   Property, PropertyTenant, PipelineItem, MaintenanceRequest,
   RentPayment, RentReceipt, UtilityBill, VendorInvoice, Lease, Mortgage,
-  InsurancePolicy, PropertyTaxRecord, Inspection, ArrearsRecord, LeaseExpiryRecord,
+  PropertyTaxRecord, Inspection, ArrearsRecord, LeaseExpiryRecord,
   FinancialSummary, PropertyDocument, UtilityAccount, Unit, UnitPhoto, PropertyValuationHistory,
   TenantDocument, TenantDocType,
 } from '../types/properties'
@@ -135,19 +135,6 @@ export const propertiesApi = {
 
   deletePipelineItem: (id: string) =>
     api.delete<{ deleted: boolean; id: string }>(`/properties/pipeline/${id}`),
-
-  // ── Insurance ───────────────────────────────────────────────────────────────
-  getInsurance: (propertyId: string) =>
-    api.get<InsurancePolicy[]>(`/properties/${propertyId}/insurance`),
-
-  createInsurance: (propertyId: string, body: Record<string, unknown>) =>
-    api.post<InsurancePolicy>(`/properties/${propertyId}/insurance`, body),
-
-  updateInsurance: (propertyId: string, id: string, body: Record<string, unknown>) =>
-    api.patch<InsurancePolicy>(`/properties/${propertyId}/insurance/${id}`, body),
-
-  deleteInsurance: (propertyId: string, id: string) =>
-    api.delete<{ id: string }>(`/properties/${propertyId}/insurance/${id}`),
 
   // ── Property Tax ─────────────────────────────────────────────────────────────
   getTax: (propertyId: string) =>

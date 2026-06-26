@@ -96,6 +96,9 @@ app.use('/internal/calendar/backfill', calendarBackfillRouter);
 import { traccarEventRouter } from './routes/internal/traccar-event';
 app.use('/internal/traccar-event', traccarEventRouter);
 
+import { batterySyncRouter } from './routes/internal/traccar-event';
+app.use('/internal/gps/battery-sync', batterySyncRouter);
+
 // ── WhatsApp webhook — raw body needed for X-Hub-Signature-256 verification ──
 // Exposed publicly via Caddy (not Docker-network-only) so Meta can reach it.
 // Security is enforced by HMAC signature check inside the route handler.

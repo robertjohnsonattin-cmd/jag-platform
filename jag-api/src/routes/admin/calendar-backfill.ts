@@ -29,22 +29,18 @@ adminCalendarBackfillRouter.post('/backfill', async (req: Request, res: Response
           c.query<{
             id: string; make: string; model: string;
             registration_number: string; owner_entity: string;
-            insurance_expiry: string | null; registration_expiry: string | null;
-            next_service_date: string | null; insurance_provider: string | null;
+            registration_expiry: string | null;
+            next_service_date: string | null;
             cal_service_event_id: string | null;
-            cal_insurance_event_id: string | null;
             cal_registration_event_id: string | null;
           }>(
             `SELECT id, make, model, registration_number, owner_entity,
-                    insurance_expiry::text   AS insurance_expiry,
                     registration_expiry::text AS registration_expiry,
                     next_service_date::text  AS next_service_date,
-                    insurance_provider,
-                    cal_service_event_id, cal_insurance_event_id, cal_registration_event_id
+                    cal_service_event_id, cal_registration_event_id
              FROM ims_vehicles
              WHERE (
                (next_service_date IS NOT NULL    AND cal_service_event_id IS NULL) OR
-               (insurance_expiry IS NOT NULL      AND cal_insurance_event_id IS NULL) OR
                (registration_expiry IS NOT NULL   AND cal_registration_event_id IS NULL)
              )`,
           ).then(r => r.rows),
@@ -59,14 +55,6 @@ adminCalendarBackfillRouter.post('/backfill', async (req: Request, res: Response
                 title: `Vehicle Service Due: ${label}`,
                 description: `Next scheduled service for ${label} (${v.owner_entity})`,
                 date: v.next_service_date,
-              });
-              vehicleEvents++;
-            }
-            if (v.insurance_expiry && !v.cal_insurance_event_id) {
-              updates['cal_insurance_event_id'] = await createAllDayCalendarEvent({
-                title: `Vehicle Insurance Expiry: ${label}`,
-                description: `Insurance policy expires for ${label} (${v.insurance_provider ?? v.owner_entity})`,
-                date: v.insurance_expiry,
               });
               vehicleEvents++;
             }

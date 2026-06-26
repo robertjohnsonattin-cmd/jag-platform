@@ -833,7 +833,11 @@
     "amountClaimed": "索赔金额（TTD）",
     "insurerRef": "保险公司参考号（可选）",
     "policyTypes": {
-      "PROPERTY": "房产险",
+      "BUILDING": "建筑险",
+      "CONTENTS": "财产险",
+      "COMPREHENSIVE": "综合险",
+      "FLOOD": "洪水险",
+      "FIRE": "火灾险",
       "VEHICLE": "车险",
       "LIABILITY": "责任险",
       "LIFE": "人寿险",
@@ -841,8 +845,12 @@
       "BUSINESS_INTERRUPTION": "营业中断险",
       "MARINE": "海上险",
       "PROFESSIONAL_INDEMNITY": "职业责任险",
+      "SURETY_BOND": "保证担保",
+      "PERFORMANCE_BOND": "履约保证",
+      "PROPERTY": "房产险",
       "OTHER": "其他"
     },
+    "subType": "子类型（可选）",
     "assetTypes": {
       "VEHICLE": "车辆",
       "PROPERTY": "房产",

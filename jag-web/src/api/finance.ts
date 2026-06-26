@@ -166,7 +166,7 @@ export const financeApi = {
   deleteExpense: (id: string) =>
     api.delete<{ deleted: boolean; id: string }>(`/finance/expenses/${id}`),
 
-  getPolicies: (params?: { is_active?: 'true' | 'false'; policy_type?: InsurancePolicyType }) => {
+  getPolicies: (params?: { is_active?: 'true' | 'false'; policy_type?: InsurancePolicyType; insured_asset_ref?: string }) => {
     const qs = params
       ? '?' + new URLSearchParams(Object.fromEntries(
           Object.entries(params).filter(([, v]) => v !== undefined).map(([k, v]) => [k, String(v)])
@@ -181,6 +181,7 @@ export const financeApi = {
   createPolicy: (data: {
     owner_entity_id: string; policy_number: string; insurer_name: string; broker_name?: string
     policy_type: InsurancePolicyType; insured_asset_type: InsuranceAssetType
+    insured_asset_ref?: string; sub_type?: string
     coverage_amount: number; currency?: string; coverage_amount_ttd: number
     premium_amount: number; premium_amount_ttd: number; premium_frequency: PremiumFrequency
     start_date: string; expiry_date: string; renewal_alert_days?: number; notes?: string
@@ -190,7 +191,8 @@ export const financeApi = {
     policy_number: string; insurer_name: string; broker_name: string
     coverage_amount: number; coverage_amount_ttd: number
     premium_amount: number; premium_amount_ttd: number
-    expiry_date: string; renewal_alert_days: number; is_active: boolean; notes: string
+    expiry_date: string; renewal_alert_days: number; is_active: boolean
+    sub_type: string | null; notes: string
   }>) => api.patch<InsurancePolicy>(`/finance/insurance/policies/${id}`, data),
 
   getPolicyHistory: (id: string) =>

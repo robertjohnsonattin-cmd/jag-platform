@@ -14,6 +14,7 @@ import { commercialPool } from '../../db/index';
 import { withTenantRLS, type RLSContext } from '../../middleware/rls';
 import { enqueueNotification } from '../../lib/notifications';
 import { logger } from '../../lib/logger';
+import { getLatestPositions } from '../../lib/traccar';
 
 export const traccarEventRouter = Router();
 
@@ -43,6 +44,119 @@ interface TraccarForwardPayload {
   geofence?: { id?: number; name?: string };
   position?: { latitude?: number; longitude?: number };
 }
+
+// ── POST /internal/gps/battery-sync ──────────────────────────────────────────
+// Called hourly by gps-battery-monitor.sh cron.
+// Fetches latest positions from Traccar, extracts batteryLevel attribute,
+// writes a reading for each registered tracker, and fires a low-battery
+// notification (≤20%) if the last alert was >8h ago.
+
+const BATTERY_SYNC_TOKEN = process.env['TRACCAR_EVENT_TOKEN'] ?? '';
+const LOW_BATTERY_THRESHOLD = 20;
+
+export const batterySyncRouter = Router();
+
+batterySyncRouter.post('/', (req: Request, res: Response): void => {
+  if (BATTERY_SYNC_TOKEN) {
+    const auth = req.headers['authorization'] ?? '';
+    if (auth !== `Bearer ${BATTERY_SYNC_TOKEN}`) { res.status(401).end(); return; }
+  }
+
+  res.status(200).json({ ok: true });
+
+  void (async () => {
+    try {
+      const positions = await getLatestPositions();
+      if (positions.length === 0) return;
+
+      // Build a map deviceId → {batteryLevel, charging}
+      const batteryMap = new Map<number, { level: number; charging: boolean }>();
+      for (const pos of positions) {
+        const raw = pos.attributes?.['batteryLevel'];
+        if (raw === undefined || raw === null) continue;
+        const level = Math.round(Number(raw));
+        if (isNaN(level) || level < 0 || level > 100) continue;
+        // Traccar reports 'charge' or 'motion' in attributes; some protocols send 'power' > 100 when on external
+        const charging = Boolean(pos.attributes?.['charge'] ?? (Number(raw) > 100));
+        batteryMap.set(pos.deviceId, { level: Math.min(level, 100), charging });
+      }
+
+      if (batteryMap.size === 0) {
+        logger.info({ entity: 'GPS_BATTERY', action: 'SYNC_NO_DATA', note: 'No batteryLevel attributes in Traccar positions' });
+        return;
+      }
+
+      const client = await commercialPool.connect();
+      try {
+        await withTenantRLS(client, SYSTEM_CTX, async (c) => {
+          // Fetch all trackers that have a Traccar device id
+          const trackers = await c.query<{
+            id: string; traccar_device_id: number; device_serial: string;
+            vehicle_id: string | null; registration_number: string | null;
+          }>(
+            `SELECT t.id, t.traccar_device_id, t.device_serial, t.vehicle_id, v.registration_number
+             FROM   gps_trackers t
+             LEFT   JOIN ims_vehicles v ON v.id = t.vehicle_id
+             WHERE  t.traccar_device_id IS NOT NULL AND t.status != 'RETIRED'`,
+          ).then(r => r.rows);
+
+          for (const tracker of trackers) {
+            const bat = batteryMap.get(tracker.traccar_device_id);
+            if (!bat) continue;
+
+            // Insert reading
+            await c.query(
+              `INSERT INTO gps_battery_log (tenant_id, tracker_id, traccar_device_id, battery_level, is_charging)
+               VALUES ($1, $2, $3, $4, $5)`,
+              [IMS_TENANT, tracker.id, tracker.traccar_device_id, bat.level, bat.charging],
+            );
+
+            logger.info({
+              entity: 'GPS_BATTERY', action: 'READING', device_serial: tracker.device_serial,
+              battery_level: bat.level, is_charging: bat.charging,
+            });
+
+            // Low battery alert — only if not charging and ≤ threshold
+            if (!bat.charging && bat.level <= LOW_BATTERY_THRESHOLD) {
+              // Dedup: check last alert within 8h
+              const recent = await c.query<{ recorded_at: string }>(
+                `SELECT recorded_at FROM gps_battery_log
+                 WHERE  tracker_id = $1 AND battery_level <= $2 AND is_charging = false
+                   AND  recorded_at > NOW() - INTERVAL '8 hours'
+                 ORDER  BY recorded_at DESC LIMIT 2`,
+                [tracker.id, LOW_BATTERY_THRESHOLD],
+              );
+              // If this is the first (just inserted) or second reading ≤ threshold within 8h,
+              // only fire on the first crossing (exactly 1 row means we just crossed the threshold)
+              if (recent.rows.length === 1) {
+                const name = tracker.registration_number ?? tracker.device_serial;
+                void enqueueNotification({
+                  tier: 1,
+                  title: `GPS battery low: ${name}`,
+                  body: `${name} GPS tracker battery is at ${bat.level}%. Charge soon to avoid losing tracking.`,
+                  payload: {
+                    kind: 'GPS_BATTERY_LOW',
+                    tracker_id: tracker.id,
+                    device_serial: tracker.device_serial,
+                    vehicle_id: tracker.vehicle_id,
+                    registration_number: tracker.registration_number,
+                    battery_level: bat.level,
+                  },
+                });
+              }
+            }
+          }
+        });
+      } finally { client.release(); }
+
+      logger.info({ entity: 'GPS_BATTERY', action: 'SYNC_COMPLETE', trackers_checked: batteryMap.size });
+    } catch (e) {
+      logger.warn({ entity: 'GPS_BATTERY', action: 'SYNC_FAILED', error: e instanceof Error ? e.message : String(e) });
+    }
+  })();
+});
+
+// ── POST /internal/traccar-event ──────────────────────────────────────────────
 
 traccarEventRouter.post('/', (req: Request, res: Response): void => {
   // Validate shared secret

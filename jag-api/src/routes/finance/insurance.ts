@@ -30,7 +30,7 @@ export const insuranceRouter = Router();
 
 // ── Schemas ────────────────────────────────────────────────────────────────────
 
-const POLICY_TYPES   = ['PROPERTY','VEHICLE','LIABILITY','LIFE','HEALTH','BUSINESS_INTERRUPTION','MARINE','PROFESSIONAL_INDEMNITY','OTHER'] as const;
+const POLICY_TYPES   = ['PROPERTY','VEHICLE','LIABILITY','LIFE','HEALTH','BUSINESS_INTERRUPTION','MARINE','PROFESSIONAL_INDEMNITY','SURETY_BOND','PERFORMANCE_BOND','BUILDING','CONTENTS','FLOOD','FIRE','COMPREHENSIVE','OTHER'] as const;
 const ASSET_TYPES    = ['VEHICLE','PROPERTY','BUSINESS','PERSON','OTHER'] as const;
 const PREM_FREQS     = ['MONTHLY','QUARTERLY','SEMI_ANNUAL','ANNUAL','ONE_OFF'] as const;
 const PREM_STATUSES  = ['DUE','PAID','OVERDUE','WAIVED'] as const;
@@ -55,6 +55,7 @@ const CreatePolicySchema = z.object({
   expiry_date:          z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   renewal_alert_days:   z.number().int().min(7).max(365).default(60),
   gl_expense_account_id: z.string().uuid().optional(),
+  sub_type:             z.string().max(50).optional(),
   notes:                z.string().optional(),
 }).strict();
 
@@ -70,6 +71,7 @@ const UpdatePolicySchema = z.object({
   renewal_alert_days:   z.number().int().min(7).max(365).optional(),
   gl_expense_account_id: z.string().uuid().nullable().optional(),
   is_active:            z.boolean().optional(),
+  sub_type:             z.string().max(50).nullable().optional(),
   notes:                z.string().optional(),
 }).strict().refine(d => Object.keys(d).length > 0, { message: 'At least one field required.' });
 
@@ -185,13 +187,33 @@ insuranceRouter.post('/policies/import', async (req: Request, res: Response, nex
 
 // ── POLICIES ──────────────────────────────────────────────────────────────────
 
+const PoliciesQuerySchema = z.object({
+  is_active:        z.enum(['true','false']).optional(),
+  policy_type:      z.enum(POLICY_TYPES).optional(),
+  insured_asset_ref: z.string().uuid().optional(),
+}).strict();
+
 // GET /policies
 insuranceRouter.get('/policies', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
+    const parsed = PoliciesQuerySchema.safeParse(req.query);
+    if (!parsed.success) { err(res, 422, 'VALIDATION_ERROR', 'Invalid query params.'); return; }
+    const q = parsed.data;
+
+    const wheres: string[] = [];
+    const params: unknown[] = [];
+    const push = (v: unknown) => { params.push(v); return `$${params.length}`; };
+
+    if (q.is_active        !== undefined) wheres.push(`is_active = ${push(q.is_active === 'true')}`);
+    if (q.policy_type      !== undefined) wheres.push(`policy_type = ${push(q.policy_type)}`);
+    if (q.insured_asset_ref !== undefined) wheres.push(`insured_asset_ref = ${push(q.insured_asset_ref)}`);
+
+    const where = wheres.length ? `WHERE ${wheres.join(' AND ')}` : '';
+
     const client = await familyPool.connect();
     try {
       const rows = await withOwnerRLS(client, req.rlsCtx, (c) =>
-        c.query(`SELECT * FROM fin_insurance_policies ORDER BY expiry_date ASC`).then(r => r.rows)
+        c.query(`SELECT * FROM fin_insurance_policies ${where} ORDER BY expiry_date ASC`, params).then(r => r.rows)
       );
       ok(res, rows);
     } finally { client.release(); }
@@ -262,8 +284,8 @@ insuranceRouter.post('/policies', async (req: Request, res: Response, next: Next
               coverage_amount, currency, coverage_amount_ttd,
               premium_amount, premium_amount_ttd, premium_frequency,
               start_date, expiry_date, renewal_alert_days,
-              gl_expense_account_id, notes)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
+              gl_expense_account_id, sub_type, notes)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
            RETURNING *`,
           [
             ownerId, b.owner_entity_id, b.policy_number, b.insurer_name, b.broker_name ?? null,
@@ -271,7 +293,7 @@ insuranceRouter.post('/policies', async (req: Request, res: Response, next: Next
             b.coverage_amount, b.currency, b.coverage_amount_ttd,
             b.premium_amount, b.premium_amount_ttd, b.premium_frequency,
             b.start_date, b.expiry_date, b.renewal_alert_days,
-            b.gl_expense_account_id ?? null, b.notes ?? null,
+            b.gl_expense_account_id ?? null, b.sub_type ?? null, b.notes ?? null,
           ]
         ).then(r => r.rows[0])
       );

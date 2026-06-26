@@ -280,7 +280,6 @@ function AddVehicleModal({
     registration_number: '', make: '', model: '', year: String(new Date().getFullYear()),
     colour: '', vehicle_type: 'CAR', fuel_type: 'PETROL',
     vin: '', engine_number: '',
-    insurance_policy_number: '', insurance_provider: '', insurance_expiry: '',
     registration_expiry: '', purchase_date: '', purchase_price: '',
     current_mileage_km: '', unit_value: '', condition: 'GOOD',
     last_service_date: '', service_interval_days: '90',
@@ -304,9 +303,6 @@ function AddVehicleModal({
       fuel_type: form.fuel_type,
       vin: form.vin || undefined,
       engine_number: form.engine_number || undefined,
-      insurance_policy_number: form.insurance_policy_number || undefined,
-      insurance_provider: form.insurance_provider || undefined,
-      insurance_expiry: form.insurance_expiry || undefined,
       registration_expiry: form.registration_expiry || undefined,
       purchase_date: form.purchase_date || undefined,
       purchase_price: form.purchase_price ? Number(form.purchase_price) : undefined,
@@ -397,22 +393,8 @@ function AddVehicleModal({
           </div>
           <div className="flex gap-3">
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">{t('inv.insuranceExpiry')}</label>
-              <input type="date" value={form.insurance_expiry} onChange={set('insurance_expiry')} className={cls} />
-            </div>
-            <div className="flex-1">
               <label className="block text-xs text-slate-400 mb-1">{t('inv.regExpiry')}</label>
               <input type="date" value={form.registration_expiry} onChange={set('registration_expiry')} className={cls} />
-            </div>
-          </div>
-          <div className="flex gap-3">
-            <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">{t('inv.insuranceProvider')}</label>
-              <input value={form.insurance_provider} onChange={set('insurance_provider')} className={cls} />
-            </div>
-            <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">{t('inv.policyNumber')}</label>
-              <input value={form.insurance_policy_number} onChange={set('insurance_policy_number')} className={cls} />
             </div>
           </div>
           <div className="flex gap-3">
@@ -518,9 +500,6 @@ function EditVehicleModal({
     condition: vehicle.item_condition ?? 'GOOD',
     current_mileage_km: vehicle.current_mileage_km != null ? String(vehicle.current_mileage_km) : '',
     unit_value: vehicle.current_value != null ? String(vehicle.current_value) : '',
-    insurance_expiry: vehicle.insurance_expiry ? vehicle.insurance_expiry.slice(0, 10) : '',
-    insurance_provider: vehicle.insurance_provider ?? '',
-    insurance_policy_number: vehicle.insurance_policy_number ?? '',
     registration_expiry: vehicle.registration_expiry ? vehicle.registration_expiry.slice(0, 10) : '',
     vin: vehicle.vin ?? '',
     engine_number: vehicle.engine_number ?? '',
@@ -539,9 +518,6 @@ function EditVehicleModal({
         condition: form.condition || undefined,
         current_mileage_km: form.current_mileage_km ? Number(form.current_mileage_km) : undefined,
         unit_value: form.unit_value ? Number(form.unit_value) : undefined,
-        insurance_expiry: (form.insurance_expiry && DATE_RE.test(form.insurance_expiry)) ? form.insurance_expiry : undefined,
-        insurance_provider: form.insurance_provider || undefined,
-        insurance_policy_number: form.insurance_policy_number || undefined,
         registration_expiry: (form.registration_expiry && DATE_RE.test(form.registration_expiry)) ? form.registration_expiry : undefined,
         location_id: form.location_id || undefined,
         vin: form.vin || undefined,
@@ -610,22 +586,8 @@ function EditVehicleModal({
           </div>
           <div className="flex gap-3">
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">{t('inv.insuranceExpiry')}</label>
-              <input type="date" value={form.insurance_expiry} onChange={set('insurance_expiry')} className={cls} />
-            </div>
-            <div className="flex-1">
               <label className="block text-xs text-slate-400 mb-1">{t('inv.regExpiry')}</label>
               <input type="date" value={form.registration_expiry} onChange={set('registration_expiry')} className={cls} />
-            </div>
-          </div>
-          <div className="flex gap-3">
-            <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">{t('inv.insuranceProvider')}</label>
-              <input value={form.insurance_provider} onChange={set('insurance_provider')} className={cls} />
-            </div>
-            <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">{t('inv.policyNumber')}</label>
-              <input value={form.insurance_policy_number} onChange={set('insurance_policy_number')} className={cls} />
             </div>
           </div>
           <div className="flex gap-3">
@@ -1762,22 +1724,12 @@ function VehiclesTab() {
   const ownerOptions = Array.from(new Set(vehicles.map(v => v.owner_entity).filter(Boolean))) as string[]
 
   // Alerts across all vehicles (unfiltered) — check entire list
-  const alertInsurance = vehicles.filter(v => isExpired(v.insurance_expiry) || isExpiringSoon(v.insurance_expiry))
   const alertReg       = vehicles.filter(v => isExpired(v.registration_expiry) || isExpiringSoon(v.registration_expiry))
   const alertService   = vehicles.filter(v => isServiceDue(v))
 
   return (
     <div className="flex flex-col h-full">
       {/* Alert banners */}
-      {alertInsurance.length > 0 && (
-        <div className="mx-4 mt-3 px-4 py-2.5 bg-red-900/40 border border-red-700 rounded-lg text-sm text-red-300 flex items-start gap-2">
-          <span className="text-base">🛡️</span>
-          <div>
-            <span className="font-semibold">{t('inv.insuranceAlert')} </span>
-            {alertInsurance.map(v => `${v.registration_number} (${isExpired(v.insurance_expiry) ? t('inv.expired') : fmtDate(v.insurance_expiry)})`).join(' · ')}
-          </div>
-        </div>
-      )}
       {alertReg.length > 0 && (
         <div className="mx-4 mt-2 px-4 py-2.5 bg-orange-900/40 border border-orange-700 rounded-lg text-sm text-orange-300 flex items-start gap-2">
           <span className="text-base">📋</span>
@@ -1863,7 +1815,6 @@ function VehiclesTab() {
                   ['location',     t('inv.colLocation')],
                   ['value',        t('inv.colValue')],
                   ['condition',    t('inv.colCondition')],
-                  ['insurance',    t('inv.colInsurance')],
                   ['regExpiry',    t('inv.colRegExpiry')],
                   ['nextService',  t('inv.colNextService')],
                   ['actions',      ''],
@@ -1888,18 +1839,6 @@ function VehiclesTab() {
                     <span className={`px-2 py-0.5 rounded-full text-xs ${CONDITION_STYLES[v.item_condition]}`}>
                       {v.item_condition}
                     </span>
-                  </td>
-                  <td className={`px-4 py-2.5 text-xs ${isExpired(v.insurance_expiry) ? 'text-red-400 font-bold' : isExpiringSoon(v.insurance_expiry) ? 'text-orange-400 font-medium' : 'text-slate-300'}`}>
-                    <div className="flex items-center gap-1">
-                      {fmtDate(v.insurance_expiry)}
-                      {(isExpired(v.insurance_expiry) || isExpiringSoon(v.insurance_expiry)) && <span>⚠</span>}
-                      {v.insurance_expiry && (
-                        <span title={v.cal_insurance_event_id ? t('inv.calSynced') : t('inv.calNotSynced')}
-                          className={v.cal_insurance_event_id ? 'text-green-400' : 'text-slate-600'}>
-                          {v.cal_insurance_event_id ? '📅' : '○'}
-                        </span>
-                      )}
-                    </div>
                   </td>
                   <td className={`px-4 py-2.5 text-xs ${isExpired(v.registration_expiry) ? 'text-red-400 font-bold' : isExpiringSoon(v.registration_expiry) ? 'text-orange-400 font-medium' : 'text-slate-300'}`}>
                     <div className="flex items-center gap-1">

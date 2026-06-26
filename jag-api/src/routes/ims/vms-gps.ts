@@ -36,6 +36,7 @@ import {
   deleteGeofence,
   linkGeofence,
 } from '../../lib/traccar';
+import { enqueueNotification } from '../../lib/notifications';
 
 export const vmsGpsRouter = Router();
 
@@ -426,6 +427,64 @@ vmsGpsRouter.patch('/gps/trackers/:tid', async (req: Request, res: Response, nex
       res.json(ok({ updated: true }));
     } finally { client.release(); }
   } catch (e) { handleKnownError(res, e, next); }
+});
+
+// ── GET /gps/trackers/:tid/battery ───────────────────────────────────────────
+// Returns last 168 readings (≈7 days at hourly) plus discharge stats.
+
+vmsGpsRouter.get('/gps/trackers/:tid/battery', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const pp = TrackerParam.safeParse(req.params);
+    if (!pp.success) { res.status(422).json(err('Tracker id must be a valid UUID.', 'VALIDATION_ERROR')); return; }
+
+    const client = await commercialPool.connect();
+    try {
+      const rows = await withTenantRLS(client, req.rlsCtx, async (c) =>
+        c.query<{ battery_level: number; is_charging: boolean; recorded_at: string }>(
+          `SELECT battery_level, is_charging, recorded_at
+           FROM   gps_battery_log
+           WHERE  tracker_id = $1
+           ORDER  BY recorded_at DESC
+           LIMIT  168`,
+          [pp.data.tid],
+        ).then(r => r.rows),
+      );
+
+      // Calculate discharge rate and estimated hours remaining using the most recent
+      // non-charging window (we don't want charging periods skewing the rate).
+      const nonCharging = rows.filter(r => !r.is_charging);
+      let discharge_pct_per_hour: number | null = null;
+      let estimated_hours_remaining: number | null = null;
+
+      if (nonCharging.length >= 2) {
+        const newest = nonCharging[0];
+        // Find the furthest reading that isn't a charging session and is <= 24h old
+        // to get a representative window
+        const cutoff = new Date(new Date(newest.recorded_at).getTime() - 24 * 3600 * 1000);
+        const window = nonCharging.filter(r => new Date(r.recorded_at) >= cutoff);
+        if (window.length >= 2) {
+          const oldest = window[window.length - 1];
+          const hoursDiff = (new Date(newest.recorded_at).getTime() - new Date(oldest.recorded_at).getTime()) / 3_600_000;
+          const pctDiff = oldest.battery_level - newest.battery_level;
+          if (hoursDiff > 0 && pctDiff > 0) {
+            discharge_pct_per_hour = Math.round((pctDiff / hoursDiff) * 100) / 100;
+            estimated_hours_remaining = Math.round(newest.battery_level / discharge_pct_per_hour);
+          }
+        }
+      }
+
+      const latest = rows[0] ?? null;
+      res.json(ok({
+        tracker_id: pp.data.tid,
+        latest_level: latest?.battery_level ?? null,
+        is_charging: latest?.is_charging ?? null,
+        last_recorded_at: latest?.recorded_at ?? null,
+        discharge_pct_per_hour,
+        estimated_hours_remaining,
+        readings: rows,
+      }));
+    } finally { client.release(); }
+  } catch (e) { next(e); }
 });
 
 // ── DELETE /gps/trackers/:tid ─────────────────────────────────────────────────
