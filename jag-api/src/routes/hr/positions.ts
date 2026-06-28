@@ -18,10 +18,10 @@ const UUIDParam = z.object({ id: z.string().uuid() });
 
 const CreatePositionSchema = z.object({
   name:           z.string().min(1).max(200),
-  code:           z.string().min(1).max(20),
+  code:           z.string().max(20).optional(),
   department_id:  z.string().uuid().optional(),
-  min_salary_ttd: z.number().min(0).optional(),
-  max_salary_ttd: z.number().min(0).optional(),
+  min_salary_ttd: z.coerce.number().min(0).optional(),
+  max_salary_ttd: z.coerce.number().min(0).optional(),
   description:    z.string().max(2000).optional(),
 }).strict();
 
@@ -63,14 +63,25 @@ hrPositionsRouter.post('/', async (req: Request, res: Response, next: NextFuncti
   try {
     const client = await commercialPool.connect();
     try {
-      const row = await withTenantRLS(client, req.rlsCtx, (c) =>
-        c.query(
+      const row = await withTenantRLS(client, req.rlsCtx, async (c) => {
+        // Auto-generate code from name initials if not provided
+        let code = d.code?.trim() || '';
+        if (!code) {
+          const base = d.name.split(/\s+/).map((w: string) => w[0] ?? '').join('').toUpperCase().slice(0, 8) || 'POS';
+          const { rows } = await c.query<{ count: string }>(
+            `SELECT COUNT(*) AS count FROM hr_positions WHERE tenant_id = $1 AND code LIKE $2`,
+            [tenantId, `${base}%`],
+          );
+          const n = parseInt(rows[0].count);
+          code = n === 0 ? base : `${base}${n + 1}`;
+        }
+        return c.query(
           `INSERT INTO hr_positions (tenant_id, name, code, department_id, min_salary_ttd, max_salary_ttd, description)
            VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
-          [tenantId, d.name, d.code, d.department_id ?? null, d.min_salary_ttd ?? null,
+          [tenantId, d.name, code, d.department_id ?? null, d.min_salary_ttd ?? null,
            d.max_salary_ttd ?? null, d.description ?? null],
-        ).then((r) => r.rows[0]),
-      );
+        ).then((r) => r.rows[0]);
+      });
       logger.info({ entity: 'HR', action: 'POSITION_CREATED', position_id: row.id, user_id: userId, tenant_id: tenantId });
       ok(res, row, 201);
     } finally { client.release(); }
