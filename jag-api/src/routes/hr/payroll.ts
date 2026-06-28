@@ -183,6 +183,21 @@ hrPayrollRouter.post('/runs/:id/calculate', async (req: Request, res: Response, 
         ).then((r) => r.rows[0] ?? null);
         if (!run) return null;
 
+        // Sync: add any ACTIVE employees not yet in this run (hired after run was created)
+        const tenantId = req.rlsCtx.tenantId;
+        await c.query(
+          `INSERT INTO hr_payroll_entries (tenant_id, payroll_run_id, employee_id, base_salary_ttd)
+           SELECT $1, $2, e.id, e.base_salary_ttd
+           FROM hr_employees e
+           WHERE e.tenant_id = $1 AND e.status = 'ACTIVE'
+             AND NOT EXISTS (
+               SELECT 1 FROM hr_payroll_entries pe
+               WHERE pe.payroll_run_id = $2 AND pe.employee_id = e.id
+             )
+           ON CONFLICT (payroll_run_id, employee_id) DO NOTHING`,
+          [tenantId, pp.data.id],
+        );
+
         const entries: Array<{
           id: string; base_salary_ttd: string; overtime_pay_ttd: string;
           bonus_ttd: string; other_allowances_ttd: string; other_deductions_ttd: string;
@@ -209,8 +224,60 @@ hrPayrollRouter.post('/runs/:id/calculate', async (req: Request, res: Response, 
 
           const calc = calculateTTPayrollForFrequency(gross, entry.pay_frequency ?? 'MONTHLY');
 
+          // Pull active advance recovery amounts for this employee
+          const advanceRows = await c.query<{ id: string; recovery_installment_ttd: string; outstanding_ttd: string }>(
+            `SELECT id, recovery_installment_ttd,
+                    (amount_ttd - total_recovered_ttd) AS outstanding_ttd
+             FROM hr_salary_advances
+             WHERE employee_id = $1 AND status = 'ACTIVE'`,
+            [entry.employee_id],
+          ).then((r) => r.rows);
+
+          // Pull active loan installments for this employee
+          const loanRows = await c.query<{ id: string; monthly_installment_ttd: string; outstanding_balance_ttd: string }>(
+            `SELECT id, monthly_installment_ttd, outstanding_balance_ttd
+             FROM hr_staff_loans
+             WHERE employee_id = $1 AND status = 'ACTIVE'`,
+            [entry.employee_id],
+          ).then((r) => r.rows);
+
+          // Rebuild deduction_items (clear old, insert new)
+          await c.query(`DELETE FROM hr_payroll_deduction_items WHERE payroll_entry_id = $1`, [entry.id]);
+
+          let advanceDedTotal = 0;
+          for (const adv of advanceRows) {
+            const installment = Math.min(
+              parseFloat(String(adv.recovery_installment_ttd)),
+              parseFloat(String(adv.outstanding_ttd)),
+            );
+            if (installment > 0) {
+              advanceDedTotal += installment;
+              await c.query(
+                `INSERT INTO hr_payroll_deduction_items (tenant_id, payroll_entry_id, label, amount_ttd, deduction_type, reference_id)
+                 VALUES ($1,$2,'Salary Advance Recovery',$3,'ADVANCE_RECOVERY',$4)`,
+                [tenantId, entry.id, installment.toFixed(2), adv.id],
+              );
+            }
+          }
+
+          let loanDedTotal = 0;
+          for (const loan of loanRows) {
+            const installment = Math.min(
+              parseFloat(String(loan.monthly_installment_ttd)),
+              parseFloat(String(loan.outstanding_balance_ttd)),
+            );
+            if (installment > 0) {
+              loanDedTotal += installment;
+              await c.query(
+                `INSERT INTO hr_payroll_deduction_items (tenant_id, payroll_entry_id, label, amount_ttd, deduction_type, reference_id)
+                 VALUES ($1,$2,'Staff Loan Repayment',$3,'LOAN_REPAYMENT',$4)`,
+                [tenantId, entry.id, installment.toFixed(2), loan.id],
+              );
+            }
+          }
+
           const otherDed = parseFloat(String(entry.other_deductions_ttd ?? 0));
-          const totalDed = calc.totalDeductionsTtd + otherDed;
+          const totalDed = calc.totalDeductionsTtd + otherDed + advanceDedTotal + loanDedTotal;
           const net      = gross - totalDed;
 
           totalGross  += gross;

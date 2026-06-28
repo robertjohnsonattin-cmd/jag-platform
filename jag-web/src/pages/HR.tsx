@@ -12,6 +12,7 @@ import type {
   HrDisciplinaryRecord,
   HrJobPosting, HrJobApplication,
   HrTimesheet,
+  HrSalaryAdvance, HrStaffLoan,
   EmployeeStatus, DisciplinarySeverity, ApplicationStage,
 } from '../types/hr'
 
@@ -92,7 +93,7 @@ function fmt(v: string | null | undefined) { return v ? fmtTTD(v) : '—' }
 function fmtN(v: number | string | null | undefined) { return v != null ? parseFloat(String(v)).toFixed(2) : '—' }
 
 // ── TABS ──────────────────────────────────────────────────────────────────────
-const TABS = ['employees','payroll','leave','performance','recruitment','training','disciplinary','attendance'] as const
+const TABS = ['employees','payroll','advances_loans','leave','performance','recruitment','training','disciplinary','attendance'] as const
 type Tab = typeof TABS[number]
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -724,6 +725,257 @@ function PayrollTab({ entityId }: { entityId: string }) {
               <button className={btnPrimary} onClick={handleCreate} disabled={saving}>{saving ? t('common.saving') : t('common.create')}</button>
             </div>
           </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ADVANCES & LOANS TAB
+// ═══════════════════════════════════════════════════════════════════════════════
+function AdvancesLoansTab({ entityId }: { entityId: string }) {
+  const { t } = useTranslation()
+  const qc = useQueryClient()
+  const a = useMemo(() => hrApiFor(entityId), [entityId])
+  const [subTab, setSubTab] = useState<'advances'|'loans'>('advances')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  // Advances state
+  const [showAddAdv, setShowAddAdv] = useState(false)
+  const [advForm, setAdvForm] = useState({ employee_id:'', advance_date:'', amount_ttd:'', recovery_installment_ttd:'', reason:'', approved_by:'' })
+
+  // Loans state
+  const [showAddLoan, setShowAddLoan] = useState(false)
+  const [loanForm, setLoanForm] = useState({ employee_id:'', loan_date:'', principal_ttd:'', interest_rate:'0', monthly_installment_ttd:'', reason:'', approved_by:'' })
+
+  const { data: advances = [] } = useQuery({ queryKey: ['hr-advances', entityId], queryFn: () => a.getAdvances({ limit: 200 }) })
+  const { data: loans = [] }    = useQuery({ queryKey: ['hr-loans', entityId],    queryFn: () => a.getLoans({ limit: 200 }) })
+  const { data: employees = [] } = useQuery({ queryKey: ['hr-employees-active', entityId], queryFn: () => a.getEmployees({ status:'ACTIVE', limit:200 }) })
+
+  const fmt = (v: string | null | undefined) => v ? parseFloat(v).toLocaleString('en-TT', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00'
+
+  async function handleAddAdvance() {
+    setSaving(true); setError('')
+    try {
+      await a.createAdvance({ ...advForm, amount_ttd: parseFloat(advForm.amount_ttd), recovery_installment_ttd: parseFloat(advForm.recovery_installment_ttd) })
+      setShowAddAdv(false); setAdvForm({ employee_id:'', advance_date:'', amount_ttd:'', recovery_installment_ttd:'', reason:'', approved_by:'' })
+      void qc.invalidateQueries({ queryKey: ['hr-advances', entityId] })
+    } catch (e: unknown) { setError((e as Error).message) }
+    finally { setSaving(false) }
+  }
+
+  async function handleCancelAdvance(id: string) {
+    try { await a.cancelAdvance(id); void qc.invalidateQueries({ queryKey: ['hr-advances', entityId] }) }
+    catch (e: unknown) { setError((e as Error).message) }
+  }
+
+  async function handleAddLoan() {
+    setSaving(true); setError('')
+    try {
+      await a.createLoan({ ...loanForm, principal_ttd: parseFloat(loanForm.principal_ttd), interest_rate: parseFloat(loanForm.interest_rate || '0'), monthly_installment_ttd: parseFloat(loanForm.monthly_installment_ttd) })
+      setShowAddLoan(false); setLoanForm({ employee_id:'', loan_date:'', principal_ttd:'', interest_rate:'0', monthly_installment_ttd:'', reason:'', approved_by:'' })
+      void qc.invalidateQueries({ queryKey: ['hr-loans', entityId] })
+    } catch (e: unknown) { setError((e as Error).message) }
+    finally { setSaving(false) }
+  }
+
+  async function handleCancelLoan(id: string) {
+    try { await a.cancelLoan(id); void qc.invalidateQueries({ queryKey: ['hr-loans', entityId] }) }
+    catch (e: unknown) { setError((e as Error).message) }
+  }
+
+  const ADV_STATUS: Record<string, string> = {
+    ACTIVE:      'bg-blue-900/50 text-blue-300 border-blue-700',
+    RECOVERED:   'bg-green-900/50 text-green-300 border-green-700',
+    WRITTEN_OFF: 'bg-red-900/50 text-red-300 border-red-700',
+    CANCELLED:   'bg-slate-700 text-slate-400 border-slate-600',
+  }
+
+  return (
+    <div>
+      {/* Sub-tab switcher */}
+      <div className="flex gap-1 mb-4 border-b border-slate-700 pb-2">
+        {(['advances','loans'] as const).map(st => (
+          <button key={st} onClick={() => setSubTab(st)}
+            className={`px-3 py-1 rounded text-sm font-medium ${subTab===st ? 'bg-blue-700 text-white' : 'text-slate-400 hover:text-white'}`}>
+            {st === 'advances' ? t('hr.salaryAdvances') : t('hr.staffLoans')}
+          </button>
+        ))}
+      </div>
+
+      {error && <p className="text-red-400 text-sm mb-3">{error}</p>}
+
+      {/* ── Advances ── */}
+      {subTab === 'advances' && (
+        <div>
+          <button className={`${btnPrimary} mb-3`} onClick={() => setShowAddAdv(true)}>{t('hr.recordAdvance')}</button>
+          <div className="overflow-x-auto rounded-lg border border-slate-700">
+            <table className="w-full text-sm">
+              <thead className="bg-slate-800 text-slate-400">
+                <tr>
+                  {['Employee','Date','Amount (TTD)','Installment','Recovered','Outstanding','Status',''].map(h => (
+                    <th key={h} className="px-3 py-2 text-left font-medium">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-700">
+                {(advances as HrSalaryAdvance[]).map(adv => (
+                  <tr key={adv.id} className="hover:bg-slate-800/50">
+                    <td className="px-3 py-2 font-medium">{adv.employee_name}</td>
+                    <td className="px-3 py-2 text-slate-400">{fmtDate(adv.advance_date)}</td>
+                    <td className="px-3 py-2">{fmt(adv.amount_ttd)}</td>
+                    <td className="px-3 py-2">{fmt(adv.recovery_installment_ttd)}</td>
+                    <td className="px-3 py-2 text-green-400">{fmt(adv.total_recovered_ttd)}</td>
+                    <td className="px-3 py-2 text-amber-400">{fmt(adv.outstanding_ttd)}</td>
+                    <td className="px-3 py-2">
+                      <span className={`text-xs px-2 py-0.5 rounded border ${ADV_STATUS[adv.status] ?? ''}`}>{adv.status}</span>
+                    </td>
+                    <td className="px-3 py-2">
+                      {adv.status === 'ACTIVE' && (
+                        <button className="text-xs text-red-400 hover:underline" onClick={() => void handleCancelAdvance(adv.id)}>{t('common.cancel')}</button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+                {advances.length === 0 && <tr><td colSpan={8} className="px-3 py-6 text-center text-slate-500">{t('common.noRecords')}</td></tr>}
+              </tbody>
+            </table>
+          </div>
+
+          {showAddAdv && (
+            <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+              <div className="bg-slate-900 rounded-xl p-6 w-full max-w-md border border-slate-700">
+                <h3 className="text-lg font-semibold mb-4">{t('hr.recordAdvance')}</h3>
+                {error && <p className="text-red-400 text-sm mb-3">{error}</p>}
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-xs text-slate-400 mb-1">{t('hr.employee')}</label>
+                    <select className="w-full bg-slate-800 border border-slate-600 rounded px-3 py-2 text-sm" value={advForm.employee_id} onChange={evt => setAdvForm(f => ({ ...f, employee_id: evt.target.value }))}>
+                      <option value="">— {t('common.select')} —</option>
+                      {(employees as HrEmployee[]).map(emp => <option key={emp.id} value={emp.id}>{emp.first_name} {emp.last_name}</option>)}
+                    </select>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs text-slate-400 mb-1">{t('hr.advanceDate')}</label>
+                      <input type="date" className="w-full bg-slate-800 border border-slate-600 rounded px-3 py-2 text-sm" value={advForm.advance_date} onChange={evt => setAdvForm(f => ({ ...f, advance_date: evt.target.value }))} />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-slate-400 mb-1">{t('hr.amount')} (TTD)</label>
+                      <input type="number" min="1" className="w-full bg-slate-800 border border-slate-600 rounded px-3 py-2 text-sm" value={advForm.amount_ttd} onChange={evt => setAdvForm(f => ({ ...f, amount_ttd: evt.target.value }))} />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs text-slate-400 mb-1">{t('hr.recoveryInstallment')} (TTD/{t('hr.payPeriod')})</label>
+                    <input type="number" min="1" className="w-full bg-slate-800 border border-slate-600 rounded px-3 py-2 text-sm" value={advForm.recovery_installment_ttd} onChange={evt => setAdvForm(f => ({ ...f, recovery_installment_ttd: evt.target.value }))} />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-slate-400 mb-1">{t('hr.reason')}</label>
+                    <input type="text" className="w-full bg-slate-800 border border-slate-600 rounded px-3 py-2 text-sm" value={advForm.reason} onChange={evt => setAdvForm(f => ({ ...f, reason: evt.target.value }))} />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-slate-400 mb-1">{t('hr.approvedBy')}</label>
+                    <input type="text" className="w-full bg-slate-800 border border-slate-600 rounded px-3 py-2 text-sm" value={advForm.approved_by} onChange={evt => setAdvForm(f => ({ ...f, approved_by: evt.target.value }))} />
+                  </div>
+                </div>
+                <div className="flex gap-3 mt-5 justify-end">
+                  <button className={btnSecondary} onClick={() => setShowAddAdv(false)}>{t('common.cancel')}</button>
+                  <button className={btnPrimary} disabled={saving || !advForm.employee_id || !advForm.amount_ttd || !advForm.recovery_installment_ttd} onClick={() => void handleAddAdvance()}>{saving ? t('common.saving') : t('common.save')}</button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Loans ── */}
+      {subTab === 'loans' && (
+        <div>
+          <button className={`${btnPrimary} mb-3`} onClick={() => setShowAddLoan(true)}>{t('hr.recordLoan')}</button>
+          <div className="overflow-x-auto rounded-lg border border-slate-700">
+            <table className="w-full text-sm">
+              <thead className="bg-slate-800 text-slate-400">
+                <tr>
+                  {['Employee','Date','Principal (TTD)','Installment/mo','Repaid','Balance','Status',''].map(h => (
+                    <th key={h} className="px-3 py-2 text-left font-medium">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-700">
+                {(loans as HrStaffLoan[]).map(loan => (
+                  <tr key={loan.id} className="hover:bg-slate-800/50">
+                    <td className="px-3 py-2 font-medium">{loan.employee_name}</td>
+                    <td className="px-3 py-2 text-slate-400">{fmtDate(loan.loan_date)}</td>
+                    <td className="px-3 py-2">{fmt(loan.principal_ttd)}</td>
+                    <td className="px-3 py-2">{fmt(loan.monthly_installment_ttd)}</td>
+                    <td className="px-3 py-2 text-green-400">{fmt(loan.total_repaid_ttd)}</td>
+                    <td className="px-3 py-2 text-amber-400">{fmt(loan.outstanding_balance_ttd)}</td>
+                    <td className="px-3 py-2">
+                      <span className={`text-xs px-2 py-0.5 rounded border ${ADV_STATUS[loan.status] ?? ''}`}>{loan.status}</span>
+                    </td>
+                    <td className="px-3 py-2">
+                      {loan.status === 'ACTIVE' && (
+                        <button className="text-xs text-red-400 hover:underline" onClick={() => void handleCancelLoan(loan.id)}>{t('common.cancel')}</button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+                {loans.length === 0 && <tr><td colSpan={8} className="px-3 py-6 text-center text-slate-500">{t('common.noRecords')}</td></tr>}
+              </tbody>
+            </table>
+          </div>
+
+          {showAddLoan && (
+            <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+              <div className="bg-slate-900 rounded-xl p-6 w-full max-w-md border border-slate-700">
+                <h3 className="text-lg font-semibold mb-4">{t('hr.recordLoan')}</h3>
+                {error && <p className="text-red-400 text-sm mb-3">{error}</p>}
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-xs text-slate-400 mb-1">{t('hr.employee')}</label>
+                    <select className="w-full bg-slate-800 border border-slate-600 rounded px-3 py-2 text-sm" value={loanForm.employee_id} onChange={evt => setLoanForm(f => ({ ...f, employee_id: evt.target.value }))}>
+                      <option value="">— {t('common.select')} —</option>
+                      {(employees as HrEmployee[]).map(emp => <option key={emp.id} value={emp.id}>{emp.first_name} {emp.last_name}</option>)}
+                    </select>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs text-slate-400 mb-1">{t('hr.loanDate')}</label>
+                      <input type="date" className="w-full bg-slate-800 border border-slate-600 rounded px-3 py-2 text-sm" value={loanForm.loan_date} onChange={evt => setLoanForm(f => ({ ...f, loan_date: evt.target.value }))} />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-slate-400 mb-1">{t('hr.principal')} (TTD)</label>
+                      <input type="number" min="1" className="w-full bg-slate-800 border border-slate-600 rounded px-3 py-2 text-sm" value={loanForm.principal_ttd} onChange={evt => setLoanForm(f => ({ ...f, principal_ttd: evt.target.value }))} />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs text-slate-400 mb-1">{t('hr.monthlyInstallment')} (TTD)</label>
+                      <input type="number" min="1" className="w-full bg-slate-800 border border-slate-600 rounded px-3 py-2 text-sm" value={loanForm.monthly_installment_ttd} onChange={evt => setLoanForm(f => ({ ...f, monthly_installment_ttd: evt.target.value }))} />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-slate-400 mb-1">{t('hr.interestRate')} (%)</label>
+                      <input type="number" min="0" step="0.1" className="w-full bg-slate-800 border border-slate-600 rounded px-3 py-2 text-sm" value={loanForm.interest_rate} onChange={evt => setLoanForm(f => ({ ...f, interest_rate: evt.target.value }))} />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs text-slate-400 mb-1">{t('hr.reason')}</label>
+                    <input type="text" className="w-full bg-slate-800 border border-slate-600 rounded px-3 py-2 text-sm" value={loanForm.reason} onChange={evt => setLoanForm(f => ({ ...f, reason: evt.target.value }))} />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-slate-400 mb-1">{t('hr.approvedBy')}</label>
+                    <input type="text" className="w-full bg-slate-800 border border-slate-600 rounded px-3 py-2 text-sm" value={loanForm.approved_by} onChange={evt => setLoanForm(f => ({ ...f, approved_by: evt.target.value }))} />
+                  </div>
+                </div>
+                <div className="flex gap-3 mt-5 justify-end">
+                  <button className={btnSecondary} onClick={() => setShowAddLoan(false)}>{t('common.cancel')}</button>
+                  <button className={btnPrimary} disabled={saving || !loanForm.employee_id || !loanForm.principal_ttd || !loanForm.monthly_installment_ttd} onClick={() => void handleAddLoan()}>{saving ? t('common.saving') : t('common.save')}</button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -1606,14 +1858,15 @@ export default function HR() {
       </div>
 
       <div className="min-h-0">
-        {activeTab === 'employees'   && <EmployeesTab entityId={selectedEntityId} />}
-        {activeTab === 'payroll'     && <PayrollTab entityId={selectedEntityId} />}
-        {activeTab === 'leave'       && <LeaveTab entityId={selectedEntityId} />}
-        {activeTab === 'performance' && <PerformanceTab entityId={selectedEntityId} />}
-        {activeTab === 'recruitment' && <RecruitmentTab entityId={selectedEntityId} />}
-        {activeTab === 'training'    && <TrainingTab entityId={selectedEntityId} />}
-        {activeTab === 'disciplinary'&& <DisciplinaryTab entityId={selectedEntityId} />}
-        {activeTab === 'attendance'  && <AttendanceTab entityId={selectedEntityId} />}
+        {activeTab === 'employees'       && <EmployeesTab entityId={selectedEntityId} />}
+        {activeTab === 'payroll'         && <PayrollTab entityId={selectedEntityId} />}
+        {activeTab === 'advances_loans'  && <AdvancesLoansTab entityId={selectedEntityId} />}
+        {activeTab === 'leave'           && <LeaveTab entityId={selectedEntityId} />}
+        {activeTab === 'performance'     && <PerformanceTab entityId={selectedEntityId} />}
+        {activeTab === 'recruitment'     && <RecruitmentTab entityId={selectedEntityId} />}
+        {activeTab === 'training'        && <TrainingTab entityId={selectedEntityId} />}
+        {activeTab === 'disciplinary'    && <DisciplinaryTab entityId={selectedEntityId} />}
+        {activeTab === 'attendance'      && <AttendanceTab entityId={selectedEntityId} />}
       </div>
     </div>
   )

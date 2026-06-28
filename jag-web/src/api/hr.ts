@@ -8,6 +8,7 @@ import type {
   HrDisciplinaryRecord,
   HrJobPosting, HrJobApplication, HrInterview,
   HrTimesheet, HrTimeEntry,
+  HrSalaryAdvance, HrStaffLoan,
 } from '../types/hr';
 
 function qs(params?: object): string {
@@ -127,6 +128,18 @@ function makeHrApi(entityId?: string) {
     createTimeEntry: (d: object)      => a.post<HrTimeEntry>('/hr/attendance/entries', d),
     updateTimeEntry: (id: string, d: object) => a.patch<HrTimeEntry>(`/hr/attendance/entries/${id}`, d),
     deleteTimeEntry: (id: string)     => a.delete<{ id: string }>(`/hr/attendance/entries/${id}`),
+
+    // Salary advances
+    getAdvances: (params?: object)    => a.get<HrSalaryAdvance[]>(`/hr/advances${qs(params)}`),
+    createAdvance: (d: object)        => a.post<HrSalaryAdvance>('/hr/advances', d),
+    updateAdvance: (id: string, d: object) => a.patch<HrSalaryAdvance>(`/hr/advances/${id}`, d),
+    cancelAdvance: (id: string)       => a.delete<{ id: string }>(`/hr/advances/${id}`),
+
+    // Staff loans
+    getLoans: (params?: object)       => a.get<HrStaffLoan[]>(`/hr/loans${qs(params)}`),
+    createLoan: (d: object)           => a.post<HrStaffLoan>('/hr/loans', d),
+    updateLoan: (id: string, d: object) => a.patch<HrStaffLoan>(`/hr/loans/${id}`, d),
+    cancelLoan: (id: string)          => a.delete<{ id: string }>(`/hr/loans/${id}`),
   };
 }
 

@@ -343,6 +343,49 @@ export interface HrInterview {
   updated_at: string;
 }
 
+// ── Salary Advances & Staff Loans ─────────────────────────────────────────────
+export type AdvanceStatus = 'ACTIVE' | 'RECOVERED' | 'WRITTEN_OFF' | 'CANCELLED';
+export type LoanStatus    = 'ACTIVE' | 'PAID_OFF'  | 'WRITTEN_OFF' | 'CANCELLED';
+
+export interface HrSalaryAdvance {
+  id: string;
+  tenant_id: string;
+  employee_id: string;
+  employee_name?: string;
+  employee_number?: string;
+  advance_date: string;
+  amount_ttd: string;
+  recovery_installment_ttd: string;
+  total_recovered_ttd: string;
+  outstanding_ttd?: string;
+  status: AdvanceStatus;
+  reason: string | null;
+  approved_by: string | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface HrStaffLoan {
+  id: string;
+  tenant_id: string;
+  employee_id: string;
+  employee_name?: string;
+  employee_number?: string;
+  loan_date: string;
+  principal_ttd: string;
+  interest_rate: string;
+  monthly_installment_ttd: string;
+  total_repaid_ttd: string;
+  outstanding_balance_ttd: string;
+  status: LoanStatus;
+  reason: string | null;
+  approved_by: string | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 // ── Attendance ────────────────────────────────────────────────────────────────
 export type TimesheetStatus = 'DRAFT' | 'SUBMITTED' | 'APPROVED' | 'REJECTED';
 export type TimeEntryType = 'REGULAR' | 'OVERTIME' | 'PUBLIC_HOLIDAY' | 'SICK' | 'OTHER';

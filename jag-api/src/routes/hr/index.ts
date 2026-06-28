@@ -9,6 +9,7 @@ import { hrTrainingRouter }     from './training';
 import { hrDisciplinaryRouter } from './disciplinary';
 import { hrRecruitmentRouter }  from './recruitment';
 import { hrAttendanceRouter }   from './attendance';
+import { hrAdvancesRouter, hrLoansRouter } from './advances-loans';
 
 export const hrRouter = Router();
 
@@ -22,3 +23,5 @@ hrRouter.use('/training',     hrTrainingRouter);
 hrRouter.use('/disciplinary', hrDisciplinaryRouter);
 hrRouter.use('/recruitment',  hrRecruitmentRouter);
 hrRouter.use('/attendance',   hrAttendanceRouter);
+hrRouter.use('/advances',     hrAdvancesRouter);
+hrRouter.use('/loans',        hrLoansRouter);
