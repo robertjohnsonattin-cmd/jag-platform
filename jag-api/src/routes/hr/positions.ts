@@ -45,6 +45,7 @@ hrPositionsRouter.get('/', async (req: Request, res: Response, next: NextFunctio
           FROM hr_positions p
           LEFT JOIN hr_departments d ON d.id = p.department_id
           WHERE p.tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid
+            AND p.is_active = true
           ORDER BY p.name
         `).then((r) => r.rows),
       );
