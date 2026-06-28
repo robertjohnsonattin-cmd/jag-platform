@@ -70,7 +70,7 @@ hrPositionsRouter.post('/', async (req: Request, res: Response, next: NextFuncti
         if (!code) {
           const base = d.name.split(/\s+/).map((w: string) => w[0] ?? '').join('').toUpperCase().slice(0, 8) || 'POS';
           const { rows } = await c.query<{ count: string }>(
-            `SELECT COUNT(*) AS count FROM hr_positions WHERE tenant_id = $1 AND code LIKE $2`,
+            `SELECT COUNT(*) AS count FROM hr_positions WHERE tenant_id = $1 AND code LIKE $2 AND is_active = true`,
             [tenantId, `${base}%`],
           );
           const n = parseInt(rows[0].count);
