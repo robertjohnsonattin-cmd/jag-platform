@@ -165,7 +165,7 @@ hrEmployeesRouter.post('/', async (req: Request, res: Response, next: NextFuncti
         let empNumber = d.employee_number?.trim() || '';
         if (!empNumber) {
           const { rows: [seq] } = await c.query<{ n: string }>(
-            `SELECT LPAD(COALESCE(MAX(SUBSTRING(employee_number FROM 'EMP-(\\d+)')::int), 0) + 1, 4, '0') AS n
+            `SELECT LPAD(((COALESCE(MAX(SUBSTRING(employee_number FROM 'EMP-(\\d+)')::int), 0) + 1)::text), 4, '0') AS n
              FROM hr_employees WHERE tenant_id = $1 AND employee_number LIKE 'EMP-%'`,
             [tenantId],
           );
