@@ -22,7 +22,7 @@ hrEmployeesRouter.use(requireAuth());
 const UUIDParam  = z.object({ id: z.string().uuid() });
 const ECParam    = z.object({ id: z.string().uuid(), ecId: z.string().uuid() });
 const DATE_RE    = /^\d{4}-\d{2}-\d{2}$/;
-const optDate    = z.string().regex(DATE_RE).nullable().optional();
+const optDate    = z.preprocess(v => (v === '' ? undefined : v), z.string().regex(DATE_RE).nullable().optional());
 
 const CreateEmployeeSchema = z.object({
   employee_number:    z.string().max(30).optional(),
@@ -45,7 +45,7 @@ const CreateEmployeeSchema = z.object({
   department_id:      z.string().uuid().optional(),
   manager_id:         z.string().uuid().optional(),
   employment_type:    z.enum(['FULL_TIME','PART_TIME','CONTRACT','CASUAL']).default('FULL_TIME'),
-  hire_date:          z.string().regex(DATE_RE).optional(),
+  hire_date:          z.preprocess(v => (v === '' ? undefined : v), z.string().regex(DATE_RE).optional()),
   probation_end_date: optDate,
   base_salary_ttd:    z.coerce.number().min(0).default(0),
   pay_frequency:      z.enum(['MONTHLY','BIWEEKLY','WEEKLY']).default('MONTHLY'),
