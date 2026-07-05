@@ -81,7 +81,7 @@ function AddPolicyModal({ onClose, onCreated }: { onClose: () => void; onCreated
 
   const { data: vehicles = [] } = useQuery({
     queryKey: ['ims', 'vehicles', 'picker'],
-    queryFn: () => imsApi.getVehicles({ include_disposed: 'false', limit: 500 }).then(r => r.vehicles),
+    queryFn: () => imsApi.getVehicles({ include_disposed: 'false', limit: 100 }).then(r => r.vehicles),
     enabled: form.insured_asset_type === 'VEHICLE',
   })
   const { data: properties = [] } = useQuery({
@@ -91,7 +91,7 @@ function AddPolicyModal({ onClose, onCreated }: { onClose: () => void; onCreated
   })
   const { data: projects = [] } = useQuery({
     queryKey: ['jabco-projects', 'picker'],
-    queryFn: () => jabcoApi.getProjects({ limit: 500 }).then(r => r.projects),
+    queryFn: () => jabcoApi.getProjects({ limit: 100 }).then(r => r.projects),
     enabled: form.insured_asset_type === 'PROJECT',
   })
 
@@ -632,7 +632,7 @@ export default function InsurancePanel() {
 
   const { data: vehicles = [] } = useQuery({
     queryKey: ['ims', 'vehicles', 'picker'],
-    queryFn: () => imsApi.getVehicles({ include_disposed: 'true', limit: 500 }).then(r => r.vehicles),
+    queryFn: () => imsApi.getVehicles({ include_disposed: 'true', limit: 100 }).then(r => r.vehicles),
     enabled: hasVehicleRef,
   })
   const { data: properties = [] } = useQuery({
@@ -642,7 +642,7 @@ export default function InsurancePanel() {
   })
   const { data: projects = [] } = useQuery({
     queryKey: ['jabco-projects', 'picker'],
-    queryFn: () => jabcoApi.getProjects({ limit: 500 }).then(r => r.projects),
+    queryFn: () => jabcoApi.getProjects({ limit: 100 }).then(r => r.projects),
     enabled: hasProjectRef,
   })
 
