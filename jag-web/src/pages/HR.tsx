@@ -1,7 +1,8 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { hrApiFor } from '../api/hr'
+import { glApi } from '../api/gl'
 import { fmtTTD, fmtDate } from '../lib/entities'
 import type {
   HrEmployee, HrDepartment, HrPosition,
@@ -11,7 +12,7 @@ import type {
   HrTrainingType,
   HrDisciplinaryRecord,
   HrJobPosting, HrJobApplication,
-  HrTimesheet,
+  HrTimesheet, HrTimeEntry,
   HrSalaryAdvance, HrStaffLoan,
   EmployeeStatus, DisciplinarySeverity, ApplicationStage,
 } from '../types/hr'
@@ -34,7 +35,7 @@ const MONTHS = [
 ]
 
 const cls = 'w-full bg-slate-700 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500'
-const btnPrimary = 'px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded'
+const btnPrimary = 'px-3 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm rounded'
 const btnSecondary = 'px-3 py-1.5 bg-slate-700 hover:bg-slate-600 border border-slate-600 text-slate-200 text-sm rounded'
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
@@ -91,6 +92,19 @@ function Badge({ text, cls: c }: { text: string; cls: string }) {
 
 function fmt(v: string | null | undefined) { return v ? fmtTTD(v) : '—' }
 function fmtN(v: number | string | null | undefined) { return v != null ? parseFloat(String(v)).toFixed(2) : '—' }
+
+const TT_TZ = 'America/Port_of_Spain'
+
+// Current calendar date in Trinidad time as YYYY-MM-DD (not UTC — matters near midnight TT)
+function todayTT(): string {
+  const parts = new Intl.DateTimeFormat('sv-SE', { timeZone: TT_TZ, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date())
+  const get = (t: string) => parts.find(p => p.type === t)?.value ?? ''
+  return `${get('year')}-${get('month')}-${get('day')}`
+}
+
+function fmtTime(iso: string) {
+  return new Date(iso).toLocaleTimeString('en-TT', { hour: '2-digit', minute: '2-digit', timeZone: TT_TZ })
+}
 
 // ── TABS ──────────────────────────────────────────────────────────────────────
 const TABS = ['employees','payroll','advances_loans','leave','performance','recruitment','training','disciplinary','attendance'] as const
@@ -585,6 +599,34 @@ function EditEmployeeForm({ employee, depts, positions, api: a, onClose, onSaved
 // ═══════════════════════════════════════════════════════════════════════════════
 // PAYROLL TAB
 // ═══════════════════════════════════════════════════════════════════════════════
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
+
+type GlFieldKey =
+  | 'salary_expense_account_id'
+  | 'nis_expense_account_id'
+  | 'salaries_payable_account_id'
+  | 'nis_payable_account_id'
+  | 'paye_payable_account_id'
+  | 'health_surcharge_payable_account_id'
+
+const GL_FIELDS: Array<{ key: GlFieldKey; labelKey: string; type: 'EXPENSE' | 'LIABILITY'; required: boolean }> = [
+  { key: 'salary_expense_account_id',        labelKey: 'hr.glSalaryExpense',        type: 'EXPENSE',   required: true },
+  { key: 'salaries_payable_account_id',      labelKey: 'hr.glSalariesPayable',      type: 'LIABILITY', required: true },
+  { key: 'nis_expense_account_id',           labelKey: 'hr.glNisExpense',           type: 'EXPENSE',   required: false },
+  { key: 'nis_payable_account_id',           labelKey: 'hr.glNisPayable',           type: 'LIABILITY', required: false },
+  { key: 'paye_payable_account_id',          labelKey: 'hr.glPayePayable',          type: 'LIABILITY', required: false },
+  { key: 'health_surcharge_payable_account_id', labelKey: 'hr.glHealthSurchargePayable', type: 'LIABILITY', required: false },
+]
+
+const EMPTY_GL_ACCOUNT_IDS: Record<GlFieldKey, string> = {
+  salary_expense_account_id: '',
+  nis_expense_account_id: '',
+  salaries_payable_account_id: '',
+  nis_payable_account_id: '',
+  paye_payable_account_id: '',
+  health_surcharge_payable_account_id: '',
+}
+
 function PayrollTab({ entityId }: { entityId: string }) {
   const { t } = useTranslation()
   const qc = useQueryClient()
@@ -593,11 +635,32 @@ function PayrollTab({ entityId }: { entityId: string }) {
   const [selectedRun, setSelectedRun] = useState<HrPayrollRun | null>(null)
   const [showNew, setShowNew] = useState(false)
   const [newForm, setNewForm] = useState({ period_month: String(now.getMonth() + 1), period_year: String(now.getFullYear()), pay_date: '' })
+  const [showFinalize, setShowFinalize] = useState(false)
+  const [finalizeDate, setFinalizeDate] = useState('')
+  const [glAccountIds, setGlAccountIds] = useState<Record<GlFieldKey, string>>(EMPTY_GL_ACCOUNT_IDS)
+  const [editingEntry, setEditingEntry] = useState<HrPayrollEntry | null>(null)
+  const [entryForm, setEntryForm] = useState({
+    base_salary_ttd: '', overtime_hours: '', overtime_rate_ttd: '',
+    bonus_ttd: '', other_allowances_ttd: '', other_deductions_ttd: '',
+    unpaid_leave_days: '', status: 'INCLUDED' as 'INCLUDED' | 'EXCLUDED', notes: '',
+  })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
   const { data: runs = [] } = useQuery({ queryKey: ['hr-payroll-runs', entityId], queryFn: () => a.getPayrollRuns({ limit: 50 }) })
-  const { data: entries = [] } = useQuery({ queryKey: ['hr-payroll-entries', entityId, selectedRun?.id], queryFn: () => a.getPayrollEntries(selectedRun!.id), enabled: !!selectedRun })
+  const { data: runDetail } = useQuery({ queryKey: ['hr-payroll-run', entityId, selectedRun?.id], queryFn: () => a.getPayrollRun(selectedRun!.id), enabled: !!selectedRun })
+  const entries = runDetail?.entries ?? []
+  const { data: glAccounts = [] } = useQuery({ queryKey: ['gl-accounts', entityId], queryFn: () => glApi.getAccounts({ owner_entity_id: entityId, is_active: 'true' }) })
+
+  // Recall last-used GL account mapping for this entity (payroll runs monthly with the same accounts)
+  useEffect(() => {
+    const saved = localStorage.getItem(`hr-payroll-gl-accounts-${entityId}`)
+    if (!saved) { setGlAccountIds(EMPTY_GL_ACCOUNT_IDS); return }
+    try { setGlAccountIds({ ...EMPTY_GL_ACCOUNT_IDS, ...JSON.parse(saved) }) }
+    catch { setGlAccountIds(EMPTY_GL_ACCOUNT_IDS) }
+  }, [entityId])
+
+  const missingRequiredGl = GL_FIELDS.filter(f => f.required && !glAccountIds[f.key])
 
   async function handleCreate() {
     setSaving(true); setError('')
@@ -615,17 +678,70 @@ function PayrollTab({ entityId }: { entityId: string }) {
       const updated = await a.calculatePayrollRun(selectedRun.id)
       setSelectedRun(updated)
       void qc.invalidateQueries({ queryKey: ['hr-payroll-runs', entityId] })
-      void qc.invalidateQueries({ queryKey: ['hr-payroll-entries', entityId, selectedRun.id] })
+      void qc.invalidateQueries({ queryKey: ['hr-payroll-run', entityId, selectedRun.id] })
     } catch (e: unknown) { setError((e as Error).message) }
     finally { setSaving(false) }
   }
 
-  async function handleFinalize() {
+  function openFinalize() {
     if (!selectedRun) return
+    setFinalizeDate(selectedRun.pay_date?.slice(0, 10) || new Date().toISOString().slice(0, 10))
+    setError('')
+    setShowFinalize(true)
+  }
+
+  async function handleFinalize() {
+    if (!selectedRun || !DATE_RE.test(finalizeDate)) { setError(t('hr.payDateRequired')); return }
     setSaving(true); setError('')
     try {
-      const updated = await a.finalizePayrollRun(selectedRun.id)
-      setSelectedRun(updated); void qc.invalidateQueries({ queryKey: ['hr-payroll-runs', entityId] })
+      localStorage.setItem(`hr-payroll-gl-accounts-${entityId}`, JSON.stringify(glAccountIds))
+      const payload: { pay_date: string } & Partial<Record<GlFieldKey, string>> = { pay_date: finalizeDate }
+      for (const f of GL_FIELDS) { if (glAccountIds[f.key]) payload[f.key] = glAccountIds[f.key] }
+      const updated = await a.finalizePayrollRun(selectedRun.id, payload)
+      setSelectedRun(updated); setShowFinalize(false)
+      void qc.invalidateQueries({ queryKey: ['hr-payroll-runs', entityId] })
+      void qc.invalidateQueries({ queryKey: ['hr-payroll-run', entityId, selectedRun.id] })
+    } catch (e: unknown) { setError((e as Error).message) }
+    finally { setSaving(false) }
+  }
+
+  function openEditEntry(entry: HrPayrollEntry) {
+    setEditingEntry(entry)
+    setEntryForm({
+      base_salary_ttd:      entry.base_salary_ttd ?? '0',
+      overtime_hours:       entry.overtime_hours ?? '0',
+      overtime_rate_ttd:    entry.overtime_rate_ttd ?? '0',
+      bonus_ttd:            entry.bonus_ttd ?? '0',
+      other_allowances_ttd: entry.other_allowances_ttd ?? '0',
+      other_deductions_ttd: entry.other_deductions_ttd ?? '0',
+      unpaid_leave_days:    entry.unpaid_leave_days ?? '0',
+      status:               entry.status,
+      notes:                entry.notes ?? '',
+    })
+    setError('')
+  }
+
+  async function handleSaveEntry() {
+    if (!selectedRun || !editingEntry) return
+    setSaving(true); setError('')
+    try {
+      await a.updatePayrollEntry(selectedRun.id, editingEntry.id, {
+        base_salary_ttd:      parseFloat(entryForm.base_salary_ttd || '0'),
+        overtime_hours:       parseFloat(entryForm.overtime_hours || '0'),
+        overtime_rate_ttd:    parseFloat(entryForm.overtime_rate_ttd || '0'),
+        bonus_ttd:            parseFloat(entryForm.bonus_ttd || '0'),
+        other_allowances_ttd: parseFloat(entryForm.other_allowances_ttd || '0'),
+        other_deductions_ttd: parseFloat(entryForm.other_deductions_ttd || '0'),
+        unpaid_leave_days:    parseFloat(entryForm.unpaid_leave_days || '0'),
+        status:               entryForm.status,
+        notes:                entryForm.notes || undefined,
+      })
+      // Re-run statutory calculation so NIS/PAYE/health surcharge and totals reflect the new figures
+      const updatedRun = await a.calculatePayrollRun(selectedRun.id)
+      setSelectedRun(updatedRun)
+      setEditingEntry(null)
+      void qc.invalidateQueries({ queryKey: ['hr-payroll-runs', entityId] })
+      void qc.invalidateQueries({ queryKey: ['hr-payroll-run', entityId, selectedRun.id] })
     } catch (e: unknown) { setError((e as Error).message) }
     finally { setSaving(false) }
   }
@@ -666,7 +782,7 @@ function PayrollTab({ entityId }: { entityId: string }) {
               {selectedRun.status === 'DRAFT' && (
                 <>
                   <button className={btnSecondary} onClick={handleCalculate} disabled={saving}>{saving ? '…' : t('hr.calculate')}</button>
-                  <button className={btnPrimary} onClick={handleFinalize} disabled={saving}>{saving ? '…' : t('hr.finalize')}</button>
+                  <button className={btnPrimary} onClick={openFinalize} disabled={saving || entries.length === 0}>{t('hr.finalize')}</button>
                 </>
               )}
             </div>
@@ -687,21 +803,79 @@ function PayrollTab({ entityId }: { entityId: string }) {
                 {['hr.employee','hr.gross','hr.nis','hr.healthSurcharge','hr.paye','hr.net'].map(k => (
                   <th key={k} className="px-3 py-2">{t(k)}</th>
                 ))}
+                {selectedRun.status === 'DRAFT' && <th className="px-3 py-2"></th>}
               </tr></thead>
               <tbody>
                 {(entries as HrPayrollEntry[]).map(entry => (
-                  <tr key={entry.id} className="border-b border-slate-700/50">
-                    <td className="px-3 py-2 text-slate-100">{entry.employee_name ?? '—'}<div className="text-xs text-slate-400">{entry.employee_number}</div></td>
+                  <tr key={entry.id} className={`border-b border-slate-700/50 ${entry.status === 'EXCLUDED' ? 'opacity-50' : ''}`}>
+                    <td className="px-3 py-2 text-slate-100">
+                      {entry.employee_name ?? '—'}
+                      <div className="text-xs text-slate-400">{entry.employee_number}</div>
+                      {entry.status === 'EXCLUDED' && <Badge text={t('hr.excluded')} cls="bg-slate-700 text-slate-400 border-slate-600 mt-1" />}
+                    </td>
                     <td className="px-3 py-2">{fmt(entry.total_gross_ttd)}</td>
                     <td className="px-3 py-2">{fmt(entry.nis_employee_ttd)}</td>
                     <td className="px-3 py-2">{fmt(entry.health_surcharge_ttd)}</td>
                     <td className="px-3 py-2">{fmt(entry.paye_ttd)}</td>
                     <td className="px-3 py-2 font-medium text-green-300">{fmt(entry.net_pay_ttd)}</td>
+                    {selectedRun.status === 'DRAFT' && (
+                      <td className="px-3 py-2">
+                        <button className="text-xs text-blue-400 hover:text-blue-300" onClick={() => openEditEntry(entry)}>{t('hr.editPay')}</button>
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
             </table>
             {entries.length === 0 && <p className="text-sm text-slate-500 italic p-4">{t('common.noRecords')}</p>}
+          </div>
+        </div>
+      )}
+
+      {editingEntry && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+          <div className="bg-slate-800 rounded-xl p-5 w-full max-w-md border border-slate-600 max-h-[90vh] overflow-y-auto">
+            <h3 className="text-lg font-semibold text-slate-100 mb-1">{editingEntry.employee_name}</h3>
+            <p className="text-sm text-slate-400 mb-4">{t('hr.editPayHint')}</p>
+            {error && <p className="text-red-400 text-sm mb-3">{error}</p>}
+            <div className="grid grid-cols-2 gap-3">
+              <Field label={t('hr.status')}>
+                <select className={cls} value={entryForm.status} onChange={e => setEntryForm(f => ({ ...f, status: e.target.value as 'INCLUDED' | 'EXCLUDED' }))}>
+                  <option value="INCLUDED">{t('hr.included')}</option>
+                  <option value="EXCLUDED">{t('hr.excluded')}</option>
+                </select>
+              </Field>
+              <Field label={t('hr.salary')}>
+                <input type="number" step="0.01" className={cls} value={entryForm.base_salary_ttd} onChange={e => setEntryForm(f => ({ ...f, base_salary_ttd: e.target.value }))} />
+              </Field>
+              <Field label={t('hr.overtimeHours')}>
+                <input type="number" step="0.01" className={cls} value={entryForm.overtime_hours} onChange={e => setEntryForm(f => ({ ...f, overtime_hours: e.target.value }))} />
+              </Field>
+              <Field label={t('hr.overtimeRate')}>
+                <input type="number" step="0.01" className={cls} value={entryForm.overtime_rate_ttd} onChange={e => setEntryForm(f => ({ ...f, overtime_rate_ttd: e.target.value }))} />
+              </Field>
+              <Field label={t('hr.bonus')}>
+                <input type="number" step="0.01" className={cls} value={entryForm.bonus_ttd} onChange={e => setEntryForm(f => ({ ...f, bonus_ttd: e.target.value }))} />
+              </Field>
+              <Field label={t('hr.otherAllowances')}>
+                <input type="number" step="0.01" className={cls} value={entryForm.other_allowances_ttd} onChange={e => setEntryForm(f => ({ ...f, other_allowances_ttd: e.target.value }))} />
+              </Field>
+              <Field label={t('hr.otherDeductions')}>
+                <input type="number" step="0.01" className={cls} value={entryForm.other_deductions_ttd} onChange={e => setEntryForm(f => ({ ...f, other_deductions_ttd: e.target.value }))} />
+              </Field>
+              <Field label={t('hr.unpaidLeaveDays')}>
+                <input type="number" step="0.5" className={cls} value={entryForm.unpaid_leave_days} onChange={e => setEntryForm(f => ({ ...f, unpaid_leave_days: e.target.value }))} />
+              </Field>
+              <div className="col-span-2">
+                <Field label={t('hr.notes')}>
+                  <textarea className={cls} rows={2} value={entryForm.notes} onChange={e => setEntryForm(f => ({ ...f, notes: e.target.value }))} />
+                </Field>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 mt-4">
+              <button className={btnSecondary} onClick={() => setEditingEntry(null)}>{t('common.cancel')}</button>
+              <button className={btnPrimary} onClick={handleSaveEntry} disabled={saving}>{saving ? t('common.saving') : t('common.save')}</button>
+            </div>
           </div>
         </div>
       )}
@@ -723,6 +897,49 @@ function PayrollTab({ entityId }: { entityId: string }) {
             <div className="flex justify-end gap-2 mt-4">
               <button className={btnSecondary} onClick={() => setShowNew(false)}>{t('common.cancel')}</button>
               <button className={btnPrimary} onClick={handleCreate} disabled={saving}>{saving ? t('common.saving') : t('common.create')}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showFinalize && selectedRun && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+          <div className="bg-slate-800 rounded-xl p-5 w-full max-w-lg border border-slate-600 max-h-[90vh] overflow-y-auto">
+            <h3 className="text-lg font-semibold text-slate-100 mb-1">{t('hr.finalize')}</h3>
+            <p className="text-sm text-slate-400 mb-4">{t('hr.finalizeHint')}</p>
+            {error && <p className="text-red-400 text-sm mb-3">{error}</p>}
+            <Field label={t('hr.payDate')}>
+              <input type="date" className={cls} value={finalizeDate} onChange={e => setFinalizeDate(e.target.value)} />
+            </Field>
+
+            <div className="mt-4 pt-4 border-t border-slate-700">
+              <p className="text-xs text-slate-400 mb-2">{t('hr.glAccountsHint')}</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {GL_FIELDS.map(f => (
+                  <Field key={f.key} label={`${t(f.labelKey)}${f.required ? ' *' : ''}`}>
+                    <select
+                      className={cls}
+                      value={glAccountIds[f.key]}
+                      onChange={e => setGlAccountIds(g => ({ ...g, [f.key]: e.target.value }))}
+                    >
+                      <option value="">{t('common.none')}</option>
+                      {glAccounts.filter(ac => ac.account_type === f.type).map(ac => (
+                        <option key={ac.id} value={ac.id}>{ac.account_code} — {ac.account_name}</option>
+                      ))}
+                    </select>
+                  </Field>
+                ))}
+              </div>
+              {missingRequiredGl.length > 0 && (
+                <p className="text-amber-400 text-xs mt-2">
+                  {t('hr.glMissingWarning', { accounts: missingRequiredGl.map(f => t(f.labelKey)).join(', ') })}
+                </p>
+              )}
+            </div>
+
+            <div className="flex justify-end gap-2 mt-4">
+              <button className={btnSecondary} onClick={() => setShowFinalize(false)}>{t('common.cancel')}</button>
+              <button className={btnPrimary} onClick={handleFinalize} disabled={saving || !DATE_RE.test(finalizeDate)}>{saving ? t('common.saving') : t('hr.finalize')}</button>
             </div>
           </div>
         </div>
@@ -1670,10 +1887,15 @@ function AttendanceTab({ entityId }: { entityId: string }) {
   const [error, setError] = useState('')
   const [tsForm, setTsForm] = useState({ employee_id:'', week_start_date:'', week_end_date:'' })
   const [entryForm, setEntryForm] = useState({ employee_id:'', timesheet_id:'', entry_date:'', hours_worked:'8', is_overtime: false, entry_type:'REGULAR', notes:'' })
+  const [breakMinutes, setBreakMinutes] = useState('0')
 
   const { data: timesheets = [] } = useQuery({ queryKey: ['hr-timesheets', entityId], queryFn: () => a.getTimesheets({ limit: 100 }) })
   const { data: entries = [] } = useQuery({ queryKey: ['hr-time-entries', entityId, selectedTs?.id], queryFn: () => a.getTimeEntries({ timesheet_id: selectedTs!.id, limit: 100 }), enabled: !!selectedTs })
   const { data: employees = [] } = useQuery({ queryKey: ['hr-employees-active', entityId], queryFn: () => a.getEmployees({ status: 'ACTIVE', limit: 200 }) })
+
+  const todayStr = todayTT()
+  const todayEntry = (entries as HrTimeEntry[]).find(e => e.entry_date.slice(0, 10) === todayStr)
+  const todayInWeek = !!selectedTs && todayStr >= selectedTs.week_start_date.slice(0, 10) && todayStr <= selectedTs.week_end_date.slice(0, 10)
 
   async function handleAddTs() {
     setSaving(true); setError('')
@@ -1689,6 +1911,38 @@ function AttendanceTab({ entityId }: { entityId: string }) {
     try {
       await a.createTimeEntry({ ...entryForm, hours_worked: parseFloat(entryForm.hours_worked), timesheet_id: entryForm.timesheet_id || undefined })
       setShowAddEntry(false); if (selectedTs) void qc.invalidateQueries({ queryKey: ['hr-time-entries', entityId, selectedTs.id] })
+    } catch (e: unknown) { setError((e as Error).message) }
+    finally { setSaving(false) }
+  }
+
+  async function handleClockIn() {
+    if (!selectedTs) return
+    setSaving(true); setError('')
+    try {
+      await a.createTimeEntry({
+        employee_id:  selectedTs.employee_id,
+        timesheet_id: selectedTs.id,
+        entry_date:   todayStr,
+        clock_in:     new Date().toISOString(),
+        hours_worked: 0,
+        entry_type:   'REGULAR',
+      })
+      void qc.invalidateQueries({ queryKey: ['hr-time-entries', entityId, selectedTs.id] })
+    } catch (e: unknown) { setError((e as Error).message) }
+    finally { setSaving(false) }
+  }
+
+  async function handleClockOut() {
+    if (!selectedTs || !todayEntry?.clock_in) return
+    setSaving(true); setError('')
+    try {
+      const clockOutIso = new Date().toISOString()
+      const mins = parseFloat(breakMinutes || '0')
+      const rawHours = (new Date(clockOutIso).getTime() - new Date(todayEntry.clock_in).getTime()) / 3_600_000
+      const hoursWorked = Math.max(0, Math.round((rawHours - mins / 60) * 100) / 100)
+      await a.updateTimeEntry(todayEntry.id, { clock_out: clockOutIso, break_minutes: Math.round(mins), hours_worked: hoursWorked })
+      setBreakMinutes('0')
+      void qc.invalidateQueries({ queryKey: ['hr-time-entries', entityId, selectedTs.id] })
     } catch (e: unknown) { setError((e as Error).message) }
     finally { setSaving(false) }
   }
@@ -1746,15 +2000,49 @@ function AttendanceTab({ entityId }: { entityId: string }) {
               {selectedTs.status === 'SUBMITTED' && <button className="px-3 py-1.5 bg-red-700 hover:bg-red-800 text-white text-sm rounded" onClick={() => patchStatus('reject', selectedTs)}>{t('common.reject')}</button>}
             </div>
           </div>
+
+          <div className="mb-4 bg-slate-900 rounded-lg p-3 border border-slate-700">
+            <div className="flex items-center justify-between flex-wrap gap-3">
+              <div>
+                <p className="text-xs text-slate-400">{t('hr.timeClock')} · {fmtDate(todayStr)}</p>
+                {!todayEntry?.clock_in && <p className="text-sm text-slate-300 mt-0.5">{t('hr.notClockedIn')}</p>}
+                {todayEntry?.clock_in && !todayEntry?.clock_out && (
+                  <p className="text-sm text-green-400 mt-0.5">{t('hr.clockedInAt', { time: fmtTime(todayEntry.clock_in) })}</p>
+                )}
+                {todayEntry?.clock_in && todayEntry?.clock_out && (
+                  <p className="text-sm text-slate-300 mt-0.5">
+                    {t('hr.workedSummary', { hours: fmtN(todayEntry.hours_worked), in: fmtTime(todayEntry.clock_in), out: fmtTime(todayEntry.clock_out) })}
+                  </p>
+                )}
+                {!todayInWeek && <p className="text-xs text-amber-400 mt-1">{t('hr.outsideWeek')}</p>}
+              </div>
+              <div className="flex items-end gap-2">
+                {todayEntry?.clock_in && !todayEntry?.clock_out && (
+                  <Field label={t('hr.breakMinutes')}>
+                    <input type="number" min="0" className={`${cls} w-24`} value={breakMinutes} onChange={e => setBreakMinutes(e.target.value)} />
+                  </Field>
+                )}
+                {!todayEntry?.clock_in && (
+                  <button className={btnPrimary} onClick={handleClockIn} disabled={saving || !todayInWeek}>{saving ? '…' : t('hr.clockIn')}</button>
+                )}
+                {todayEntry?.clock_in && !todayEntry?.clock_out && (
+                  <button className="px-3 py-1.5 bg-red-700 hover:bg-red-800 text-white text-sm rounded disabled:opacity-40" onClick={handleClockOut} disabled={saving}>{saving ? '…' : t('hr.clockOut')}</button>
+                )}
+              </div>
+            </div>
+          </div>
+
           <div className="overflow-x-auto rounded-lg border border-slate-700">
             <table className="w-full text-sm">
               <thead><tr className="text-left text-xs text-slate-400 border-b border-slate-700 bg-slate-900">
-                {['hr.date','hr.hours','hr.type','hr.overtime','common.notes'].map(k => <th key={k} className="px-3 py-2">{t(k)}</th>)}
+                {['hr.date','hr.clockIn','hr.clockOut','hr.hours','hr.type','hr.overtime','common.notes'].map(k => <th key={k} className="px-3 py-2">{t(k)}</th>)}
               </tr></thead>
               <tbody>
                 {entries.map(entry => (
                   <tr key={entry.id} className="border-b border-slate-700/50">
                     <td className="px-3 py-2 text-slate-100">{fmtDate(entry.entry_date)}</td>
+                    <td className="px-3 py-2 text-slate-300">{entry.clock_in ? fmtTime(entry.clock_in) : '—'}</td>
+                    <td className="px-3 py-2 text-slate-300">{entry.clock_out ? fmtTime(entry.clock_out) : '—'}</td>
                     <td className="px-3 py-2 text-slate-300">{fmtN(entry.hours_worked)}h</td>
                     <td className="px-3 py-2 text-slate-300">{entry.entry_type.replace('_',' ')}</td>
                     <td className="px-3 py-2">{entry.is_overtime ? <span className="text-orange-400">OT</span> : '—'}</td>

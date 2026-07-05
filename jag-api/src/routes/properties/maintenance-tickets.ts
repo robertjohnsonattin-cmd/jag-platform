@@ -22,7 +22,11 @@ export const contractorsRouter        = Router();
 
 const IdParam = z.object({ id: z.string().uuid() });
 
-const CategoryEnum  = z.enum(['PLUMBING','ELECTRICAL','STRUCTURAL','PEST','APPLIANCE','OTHER']);
+const CategoryEnum  = z.enum([
+  'PLUMBING','ELECTRICAL','HVAC','APPLIANCE','STRUCTURAL','ROOFING','PAINTING',
+  'FLOORING','DOORS_WINDOWS','LOCKS_KEYS','PEST','SECURITY','GARDEN','FENCING',
+  'DRAINAGE','WASTE_DISPOSAL','SMOKE_DETECTOR','CLEANING','OTHER',
+]);
 const PriorityEnum  = z.enum(['P1','P2','P3','P4']);
 const TicketStatusEnum = z.enum(['OPEN','ASSIGNED','IN_PROGRESS','PENDING_PARTS','RESOLVED','CLOSED','CANCELLED']);
 const ChannelEnum   = z.enum(['WHATSAPP','SMS','PORTAL','PHONE','EMAIL']);
@@ -48,7 +52,7 @@ function slaHours(priority: string): number | null {
 }
 
 const CreateTicketSchema = z.object({
-  unit_id:            z.string().uuid(),
+  unit_id:            z.string().uuid().optional(),
   property_id:        z.string().uuid().optional(),
   lease_id:           z.string().uuid().optional(),
   reported_by_name:   z.string().max(200).optional(),
@@ -58,7 +62,9 @@ const CreateTicketSchema = z.object({
   description:        z.string().min(1),
   photo_urls:         z.array(z.string()).optional(),
   priority:           PriorityEnum.optional(),
-}).strict();
+}).strict().refine(b => b.unit_id || b.property_id, {
+  message: 'Either unit_id (unit-level issue) or property_id (building-level issue) is required.',
+});
 
 const PatchTicketSchema = z.object({
   status:               TicketStatusEnum.optional(),
@@ -105,16 +111,18 @@ const PatchContractorSchema = z.object({
 // ── Batch: SLA breach detector ────────────────────────────────────────────────
 maintenanceTicketsRouter.post('/check-sla', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const ownerId = (req as Request & { user?: { jag_user_id?: string } }).user?.jag_user_id;
+    const ownerId = req.rlsCtx.userId;
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
 
     const SLA_HOURS: Record<string, number> = { P1: 2, P2: 24, P3: 120 };
 
     const { newlyBreached, totalBreached } = await withOwnerRLS(propertiesPool, ownerId, async client => {
       const { rows: tickets } = await client.query<Record<string, unknown>>(
-        `SELECT t.id, t.priority, t.created_at, t.sla_breached, t.ticket_ref, u.unit_number
+        `SELECT t.id, t.priority, t.created_at, t.sla_breached, t.ticket_ref,
+                COALESCE(u.unit_number, p.name) AS location_label
          FROM prop_maintenance_tickets t
-         JOIN prop_units u ON u.id = t.unit_id
+         LEFT JOIN prop_units u ON u.id = t.unit_id
+         LEFT JOIN prop_properties p ON p.id = t.property_id
          WHERE t.owner_id = $1 AND t.status IN ('OPEN','ASSIGNED','IN_PROGRESS','PENDING_PARTS')
            AND t.priority IN ('P1','P2','P3')`,
         [ownerId],
@@ -147,7 +155,7 @@ maintenanceTicketsRouter.post('/check-sla', async (req: Request, res: Response, 
                   { type: 'text', text: String(tk['priority'] ?? '') },
                   { type: 'text', text: `${Math.round(elapsedHours)}h` },
                   { type: 'text', text: String(SLA_HOURS[String(tk['priority'])] ?? '?') + 'h' },
-                  { type: 'text', text: String(tk['unit_number'] ?? '') },
+                  { type: 'text', text: String(tk['location_label'] ?? '') },
                 ]}],
               }).catch(() => { /* non-fatal */ });
             }
@@ -155,7 +163,7 @@ maintenanceTicketsRouter.post('/check-sla', async (req: Request, res: Response, 
             void enqueueNotification({
               tier: 1,
               title: 'Maintenance SLA breach',
-              body: `Ticket ${String(tk['ticket_ref'] ?? tk['id'])} (${String(tk['priority'] ?? '')}) at unit ${String(tk['unit_number'] ?? '—')} has breached its SLA.`,
+              body: `Ticket ${String(tk['ticket_ref'] ?? tk['id'])} (${String(tk['priority'] ?? '')}) at ${String(tk['location_label'] ?? '—')} has breached its SLA.`,
               payload: { module: 'PROPERTIES', kind: 'MAINTENANCE_SLA', ticket_id: tk['id'] },
             });
             newlyBreached++;
@@ -173,7 +181,7 @@ maintenanceTicketsRouter.post('/check-sla', async (req: Request, res: Response, 
 
 maintenanceTicketsRouter.get('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const ownerId = (req as Request & { user?: { jag_user_id?: string } }).user?.jag_user_id;
+    const ownerId = req.rlsCtx.userId;
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
 
     const unitId   = req.query['unit_id'] as string | undefined;
@@ -190,7 +198,7 @@ maintenanceTicketsRouter.get('/', async (req: Request, res: Response, next: Next
       const { rows: r } = await client.query(
         `SELECT t.*, u.unit_number, p.name AS property_name, c.name AS contractor_name
          FROM prop_maintenance_tickets t
-         JOIN prop_units u ON u.id = t.unit_id
+         LEFT JOIN prop_units u ON u.id = t.unit_id
          LEFT JOIN prop_properties p ON p.id = t.property_id
          LEFT JOIN prop_contractors c ON c.id = t.contractor_id
          WHERE t.owner_id = $1${where}
@@ -205,7 +213,7 @@ maintenanceTicketsRouter.get('/', async (req: Request, res: Response, next: Next
 
 maintenanceTicketsRouter.post('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const ownerId = (req as Request & { user?: { jag_user_id?: string } }).user?.jag_user_id;
+    const ownerId = req.rlsCtx.userId;
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
     const body = CreateTicketSchema.parse(req.body);
 
@@ -228,7 +236,7 @@ maintenanceTicketsRouter.post('/', async (req: Request, res: Response, next: Nex
             category, description, photo_urls,
             priority, priority_auto_suggested, sla_hours, sla_breach_at)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING *`,
-        [ownerId, body.unit_id, body.property_id ?? null, body.lease_id ?? null, ticketRef,
+        [ownerId, body.unit_id ?? null, body.property_id ?? null, body.lease_id ?? null, ticketRef,
          body.reported_by_name ?? null, body.reported_by_phone ?? null, body.report_channel ?? null,
          body.category, body.description, JSON.stringify(body.photo_urls ?? []),
          priority, autoSuggested, sla, slaBreachAt],
@@ -277,7 +285,7 @@ maintenanceTicketsRouter.post('/', async (req: Request, res: Response, next: Nex
 
 maintenanceTicketsRouter.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const ownerId = (req as Request & { user?: { jag_user_id?: string } }).user?.jag_user_id;
+    const ownerId = req.rlsCtx.userId;
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
     const { id } = IdParam.parse(req.params);
 
@@ -285,7 +293,7 @@ maintenanceTicketsRouter.get('/:id', async (req: Request, res: Response, next: N
       const { rows: [ticket] } = await client.query(
         `SELECT t.*, u.unit_number, p.name AS property_name, c.name AS contractor_name, c.phone AS contractor_phone
          FROM prop_maintenance_tickets t
-         JOIN prop_units u ON u.id = t.unit_id
+         LEFT JOIN prop_units u ON u.id = t.unit_id
          LEFT JOIN prop_properties p ON p.id = t.property_id
          LEFT JOIN prop_contractors c ON c.id = t.contractor_id
          WHERE t.id = $1 AND t.owner_id = $2`,
@@ -305,7 +313,7 @@ maintenanceTicketsRouter.get('/:id', async (req: Request, res: Response, next: N
 
 maintenanceTicketsRouter.patch('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const ownerId = (req as Request & { user?: { jag_user_id?: string } }).user?.jag_user_id;
+    const ownerId = req.rlsCtx.userId;
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
     const { id } = IdParam.parse(req.params);
     const body = PatchTicketSchema.parse(req.body);
@@ -411,7 +419,7 @@ maintenanceTicketsRouter.patch('/:id', async (req: Request, res: Response, next:
 
 maintenanceTicketsRouter.post('/:id/resolve', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const ownerId = (req as Request & { user?: { jag_user_id?: string } }).user?.jag_user_id;
+    const ownerId = req.rlsCtx.userId;
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
     const { id } = IdParam.parse(req.params);
     const body = ResolveSchema.parse(req.body);
@@ -451,7 +459,7 @@ maintenanceTicketsRouter.post('/:id/resolve', async (req: Request, res: Response
 
 maintenanceTicketsRouter.post('/:id/satisfaction', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const ownerId = (req as Request & { user?: { jag_user_id?: string } }).user?.jag_user_id;
+    const ownerId = req.rlsCtx.userId;
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
     const { id } = IdParam.parse(req.params);
     const body = SatisfactionSchema.parse(req.body);
@@ -473,7 +481,7 @@ maintenanceTicketsRouter.post('/:id/satisfaction', async (req: Request, res: Res
 
 contractorsRouter.get('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const ownerId = (req as Request & { user?: { jag_user_id?: string } }).user?.jag_user_id;
+    const ownerId = req.rlsCtx.userId;
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
 
     const rows = await withOwnerRLS(propertiesPool, ownerId, async client => {
@@ -488,7 +496,7 @@ contractorsRouter.get('/', async (req: Request, res: Response, next: NextFunctio
 
 contractorsRouter.post('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const ownerId = (req as Request & { user?: { jag_user_id?: string } }).user?.jag_user_id;
+    const ownerId = req.rlsCtx.userId;
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
     const body = CreateContractorSchema.parse(req.body);
 
@@ -507,7 +515,7 @@ contractorsRouter.post('/', async (req: Request, res: Response, next: NextFuncti
 
 contractorsRouter.patch('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const ownerId = (req as Request & { user?: { jag_user_id?: string } }).user?.jag_user_id;
+    const ownerId = req.rlsCtx.userId;
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
     const { id } = IdParam.parse(req.params);
     const body = PatchContractorSchema.parse(req.body);

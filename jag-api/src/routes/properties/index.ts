@@ -3,7 +3,6 @@ import { requireAuth } from '../../middleware/auth';
 import { brianPortalGate } from '../../middleware/brian';
 import { propertiesRouter as propRoutes }  from './properties';
 import { pipelineRouter }                  from './pipeline';
-import { maintenanceRouter }               from './maintenance';
 import { propTenantsRouter, propMortgageRouter } from './tenants-mortgage';
 import { utilitiesRouter }                 from './utilities';
 import { vendorInvoicesRouter }            from './vendor-invoices';
@@ -54,7 +53,6 @@ propertiesRouter.use('/tenants',       propTenantsRouter);
 propertiesRouter.use('/', propRoutes);
 
 // ── Nested property-level sub-routes ─────────────────────────────────────────
-propertiesRouter.use('/:propertyId/maintenance',     maintenanceRouter);
 propertiesRouter.use('/:propertyId/mortgage',        propMortgageRouter);
 propertiesRouter.use('/:propertyId/utilities',       utilitiesRouter);
 propertiesRouter.use('/:propertyId/vendor-invoices', vendorInvoicesRouter);

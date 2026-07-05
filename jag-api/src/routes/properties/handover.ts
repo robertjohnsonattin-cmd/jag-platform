@@ -65,7 +65,7 @@ const PatchHandoverSchema = z.object({
 
 handoverRouter.get('/unit/:unitId', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const ownerId = (req as Request & { user?: { jag_user_id?: string } }).user?.jag_user_id;
+    const ownerId = req.rlsCtx.userId;
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
     const { unitId } = UnitIdParam.parse(req.params);
 
@@ -82,7 +82,7 @@ handoverRouter.get('/unit/:unitId', async (req: Request, res: Response, next: Ne
 
 handoverRouter.post('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const ownerId = (req as Request & { user?: { jag_user_id?: string } }).user?.jag_user_id;
+    const ownerId = req.rlsCtx.userId;
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
     const body = CreateHandoverSchema.parse(req.body);
 
@@ -113,7 +113,7 @@ handoverRouter.post('/', async (req: Request, res: Response, next: NextFunction)
 
 handoverRouter.patch('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const ownerId = (req as Request & { user?: { jag_user_id?: string } }).user?.jag_user_id;
+    const ownerId = req.rlsCtx.userId;
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
     const { id } = IdParam.parse(req.params);
     const body = PatchHandoverSchema.parse(req.body);
@@ -197,7 +197,7 @@ handoverRouter.patch('/:id', async (req: Request, res: Response, next: NextFunct
 
 handoverRouter.get('/:id/compare', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const ownerId = (req as Request & { user?: { jag_user_id?: string } }).user?.jag_user_id;
+    const ownerId = req.rlsCtx.userId;
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
     const { id } = IdParam.parse(req.params);
 

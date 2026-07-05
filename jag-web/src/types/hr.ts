@@ -168,11 +168,20 @@ export interface HrPayrollRun {
   updated_at: string;
 }
 
+export interface HrPayrollDeductionItem {
+  id: string;
+  payroll_entry_id: string;
+  label: string;
+  amount_ttd: string;
+  deduction_type: string;
+  reference_id: string | null;
+}
+
 export interface HrPayrollEntry {
   id: string;
   payroll_run_id: string;
   employee_id: string;
-  gross_salary_ttd: string;
+  base_salary_ttd: string;
   overtime_hours: string | null;
   overtime_rate_ttd: string | null;
   overtime_pay_ttd: string | null;
@@ -186,11 +195,15 @@ export interface HrPayrollEntry {
   total_deductions_ttd: string | null;
   net_pay_ttd: string | null;
   nis_employer_ttd: string | null;
+  unpaid_leave_days: string | null;
   notes: string | null;
   status: PayrollEntryStatus;
   employee_name?: string;
   employee_number?: string;
   position_name?: string;
+  department_name?: string;
+  pay_frequency?: string;
+  deduction_items?: HrPayrollDeductionItem[];
 }
 
 // ── Performance ───────────────────────────────────────────────────────────────

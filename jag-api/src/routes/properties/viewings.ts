@@ -36,7 +36,7 @@ const BookingSchema = z.object({
 
 viewingsRouter.get('/available-slots', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const ownerId = (req as Request & { user?: { jag_user_id?: string } }).user?.jag_user_id;
+    const ownerId = req.rlsCtx.userId;
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
 
     const fromDate = req.query['from'] ? new Date(req.query['from'] as string) : new Date();
@@ -51,7 +51,7 @@ viewingsRouter.get('/available-slots', async (req: Request, res: Response, next:
 
 viewingsRouter.get('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const ownerId = (req as Request & { user?: { jag_user_id?: string } }).user?.jag_user_id;
+    const ownerId = req.rlsCtx.userId;
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
 
     const status = req.query['status'] as string | undefined;
@@ -83,7 +83,7 @@ viewingsRouter.get('/', async (req: Request, res: Response, next: NextFunction) 
 // ── Batch: send 24h viewing reminders ────────────────────────────────────────
 viewingsRouter.post('/send-reminders', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const ownerId = (req as Request & { user?: { jag_user_id?: string } }).user?.jag_user_id;
+    const ownerId = req.rlsCtx.userId;
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
 
     const rows = await withOwnerRLS(propertiesPool, ownerId, async client => {
@@ -133,7 +133,7 @@ viewingsRouter.post('/send-reminders', async (req: Request, res: Response, next:
 // ── Batch: send 1h viewing reminders ─────────────────────────────────────────
 viewingsRouter.post('/send-reminders-1h', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const ownerId = (req as Request & { user?: { jag_user_id?: string } }).user?.jag_user_id;
+    const ownerId = req.rlsCtx.userId;
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
 
     const rows = await withOwnerRLS(propertiesPool, ownerId, async client => {
@@ -182,7 +182,7 @@ viewingsRouter.post('/send-reminders-1h', async (req: Request, res: Response, ne
 // ── Batch: send application link after completed viewing ──────────────────────
 viewingsRouter.post('/send-post-viewing-links', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const ownerId = (req as Request & { user?: { jag_user_id?: string } }).user?.jag_user_id;
+    const ownerId = req.rlsCtx.userId;
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
 
     const rows = await withOwnerRLS(propertiesPool, ownerId, async client => {
@@ -224,7 +224,7 @@ viewingsRouter.post('/send-post-viewing-links', async (req: Request, res: Respon
 
 viewingsRouter.patch('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const ownerId = (req as Request & { user?: { jag_user_id?: string } }).user?.jag_user_id;
+    const ownerId = req.rlsCtx.userId;
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
     const { id } = IdParam.parse(req.params);
     const body = PatchViewingSchema.parse(req.body);

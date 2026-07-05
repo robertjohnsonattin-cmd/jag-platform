@@ -2,6 +2,14 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { tenancyApi } from '../../api/tenancy'
+import { propertiesApi } from '../../api/properties'
+import type { Property, Unit } from '../../types/properties'
+
+const CATEGORIES = [
+  'PLUMBING','ELECTRICAL','HVAC','APPLIANCE','STRUCTURAL','ROOFING','PAINTING',
+  'FLOORING','DOORS_WINDOWS','LOCKS_KEYS','PEST','SECURITY','GARDEN','FENCING',
+  'DRAINAGE','WASTE_DISPOSAL','SMOKE_DETECTOR','CLEANING','OTHER',
+]
 
 const PRIORITY_COLORS: Record<string, string> = {
   P1: 'bg-red-900/70 text-red-200 border-red-600',
@@ -29,7 +37,7 @@ export default function PropertiesMaintenancePanel() {
   const [statusFilter, setStatusFilter] = useState('')
   const [priorityFilter, setPriorityFilter] = useState('')
   const [showCreate, setShowCreate] = useState(false)
-  const [form, setForm] = useState({ unit_id: '', category: 'OTHER', description: '', priority: '', reported_by_name: '', reported_by_phone: '', report_channel: 'PORTAL' })
+  const [form, setForm] = useState({ property_id: '', unit_id: '', category: 'OTHER', description: '', priority: '', reported_by_name: '', reported_by_phone: '', report_channel: 'PORTAL' })
   const [resolveForm, setResolveForm] = useState({ resolution_notes: '', cost_ttd: '' })
   const [showResolve, setShowResolve] = useState(false)
 
@@ -45,7 +53,11 @@ export default function PropertiesMaintenancePanel() {
   })
 
   const createMut = useMutation({
-    mutationFn: () => tenancyApi.createMaintenanceTicket({ ...form, priority: form.priority || undefined }),
+    mutationFn: () => tenancyApi.createMaintenanceTicket({
+      ...form,
+      unit_id: form.unit_id || undefined,
+      priority: form.priority || undefined,
+    }),
     onSuccess: () => { setShowCreate(false); qc.invalidateQueries({ queryKey: ['maintenance'] }) },
   })
 
@@ -65,6 +77,20 @@ export default function PropertiesMaintenancePanel() {
     queryKey: ['contractors'],
     queryFn: () => tenancyApi.getContractors(),
     staleTime: 5 * 60_000,
+  })
+
+  const { data: properties = [] } = useQuery({
+    queryKey: ['properties-picker'],
+    queryFn: () => propertiesApi.getProperties({ limit: 500 }),
+    enabled: showCreate,
+    staleTime: 60_000,
+  })
+
+  const { data: propertyUnits = [] } = useQuery({
+    queryKey: ['properties', form.property_id, 'units-picker'],
+    queryFn: () => propertiesApi.getUnits(form.property_id),
+    enabled: showCreate && !!form.property_id,
+    staleTime: 60_000,
   })
 
   return (
@@ -96,7 +122,7 @@ export default function PropertiesMaintenancePanel() {
                   {Boolean(tk['sla_breached']) && <span className="text-xs text-red-400 font-semibold">SLA BREACH</span>}
                 </div>
                 <p className="text-sm text-slate-200 mt-1 truncate">{String(tk['description'])}</p>
-                <p className="text-xs text-slate-400">Unit {String(tk['unit_number'] ?? '—')} · {String(tk['category'])} · {String(tk['reported_by_name'] ?? '')}</p>
+                <p className="text-xs text-slate-400">{tk['unit_number'] ? `Unit ${String(tk['unit_number'])}` : String(tk['property_name'] ?? '—')} · {String(tk['category'])} · {String(tk['reported_by_name'] ?? '')}</p>
               </div>
               <span className={`text-xs px-2 py-0.5 rounded border flex-shrink-0 ${STATUS_COLORS[String(tk['status'])] ?? ''}`}>{String(tk['status']).replace(/_/g,' ')}</span>
             </div>
@@ -114,7 +140,7 @@ export default function PropertiesMaintenancePanel() {
                 <span className="text-xs text-slate-500 font-mono">{String(detail['ticket_ref'])}</span>
               </div>
               <p className="text-sm text-slate-200 mt-2">{String(detail['description'])}</p>
-              <p className="text-xs text-slate-400 mt-1">{String(detail['category'])} · Unit {String(detail['unit_number'] ?? '—')}</p>
+              <p className="text-xs text-slate-400 mt-1">{String(detail['category'])} · {detail['unit_number'] ? `Unit ${String(detail['unit_number'])}` : String(detail['property_name'] ?? '—')}</p>
               {Boolean(detail['contractor_name']) && <p className="text-xs text-slate-400">Contractor: {String(detail['contractor_name'])}</p>}
             </div>
             <div className="flex gap-2 flex-wrap">
@@ -174,10 +200,27 @@ export default function PropertiesMaintenancePanel() {
           <div className="bg-slate-800 rounded-lg p-6 w-full max-w-md overflow-y-auto max-h-[90vh]">
             <h2 className="text-lg font-semibold mb-4">{t('tenancy.newTicket','New Maintenance Ticket')}</h2>
             <div className="space-y-3">
-              <div><label className="block text-xs text-slate-400 mb-1">{t('tenancy.unitId','Unit ID')}</label><input className={cls} value={form.unit_id} onChange={set('unit_id')} /></div>
+              <div><label className="block text-xs text-slate-400 mb-1">{t('tenancy.property','Property')}</label>
+                <select className={cls} value={form.property_id}
+                  onChange={e => setForm(f => ({ ...f, property_id: e.target.value, unit_id: '' }))}>
+                  <option value="">{t('tenancy.selectProperty','— Select property —')}</option>
+                  {properties.map((p: Property) => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">{t('tenancy.unit','Unit (leave blank for a whole-building issue)')}</label>
+                <select className={cls} value={form.unit_id} onChange={set('unit_id')} disabled={!form.property_id}>
+                  <option value="">{t('tenancy.noUnit','— Whole building / no specific unit —')}</option>
+                  {propertyUnits.map((u: Unit) => (
+                    <option key={u.id} value={u.id}>{u.unit_number}</option>
+                  ))}
+                </select>
+              </div>
               <div><label className="block text-xs text-slate-400 mb-1">{t('tenancy.category','Category')}</label>
                 <select className={cls} value={form.category} onChange={set('category')}>
-                  {['PLUMBING','ELECTRICAL','STRUCTURAL','PEST','APPLIANCE','OTHER'].map(c => <option key={c} value={c}>{c}</option>)}
+                  {CATEGORIES.map(c => <option key={c} value={c}>{c.replace(/_/g,' ')}</option>)}
                 </select>
               </div>
               <div><label className="block text-xs text-slate-400 mb-1">{t('tenancy.description','Description')}</label><textarea className={cls} rows={3} value={form.description} onChange={set('description')} /></div>
@@ -186,7 +229,7 @@ export default function PropertiesMaintenancePanel() {
             </div>
             <div className="flex gap-2 justify-end mt-4">
               <button onClick={() => setShowCreate(false)} className="px-4 py-2 text-sm text-slate-400 hover:text-slate-200">{t('common.cancel','Cancel')}</button>
-              <button onClick={() => createMut.mutate()} disabled={createMut.isPending || !form.unit_id || !form.description}
+              <button onClick={() => createMut.mutate()} disabled={createMut.isPending || !form.property_id || !form.description}
                 className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded disabled:opacity-40">
                 {createMut.isPending ? t('common.saving','Saving...') : t('common.save','Save')}
               </button>

@@ -891,6 +891,12 @@ function ContactPanel({ contactId, onClose }: { contactId: string; onClose: () =
 
   const fullAddress = [contact.address_line1, contact.address_line2, contact.city, contact.state_province, contact.postal_code].filter(Boolean).join(', ')
 
+  const quickLog = (type: InteractionType, subject: string) => {
+    crmApi.quickLog(contact.id, type, subject)
+      .then(() => qc.invalidateQueries({ queryKey: ['crm-contact', contactId] }))
+      .catch(err => console.error('Quick-log interaction failed', err))
+  }
+
   return (
     <>
       <div className="flex flex-col h-full overflow-y-auto">
@@ -912,26 +918,26 @@ function ContactPanel({ contactId, onClose }: { contactId: string; onClose: () =
         <div className="px-5 py-3 border-b border-slate-700 flex flex-wrap gap-2 shrink-0">
           {contact.phone && (
             <>
-              <a href={`tel:${contact.phone}`} className="flex items-center gap-1 px-3 py-1.5 rounded text-xs bg-green-800/50 hover:bg-green-700/60 text-green-300 border border-green-700 transition-colors">
+              <a href={`tel:${contact.phone}`} onClick={() => quickLog('CALL', `Called ${contact.phone}`)} className="flex items-center gap-1 px-3 py-1.5 rounded text-xs bg-green-800/50 hover:bg-green-700/60 text-green-300 border border-green-700 transition-colors">
                 📞 {t('crm.callLand')}
               </a>
-              <a href={`https://wa.me/${waPhone(contact.phone)}`} target="_blank" rel="noreferrer" className="flex items-center gap-1 px-3 py-1.5 rounded text-xs bg-green-900/50 hover:bg-green-800/60 text-green-400 border border-green-800 transition-colors">
+              <a href={`https://wa.me/${waPhone(contact.phone)}`} target="_blank" rel="noreferrer" onClick={() => quickLog('WHATSAPP_MESSAGE', `WhatsApp to ${contact.phone}`)} className="flex items-center gap-1 px-3 py-1.5 rounded text-xs bg-green-900/50 hover:bg-green-800/60 text-green-400 border border-green-800 transition-colors">
                 💬 {t('crm.whatsapp')}
               </a>
             </>
           )}
           {contact.phone2 && (
             <>
-              <a href={`tel:${contact.phone2}`} className="flex items-center gap-1 px-3 py-1.5 rounded text-xs bg-blue-800/50 hover:bg-blue-700/60 text-blue-300 border border-blue-700 transition-colors">
+              <a href={`tel:${contact.phone2}`} onClick={() => quickLog('CALL', `Called ${contact.phone2}`)} className="flex items-center gap-1 px-3 py-1.5 rounded text-xs bg-blue-800/50 hover:bg-blue-700/60 text-blue-300 border border-blue-700 transition-colors">
                 📱 {t('crm.callCell')}
               </a>
-              <a href={`https://wa.me/${waPhone(contact.phone2)}`} target="_blank" rel="noreferrer" className="flex items-center gap-1 px-3 py-1.5 rounded text-xs bg-green-900/50 hover:bg-green-800/60 text-green-400 border border-green-800 transition-colors">
+              <a href={`https://wa.me/${waPhone(contact.phone2)}`} target="_blank" rel="noreferrer" onClick={() => quickLog('WHATSAPP_MESSAGE', `WhatsApp to ${contact.phone2}`)} className="flex items-center gap-1 px-3 py-1.5 rounded text-xs bg-green-900/50 hover:bg-green-800/60 text-green-400 border border-green-800 transition-colors">
                 💬 {t('crm.whatsappCell')}
               </a>
             </>
           )}
           {contact.email && (
-            <a href={`mailto:${contact.email}`} className="flex items-center gap-1 px-3 py-1.5 rounded text-xs bg-orange-900/50 hover:bg-orange-800/60 text-orange-300 border border-orange-700 transition-colors">
+            <a href={`mailto:${contact.email}`} onClick={() => quickLog('EMAIL', `Email to ${contact.email}`)} className="flex items-center gap-1 px-3 py-1.5 rounded text-xs bg-orange-900/50 hover:bg-orange-800/60 text-orange-300 border border-orange-700 transition-colors">
               ✉️ {t('crm.sendEmail')}
             </a>
           )}
@@ -957,7 +963,7 @@ function ContactPanel({ contactId, onClose }: { contactId: string; onClose: () =
           {contact.email && (
             <div className="flex gap-2 text-sm">
               <span className="text-slate-500 w-20 shrink-0">{t('crm.email')}</span>
-              <a href={`mailto:${contact.email}`} className="text-orange-400 hover:text-orange-300 truncate">{contact.email}</a>
+              <a href={`mailto:${contact.email}`} onClick={() => quickLog('EMAIL', `Email to ${contact.email}`)} className="text-orange-400 hover:text-orange-300 truncate">{contact.email}</a>
             </div>
           )}
           {fullAddress && (

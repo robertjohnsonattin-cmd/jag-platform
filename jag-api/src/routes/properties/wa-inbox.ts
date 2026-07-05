@@ -35,7 +35,7 @@ const LogSchema = z.object({
 // ── GET /wa-inbox — recent conversations grouped by phone ────────────────────
 waInboxRouter.get('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const ownerId = (req as Request & { user?: { jag_user_id?: string } }).user?.jag_user_id;
+    const ownerId = req.rlsCtx.userId;
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
 
     const rows = await withOwnerRLS(propertiesPool, ownerId, async client => {
@@ -69,7 +69,7 @@ waInboxRouter.get('/', async (req: Request, res: Response, next: NextFunction) =
 // ── GET /wa-inbox/:phone — full timeline for a contact ───────────────────────
 waInboxRouter.get('/:phone', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const ownerId = (req as Request & { user?: { jag_user_id?: string } }).user?.jag_user_id;
+    const ownerId = req.rlsCtx.userId;
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
     const { phone } = PhoneParam.parse(req.params);
 
@@ -122,7 +122,7 @@ waInboxRouter.get('/:phone', async (req: Request, res: Response, next: NextFunct
 // ── POST /wa-inbox/:phone/reply — send a free-text WA reply ─────────────────
 waInboxRouter.post('/:phone/reply', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const ownerId = (req as Request & { user?: { jag_user_id?: string } }).user?.jag_user_id;
+    const ownerId = req.rlsCtx.userId;
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
     const { phone } = PhoneParam.parse(req.params);
     const { body: msgBody } = ReplySchema.parse(req.body);
@@ -146,7 +146,7 @@ waInboxRouter.post('/:phone/reply', async (req: Request, res: Response, next: Ne
 // ── POST /wa-inbox/:phone/log — log a call or note ──────────────────────────
 waInboxRouter.post('/:phone/log', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const ownerId = (req as Request & { user?: { jag_user_id?: string } }).user?.jag_user_id;
+    const ownerId = req.rlsCtx.userId;
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
     const { phone } = PhoneParam.parse(req.params);
     const body = LogSchema.parse(req.body);

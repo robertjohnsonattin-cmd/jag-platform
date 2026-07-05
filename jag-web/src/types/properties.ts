@@ -158,23 +158,6 @@ export interface ApplicationDocument {
   created_at: string
 }
 
-export interface MaintenanceRequest {
-  id: string
-  category: string
-  description: string
-  priority: 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT'
-  status: string
-  assigned_to: string | null
-  estimated_cost: string | null
-  actual_cost: string | null
-  reported_date: string
-  scheduled_date: string | null
-  completed_date: string | null
-  completion_notes: string | null
-  last_modified_at: string
-  created_at: string
-}
-
 export type PipelineStage = 'WATCH' | 'INTERESTED' | 'OFFER_MADE' | 'DUE_DILIGENCE' | 'CONTRACT' | 'ACQUIRED' | 'PASSED'
 
 export interface PipelineItem {

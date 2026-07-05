@@ -81,7 +81,7 @@ export async function generateRentSchedule(ownerId: string, leaseId: string): Pr
 
 rentScheduleRouter.get('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const ownerId = (req as Request & { user?: { jag_user_id?: string } }).user?.jag_user_id;
+    const ownerId = req.rlsCtx.userId;
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
 
     const unitId  = req.query['unit_id'] as string | undefined;
@@ -114,7 +114,7 @@ rentScheduleRouter.get('/', async (req: Request, res: Response, next: NextFuncti
 
 rentScheduleRouter.post('/generate', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const ownerId = (req as Request & { user?: { jag_user_id?: string } }).user?.jag_user_id;
+    const ownerId = req.rlsCtx.userId;
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
     const { lease_id } = GenerateScheduleSchema.parse(req.body);
     const inserted = await generateRentSchedule(ownerId, lease_id);
@@ -125,7 +125,7 @@ rentScheduleRouter.post('/generate', async (req: Request, res: Response, next: N
 // ── Batch: cron sends reminders for upcoming / late periods ──────────────────
 rentScheduleRouter.post('/send-reminders', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const ownerId = (req as Request & { user?: { jag_user_id?: string } }).user?.jag_user_id;
+    const ownerId = req.rlsCtx.userId;
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
 
     const sent: string[] = [];
@@ -175,7 +175,7 @@ rentScheduleRouter.post('/send-reminders', async (req: Request, res: Response, n
 // ── Batch: D-1 urgent reminder ────────────────────────────────────────────────
 rentScheduleRouter.post('/send-reminders-d1', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const ownerId = (req as Request & { user?: { jag_user_id?: string } }).user?.jag_user_id;
+    const ownerId = req.rlsCtx.userId;
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
 
     const bank = process.env.JAG_BANK_NAME ?? 'First Citizens Bank';
@@ -231,7 +231,7 @@ rentScheduleRouter.post('/send-reminders-d1', async (req: Request, res: Response
 // ── Batch: D+1 missed payment notice ─────────────────────────────────────────
 rentScheduleRouter.post('/send-missed-d1', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const ownerId = (req as Request & { user?: { jag_user_id?: string } }).user?.jag_user_id;
+    const ownerId = req.rlsCtx.userId;
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
 
     const sent: string[] = [];
@@ -281,7 +281,7 @@ rentScheduleRouter.post('/send-missed-d1', async (req: Request, res: Response, n
 // ── Batch: queue D+7 and D+14 arrears escalations for owner approval ──────────
 rentScheduleRouter.post('/queue-arrears-escalation', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const ownerId = (req as Request & { user?: { jag_user_id?: string } }).user?.jag_user_id;
+    const ownerId = req.rlsCtx.userId;
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
 
     const queued: string[] = [];
@@ -347,7 +347,7 @@ rentScheduleRouter.post('/queue-arrears-escalation', async (req: Request, res: R
 
 rentScheduleRouter.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const ownerId = (req as Request & { user?: { jag_user_id?: string } }).user?.jag_user_id;
+    const ownerId = req.rlsCtx.userId;
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
     const { id } = IdParam.parse(req.params);
 
@@ -369,7 +369,7 @@ rentScheduleRouter.get('/:id', async (req: Request, res: Response, next: NextFun
 
 rentScheduleRouter.post('/:id/record-payment', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const ownerId = (req as Request & { user?: { jag_user_id?: string } }).user?.jag_user_id;
+    const ownerId = req.rlsCtx.userId;
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
     const { id } = IdParam.parse(req.params);
     const body = RecordPaymentSchema.parse(req.body);
@@ -449,7 +449,7 @@ rentScheduleRouter.post('/:id/record-payment', async (req: Request, res: Respons
 
 rentScheduleRouter.get('/:id/receipt', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const ownerId = (req as Request & { user?: { jag_user_id?: string } }).user?.jag_user_id;
+    const ownerId = req.rlsCtx.userId;
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
     const { id } = IdParam.parse(req.params);
 
@@ -474,7 +474,7 @@ rentScheduleRouter.get('/:id/receipt', async (req: Request, res: Response, next:
 
 rentScheduleRouter.post('/:id/waive', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const ownerId = (req as Request & { user?: { jag_user_id?: string } }).user?.jag_user_id;
+    const ownerId = req.rlsCtx.userId;
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
     const { id } = IdParam.parse(req.params);
     const { reason } = WaiveSchema.parse(req.body);

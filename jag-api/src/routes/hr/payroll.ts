@@ -203,16 +203,19 @@ hrPayrollRouter.post('/runs/:id/calculate', async (req: Request, res: Response, 
           bonus_ttd: string; other_allowances_ttd: string; other_deductions_ttd: string;
           employee_id: string;
           pay_frequency: 'MONTHLY' | 'BIWEEKLY' | 'WEEKLY';
+          employment_type: string;
         }> = await c.query(`
           SELECT pe.id, pe.base_salary_ttd, pe.overtime_pay_ttd, pe.bonus_ttd,
                  pe.other_allowances_ttd, pe.other_deductions_ttd, pe.employee_id,
-                 e.pay_frequency
+                 e.pay_frequency, e.employment_type
           FROM hr_payroll_entries pe
           JOIN hr_employees e ON e.id = pe.employee_id
           WHERE pe.payroll_run_id = $1 AND pe.status = 'INCLUDED'
         `, [pp.data.id]).then((r) => r.rows);
 
         // Calculate statutory deductions per entry
+        // CONTRACT workers: flat payment, no statutory deductions (NIS/Health Surcharge/PAYE)
+        // They are self-employed for NIS purposes and handle their own tax obligations.
         let totalGross = 0, totalNet = 0, totalNisEmp = 0, totalNisEr = 0,
             totalPaye = 0, totalHS = 0;
 
@@ -222,7 +225,10 @@ hrPayrollRouter.post('/runs/:id/calculate', async (req: Request, res: Response, 
                       + parseFloat(String(entry.bonus_ttd ?? 0))
                       + parseFloat(String(entry.other_allowances_ttd ?? 0));
 
-          const calc = calculateTTPayrollForFrequency(gross, entry.pay_frequency ?? 'MONTHLY');
+          const isContractor = entry.employment_type === 'CONTRACT';
+          const calc = isContractor
+            ? { nisEmployeeTtd: 0, nisEmployerTtd: 0, healthSurchargeTtd: 0, payeTtd: 0, totalDeductionsTtd: 0 }
+            : calculateTTPayrollForFrequency(gross, entry.pay_frequency ?? 'MONTHLY');
 
           // Pull active advance recovery amounts for this employee
           const advanceRows = await c.query<{ id: string; recovery_installment_ttd: string; outstanding_ttd: string }>(

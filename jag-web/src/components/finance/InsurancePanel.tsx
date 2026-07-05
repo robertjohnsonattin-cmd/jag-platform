@@ -1,7 +1,10 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { financeApi } from '../../api/finance'
+import { imsApi } from '../../api/ims'
+import { propertiesApi } from '../../api/properties'
+import { jabcoApi } from '../../api/jabco'
 import { entityName, fmtTTD, fmtDate } from '../../lib/entities'
 import type {
   InsurancePolicy, InsurancePremium, InsuranceClaim as _InsuranceClaim,
@@ -17,7 +20,7 @@ const POLICY_TYPES: InsurancePolicyType[] = [
   'BUSINESS_INTERRUPTION','MARINE','PROFESSIONAL_INDEMNITY',
   'SURETY_BOND','PERFORMANCE_BOND','PROPERTY','OTHER',
 ]
-const ASSET_TYPES: InsuranceAssetType[] = ['VEHICLE','PROPERTY','BUSINESS','PERSON','OTHER']
+const ASSET_TYPES: InsuranceAssetType[] = ['VEHICLE','PROPERTY','BUSINESS','PERSON','PROJECT','OTHER']
 const PREM_FREQS: PremiumFrequency[] = ['MONTHLY','QUARTERLY','SEMI_ANNUAL','ANNUAL','ONE_OFF']
 const CLAIM_STATUS_STYLES: Record<ClaimStatus, string> = {
   SUBMITTED:    'bg-blue-900/50 text-blue-300 border border-blue-700',
@@ -62,6 +65,7 @@ function AddPolicyModal({ onClose, onCreated }: { onClose: () => void; onCreated
     broker_name: '',
     policy_type: 'BUILDING' as InsurancePolicyType,
     insured_asset_type: 'PROPERTY' as InsuranceAssetType,
+    insured_asset_ref: '',
     sub_type: '',
     coverage_amount: '',
     currency: 'TTD',
@@ -73,7 +77,23 @@ function AddPolicyModal({ onClose, onCreated }: { onClose: () => void; onCreated
     notes: '',
   })
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
-    setForm(f => ({ ...f, [k]: e.target.value }))
+    setForm(f => ({ ...f, [k]: e.target.value, ...(k === 'insured_asset_type' ? { insured_asset_ref: '' } : {}) }))
+
+  const { data: vehicles = [] } = useQuery({
+    queryKey: ['ims', 'vehicles', 'picker'],
+    queryFn: () => imsApi.getVehicles({ include_disposed: 'false', limit: 500 }).then(r => r.vehicles),
+    enabled: form.insured_asset_type === 'VEHICLE',
+  })
+  const { data: properties = [] } = useQuery({
+    queryKey: ['properties', 'picker'],
+    queryFn: () => propertiesApi.getProperties({ limit: 500 }),
+    enabled: form.insured_asset_type === 'PROPERTY',
+  })
+  const { data: projects = [] } = useQuery({
+    queryKey: ['jabco-projects', 'picker'],
+    queryFn: () => jabcoApi.getProjects({ limit: 500 }).then(r => r.projects),
+    enabled: form.insured_asset_type === 'PROJECT',
+  })
 
   const { mutate, isPending, error } = useMutation({
     mutationFn: () => financeApi.createPolicy({
@@ -83,6 +103,7 @@ function AddPolicyModal({ onClose, onCreated }: { onClose: () => void; onCreated
       broker_name: form.broker_name || undefined,
       policy_type: form.policy_type,
       insured_asset_type: form.insured_asset_type,
+      insured_asset_ref: form.insured_asset_ref || undefined,
       sub_type: form.sub_type || undefined,
       coverage_amount: Number(form.coverage_amount),
       currency: form.currency || 'TTD',
@@ -125,6 +146,33 @@ function AddPolicyModal({ onClose, onCreated }: { onClose: () => void; onCreated
               </select>
             </div>
           </div>
+          {form.insured_asset_type === 'VEHICLE' && (
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">{t('insurance.linkedVehicle')} <span className="text-slate-500 text-xs">({t('common.optional')})</span></label>
+              <select value={form.insured_asset_ref} onChange={set('insured_asset_ref')} className={cls}>
+                <option value="">{t('insurance.noSpecificAsset')}</option>
+                {vehicles.map(v => <option key={v.id} value={v.id}>{v.registration_number} — {v.make} {v.model}</option>)}
+              </select>
+            </div>
+          )}
+          {form.insured_asset_type === 'PROPERTY' && (
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">{t('insurance.linkedProperty')} <span className="text-slate-500 text-xs">({t('common.optional')})</span></label>
+              <select value={form.insured_asset_ref} onChange={set('insured_asset_ref')} className={cls}>
+                <option value="">{t('insurance.noSpecificAsset')}</option>
+                {properties.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+            </div>
+          )}
+          {form.insured_asset_type === 'PROJECT' && (
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">{t('insurance.linkedProject')} <span className="text-slate-500 text-xs">({t('common.optional')})</span></label>
+              <select value={form.insured_asset_ref} onChange={set('insured_asset_ref')} className={cls}>
+                <option value="">{t('insurance.noSpecificAsset')}</option>
+                {projects.map(p => <option key={p.id} value={p.id}>{p.project_code} — {p.name}</option>)}
+              </select>
+            </div>
+          )}
           <div>
             <label className="block text-xs text-slate-400 mb-1">{t('insurance.subType')} <span className="text-slate-500 text-xs">({t('common.optional')})</span></label>
             <input value={form.sub_type} onChange={set('sub_type')} className={cls} placeholder="e.g. Third-party, All-risks, Comprehensive" />
@@ -576,6 +624,41 @@ export default function InsurancePanel() {
     queryFn: () => financeApi.getExpiringPolicies(),
   })
 
+  // Resolve insured_asset_ref → a human label (plate/property/project) for display.
+  // Only fetched if at least one loaded policy references that asset type.
+  const hasVehicleRef  = policies.some(p => p.insured_asset_type === 'VEHICLE'  && p.insured_asset_ref)
+  const hasPropertyRef = policies.some(p => p.insured_asset_type === 'PROPERTY' && p.insured_asset_ref)
+  const hasProjectRef  = policies.some(p => p.insured_asset_type === 'PROJECT'  && p.insured_asset_ref)
+
+  const { data: vehicles = [] } = useQuery({
+    queryKey: ['ims', 'vehicles', 'picker'],
+    queryFn: () => imsApi.getVehicles({ include_disposed: 'true', limit: 500 }).then(r => r.vehicles),
+    enabled: hasVehicleRef,
+  })
+  const { data: properties = [] } = useQuery({
+    queryKey: ['properties', 'picker'],
+    queryFn: () => propertiesApi.getProperties({ limit: 500 }),
+    enabled: hasPropertyRef,
+  })
+  const { data: projects = [] } = useQuery({
+    queryKey: ['jabco-projects', 'picker'],
+    queryFn: () => jabcoApi.getProjects({ limit: 500 }).then(r => r.projects),
+    enabled: hasProjectRef,
+  })
+
+  const assetLabel = useMemo(() => {
+    const vehicleMap = new Map(vehicles.map(v => [v.id, `${v.registration_number} (${v.make} ${v.model})`]))
+    const propertyMap = new Map(properties.map(p => [p.id, p.name]))
+    const projectMap = new Map(projects.map(p => [p.id, `${p.project_code} — ${p.name}`]))
+    return (p: InsurancePolicy): string | null => {
+      if (!p.insured_asset_ref) return null
+      if (p.insured_asset_type === 'VEHICLE')  return vehicleMap.get(p.insured_asset_ref) ?? null
+      if (p.insured_asset_type === 'PROPERTY') return propertyMap.get(p.insured_asset_ref) ?? null
+      if (p.insured_asset_type === 'PROJECT')  return projectMap.get(p.insured_asset_ref) ?? null
+      return null
+    }
+  }, [vehicles, properties, projects])
+
   const refresh = () => void qc.invalidateQueries({ queryKey: ['finance', 'insurance'] })
 
   const totalCoverage = policies.reduce((s, p) => s + parseFloat(p.coverage_amount_ttd), 0)
@@ -644,6 +727,7 @@ export default function InsurancePanel() {
               <tr className="bg-slate-700/50 text-slate-400 text-xs uppercase tracking-wide">
                 <th className="text-left px-4 py-2">{t('insurance.colInsurer')}</th>
                 <th className="text-left px-4 py-2">{t('insurance.colType')}</th>
+                <th className="text-left px-4 py-2">{t('insurance.colAsset')}</th>
                 <th className="text-left px-4 py-2">{t('insurance.colEntity')}</th>
                 <th className="text-right px-4 py-2">{t('insurance.colCoverage')}</th>
                 <th className="text-right px-4 py-2">{t('insurance.colPremium')}</th>
@@ -665,6 +749,9 @@ export default function InsurancePanel() {
                     <td className="px-4 py-3 text-slate-400">
                       {t(`insurance.policyTypes.${p.policy_type}`)}
                       {p.sub_type && <span className="text-xs text-slate-500 ml-1">({p.sub_type})</span>}
+                    </td>
+                    <td className="px-4 py-3 text-slate-400">
+                      {assetLabel(p) ?? <span className="text-slate-600">{t(`insurance.assetTypes.${p.insured_asset_type}`)}</span>}
                     </td>
                     <td className="px-4 py-3 text-slate-400">{entityName(p.owner_entity_id)}</td>
                     <td className="px-4 py-3 text-right font-mono text-slate-200">{fmtTTD(p.coverage_amount_ttd)}</td>

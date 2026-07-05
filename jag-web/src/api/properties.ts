@@ -1,6 +1,6 @@
 import { api } from './client'
 import type {
-  Property, PropertyTenant, PipelineItem, MaintenanceRequest,
+  Property, PropertyTenant, PipelineItem,
   RentPayment, RentReceipt, UtilityBill, VendorInvoice, Lease, Mortgage,
   PropertyTaxRecord, Inspection, ArrearsRecord, LeaseExpiryRecord,
   FinancialSummary, PropertyDocument, UtilityAccount, Unit, UnitPhoto, PropertyValuationHistory,
@@ -35,9 +35,6 @@ export const propertiesApi = {
 
   getMortgages: (propertyId: string) =>
     api.get<Mortgage[]>(`/properties/${propertyId}/mortgage`),
-
-  getMaintenance: (propertyId: string) =>
-    api.get<MaintenanceRequest[]>(`/properties/${propertyId}/maintenance`),
 
   getUtilities: (propertyId: string, params?: { page?: number; limit?: number }) =>
     api.get<{ utility_bills: UtilityBill[]; pagination: { page: number; limit: number; total: number; pages: number } }>(
@@ -83,12 +80,6 @@ export const propertiesApi = {
 
   createMortgage: (propertyId: string, body: Record<string, unknown>) =>
     api.post<Mortgage>(`/properties/${propertyId}/mortgage`, body),
-
-  createMaintenance: (propertyId: string, body: Record<string, unknown>) =>
-    api.post<MaintenanceRequest>(`/properties/${propertyId}/maintenance`, body),
-
-  updateMaintenance: (propertyId: string, id: string, body: Record<string, unknown>) =>
-    api.patch<MaintenanceRequest>(`/properties/${propertyId}/maintenance/${id}`, body),
 
   createUtility: (propertyId: string, body: Record<string, unknown>) =>
     api.post<UtilityBill>(`/properties/${propertyId}/utilities`, body),

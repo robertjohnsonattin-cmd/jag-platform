@@ -31,7 +31,7 @@ export const insuranceRouter = Router();
 // ── Schemas ────────────────────────────────────────────────────────────────────
 
 const POLICY_TYPES   = ['PROPERTY','VEHICLE','LIABILITY','LIFE','HEALTH','BUSINESS_INTERRUPTION','MARINE','PROFESSIONAL_INDEMNITY','SURETY_BOND','PERFORMANCE_BOND','BUILDING','CONTENTS','FLOOD','FIRE','COMPREHENSIVE','OTHER'] as const;
-const ASSET_TYPES    = ['VEHICLE','PROPERTY','BUSINESS','PERSON','OTHER'] as const;
+const ASSET_TYPES    = ['VEHICLE','PROPERTY','BUSINESS','PERSON','PROJECT','OTHER'] as const;
 const PREM_FREQS     = ['MONTHLY','QUARTERLY','SEMI_ANNUAL','ANNUAL','ONE_OFF'] as const;
 const PREM_STATUSES  = ['DUE','PAID','OVERDUE','WAIVED'] as const;
 const CLAIM_STATUSES = ['SUBMITTED','UNDER_REVIEW','APPROVED','REJECTED','SETTLED','WITHDRAWN'] as const;

@@ -43,7 +43,7 @@ const VacateSchema = z.object({
 
 renewalsRouter.get('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const ownerId = (req as Request & { user?: { jag_user_id?: string } }).user?.jag_user_id;
+    const ownerId = req.rlsCtx.userId;
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
 
     const rows = await withOwnerRLS(propertiesPool, ownerId, async client => {
@@ -68,7 +68,7 @@ renewalsRouter.get('/', async (req: Request, res: Response, next: NextFunction) 
 // ── Batch: send D-60/D-30/D-14 renewal notices ───────────────────────────────
 renewalsRouter.post('/send-notices', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const ownerId = (req as Request & { user?: { jag_user_id?: string } }).user?.jag_user_id;
+    const ownerId = req.rlsCtx.userId;
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
 
     const MILESTONES: Record<number, 'd60_sent_at' | 'd30_sent_at' | 'd14_sent_at'> = { 60: 'd60_sent_at', 30: 'd30_sent_at', 14: 'd14_sent_at' };
@@ -116,7 +116,7 @@ renewalsRouter.post('/send-notices', async (req: Request, res: Response, next: N
 
 renewalsRouter.post('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const ownerId = (req as Request & { user?: { jag_user_id?: string } }).user?.jag_user_id;
+    const ownerId = req.rlsCtx.userId;
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
     const body = CreateRenewalSchema.parse(req.body);
 
@@ -135,7 +135,7 @@ renewalsRouter.post('/', async (req: Request, res: Response, next: NextFunction)
 
 renewalsRouter.patch('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const ownerId = (req as Request & { user?: { jag_user_id?: string } }).user?.jag_user_id;
+    const ownerId = req.rlsCtx.userId;
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
     const { id } = IdParam.parse(req.params);
     const body = PatchRenewalSchema.parse(req.body);
@@ -166,7 +166,7 @@ renewalsRouter.patch('/:id', async (req: Request, res: Response, next: NextFunct
 
 renewalsRouter.post('/:id/renew', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const ownerId = (req as Request & { user?: { jag_user_id?: string } }).user?.jag_user_id;
+    const ownerId = req.rlsCtx.userId;
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
     const { id } = IdParam.parse(req.params);
     const body = RenewSchema.parse(req.body);
@@ -210,7 +210,7 @@ renewalsRouter.post('/:id/renew', async (req: Request, res: Response, next: Next
 
 renewalsRouter.post('/:id/vacate', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const ownerId = (req as Request & { user?: { jag_user_id?: string } }).user?.jag_user_id;
+    const ownerId = req.rlsCtx.userId;
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
     const { id } = IdParam.parse(req.params);
     const body = VacateSchema.parse(req.body);

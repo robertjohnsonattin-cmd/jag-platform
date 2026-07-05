@@ -52,7 +52,7 @@ const SendAppLinkSchema = z.object({
 
 enquiriesRouter.get('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const ownerId = (req as Request & { user?: { jag_user_id?: string } }).user?.jag_user_id;
+    const ownerId = req.rlsCtx.userId;
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
 
     const unitId = req.query['unit_id'] as string | undefined;
@@ -81,7 +81,7 @@ enquiriesRouter.get('/', async (req: Request, res: Response, next: NextFunction)
 
 enquiriesRouter.post('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const ownerId = (req as Request & { user?: { jag_user_id?: string } }).user?.jag_user_id;
+    const ownerId = req.rlsCtx.userId;
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
     const body = CreateEnquirySchema.parse(req.body);
 
@@ -143,7 +143,7 @@ enquiriesRouter.post('/', async (req: Request, res: Response, next: NextFunction
 
 enquiriesRouter.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const ownerId = (req as Request & { user?: { jag_user_id?: string } }).user?.jag_user_id;
+    const ownerId = req.rlsCtx.userId;
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
     const { id } = IdParam.parse(req.params);
 
@@ -171,7 +171,7 @@ enquiriesRouter.get('/:id', async (req: Request, res: Response, next: NextFuncti
 
 enquiriesRouter.patch('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const ownerId = (req as Request & { user?: { jag_user_id?: string } }).user?.jag_user_id;
+    const ownerId = req.rlsCtx.userId;
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
     const { id } = IdParam.parse(req.params);
     const body = PatchEnquirySchema.parse(req.body);
@@ -198,7 +198,7 @@ enquiriesRouter.patch('/:id', async (req: Request, res: Response, next: NextFunc
 
 enquiriesRouter.delete('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const ownerId = (req as Request & { user?: { jag_user_id?: string } }).user?.jag_user_id;
+    const ownerId = req.rlsCtx.userId;
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
     const { id } = IdParam.parse(req.params);
 
@@ -211,7 +211,7 @@ enquiriesRouter.delete('/:id', async (req: Request, res: Response, next: NextFun
 
 enquiriesRouter.post('/:id/send-reply', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const ownerId = (req as Request & { user?: { jag_user_id?: string } }).user?.jag_user_id;
+    const ownerId = req.rlsCtx.userId;
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
     const { id } = IdParam.parse(req.params);
     const { body: msgBody } = SendReplySchema.parse(req.body);
@@ -240,7 +240,7 @@ enquiriesRouter.post('/:id/send-reply', async (req: Request, res: Response, next
 
 enquiriesRouter.post('/:id/send-app-link', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const ownerId = (req as Request & { user?: { jag_user_id?: string } }).user?.jag_user_id;
+    const ownerId = req.rlsCtx.userId;
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
     const { id } = IdParam.parse(req.params);
     const { application_link } = SendAppLinkSchema.parse(req.body);

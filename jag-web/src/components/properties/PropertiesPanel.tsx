@@ -10,7 +10,7 @@ import FileUpload from '../ui/FileUpload'
 import ConfirmDeleteModal from '../ui/ConfirmDeleteModal'
 import type { InsurancePolicy } from '../../types/finance'
 import type {
-  Property, MaintenanceRequest, VendorInvoice,
+  Property, VendorInvoice,
   PropertyTaxRecord, Inspection,
   Lease, PropertyDocument,
   UtilityAccount, Unit, UnitPhoto, RentPayment, RentReceipt,
@@ -32,21 +32,6 @@ function Empty({ message = 'No records found' }: { message?: string }) {
   return <p className="text-sm text-slate-500 py-6 text-center">{message}</p>
 }
 
-const PRIORITY_STYLES: Record<string, string> = {
-  URGENT: 'bg-red-900/50 text-red-300 border-red-700',
-  HIGH:   'bg-orange-900/50 text-orange-300 border-orange-700',
-  MEDIUM: 'bg-yellow-900/50 text-yellow-300 border-yellow-700',
-  LOW:    'bg-slate-700 text-slate-400 border-slate-600',
-}
-
-const STATUS_STYLES_MAINT: Record<string, string> = {
-  OPEN:        'bg-red-900/50 text-red-300 border-red-700',
-  ASSIGNED:    'bg-blue-900/50 text-blue-300 border-blue-700',
-  IN_PROGRESS: 'bg-yellow-900/50 text-yellow-300 border-yellow-700',
-  COMPLETED:   'bg-green-900/50 text-green-300 border-green-700',
-  CLOSED:      'bg-slate-700 text-slate-500 border-slate-600',
-}
-
 const INVOICE_STATUS_STYLES: Record<string, string> = {
   RECEIVED: 'bg-yellow-900/50 text-yellow-300 border-yellow-700',
   APPROVED: 'bg-blue-900/50 text-blue-300 border-blue-700',
@@ -56,7 +41,6 @@ const INVOICE_STATUS_STYLES: Record<string, string> = {
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
 const PROP_TYPES = ['RESIDENTIAL', 'COMMERCIAL', 'LAND', 'MIXED', 'AGRICULTURAL'] as const
 const TENURE_TYPES = ['FREEHOLD', 'LEASEHOLD', 'STATE_LAND'] as const
-const MAINT_CATS = ['PLUMBING','ELECTRICAL','STRUCTURAL','HVAC','APPLIANCE','PEST_CONTROL','SECURITY','GARDEN','PAINTING','ROOFING','OTHER'] as const
 // BANK_TRANSFER first — primary method for JAG Properties rent collection
 // WIPAY kept last for display of historical records only
 const PAY_METHODS = ['BANK_TRANSFER','CASH','CHEQUE','OTHER','WIPAY'] as const
@@ -641,160 +625,6 @@ function ReceiptModal({ propertyId, paymentId, onClose }: {
             </p>
           </>
         )}
-      </div>
-    </div>
-  )
-}
-
-// ─── Add Maintenance Modal ────────────────────────────────────────────────────
-function AddMaintenanceModal({ propertyId, onClose, onCreated }: { propertyId: string; onClose: () => void; onCreated: () => void }) {
-  const { t } = useTranslation()
-  const [form, setForm] = useState({
-    category: 'PLUMBING' as typeof MAINT_CATS[number],
-    description: '', priority: 'MEDIUM',
-    reported_date: new Date().toISOString().slice(0,10),
-    assigned_to: '', estimated_cost: '', scheduled_date: '',
-  })
-  const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
-    setForm(f => ({ ...f, [k]: e.target.value }))
-
-  const { mutate, isPending, error } = useMutation({
-    mutationFn: () => propertiesApi.createMaintenance(propertyId, {
-      category: form.category,
-      description: form.description,
-      priority: form.priority,
-      reported_date: form.reported_date,
-      assigned_to: form.assigned_to || undefined,
-      estimated_cost: form.estimated_cost ? Number(form.estimated_cost) : undefined,
-      scheduled_date: form.scheduled_date || undefined,
-      idempotency_key: crypto.randomUUID(),
-    }),
-    onSuccess: () => { onCreated(); onClose() },
-  })
-
-  return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
-      <div className="bg-slate-800 border border-slate-700 rounded-xl w-full max-w-md p-6 shadow-2xl">
-        <h2 className="text-lg font-semibold mb-4 text-white">{t('propertiesPanel.addMaintenance')}</h2>
-        <div className="space-y-3">
-          <div className="flex gap-3">
-            <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">Category</label>
-              <select value={form.category} onChange={set('category')} className={cls}>
-                {MAINT_CATS.map(c => <option key={c} value={c}>{t(`propertiesPanel.maintenanceCategories.${c}`, c.replace(/_/g,' '))}</option>)}
-              </select>
-            </div>
-            <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.priority')}</label>
-              <select value={form.priority} onChange={set('priority')} className={cls}>
-                {['LOW','MEDIUM','HIGH','URGENT'].map(p => <option key={p} value={p}>{t(`propertiesPanel.priorities.${p}`, p)}</option>)}
-              </select>
-            </div>
-          </div>
-          <div>
-            <label className="block text-xs text-slate-400 mb-1">{t('common.description')} *</label>
-            <textarea value={form.description} onChange={set('description')} rows={3} className={cls} placeholder={t('propertiesPanel.describeIssue')} />
-          </div>
-          <div className="flex gap-3">
-            <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.reportedDate')}</label>
-              <input type="date" value={form.reported_date} onChange={set('reported_date')} className={cls} />
-            </div>
-            <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.scheduledDate')}</label>
-              <input type="date" value={form.scheduled_date} onChange={set('scheduled_date')} className={cls} />
-            </div>
-          </div>
-          <div className="flex gap-3">
-            <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.assignedTo')}</label>
-              <input value={form.assigned_to} onChange={set('assigned_to')} className={cls} placeholder="Contractor name" />
-            </div>
-            <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.estCost')}</label>
-              <input type="number" step="0.01" value={form.estimated_cost} onChange={set('estimated_cost')} className={cls} />
-            </div>
-          </div>
-          {error && <p className="text-red-400 text-xs">{error instanceof Error ? error.message : 'Failed.'}</p>}
-        </div>
-        <div className="flex gap-3 mt-5">
-          <button onClick={() => mutate()} disabled={isPending || !form.description}
-            className="flex-1 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-sm rounded-lg transition-colors">
-            {isPending ? t('common.saving') : t('propertiesPanel.addRequest')}
-          </button>
-          <button onClick={onClose} className="px-4 py-2 text-slate-400 hover:text-white text-sm transition-colors">{t('common.cancel')}</button>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-// ─── Update Maintenance Status Modal ─────────────────────────────────────────
-function UpdateMaintModal({ propertyId, req, onClose, onUpdated }: {
-  propertyId: string; req: MaintenanceRequest; onClose: () => void; onUpdated: () => void
-}) {
-  const { t } = useTranslation()
-  const [form, setForm] = useState({
-    status: req.status,
-    assigned_to: req.assigned_to ?? '',
-    actual_cost: req.actual_cost ?? '',
-    completed_date: req.completed_date ?? '',
-    completion_notes: req.completion_notes ?? '',
-  })
-  const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
-    setForm(f => ({ ...f, [k]: e.target.value }))
-
-  const { mutate, isPending, error } = useMutation({
-    mutationFn: () => propertiesApi.updateMaintenance(propertyId, req.id, {
-      status: form.status,
-      assigned_to: form.assigned_to || null,
-      actual_cost: form.actual_cost ? Number(form.actual_cost) : null,
-      completed_date: form.completed_date || null,
-      completion_notes: form.completion_notes || null,
-    }),
-    onSuccess: () => { onUpdated(); onClose() },
-  })
-
-  return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
-      <div className="bg-slate-800 border border-slate-700 rounded-xl w-full max-w-md p-6 shadow-2xl">
-        <h2 className="text-base font-semibold mb-3 text-white">{t('propertiesPanel.updateMaintenance')} — <span className="text-slate-400 font-normal text-sm truncate">{req.description}</span></h2>
-        <div className="space-y-3">
-          <div>
-            <label className="block text-xs text-slate-400 mb-1">{t('common.status')}</label>
-            <select value={form.status} onChange={set('status')} className={cls}>
-              {['OPEN','ASSIGNED','IN_PROGRESS','AWAITING_PARTS','COMPLETED','CLOSED','CANNOT_REPRODUCE'].map(s =>
-                <option key={s} value={s}>{t(`propertiesPanel.maintenanceStatuses.${s}`, s.replace(/_/g,' '))}</option>
-              )}
-            </select>
-          </div>
-          <div className="flex gap-3">
-            <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.assignedTo')}</label>
-              <input value={form.assigned_to} onChange={set('assigned_to')} className={cls} />
-            </div>
-            <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.actualCost')}</label>
-              <input type="number" step="0.01" value={form.actual_cost} onChange={set('actual_cost')} className={cls} />
-            </div>
-          </div>
-          <div>
-            <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.completedDate')}</label>
-            <input type="date" value={form.completed_date} onChange={set('completed_date')} className={cls} />
-          </div>
-          <div>
-            <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.completionNotes')}</label>
-            <textarea value={form.completion_notes} onChange={set('completion_notes')} rows={2} className={cls} />
-          </div>
-          {error && <p className="text-red-400 text-xs">{error instanceof Error ? error.message : 'Failed.'}</p>}
-        </div>
-        <div className="flex gap-3 mt-5">
-          <button onClick={() => mutate()} disabled={isPending}
-            className="flex-1 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-sm rounded-lg transition-colors">
-            {isPending ? t('common.saving') : t('propertiesPanel.update')}
-          </button>
-          <button onClick={onClose} className="px-4 py-2 text-slate-400 hover:text-white text-sm transition-colors">{t('common.cancel')}</button>
-        </div>
       </div>
     </div>
   )
@@ -2142,7 +1972,7 @@ function EditPropertyModal({ property, onClose, onSaved }: { property: Property;
   )
 }
 
-type DetailTab = 'overview' | 'leases' | 'payments' | 'maintenance' | 'utilities' | 'invoices' | 'insurance' | 'tax' | 'inspections' | 'financials' | 'documents' | 'units'
+type DetailTab = 'overview' | 'leases' | 'payments' | 'utilities' | 'invoices' | 'insurance' | 'tax' | 'inspections' | 'financials' | 'documents' | 'units'
 
 function ValuationHistoryModal({ id, name, onClose }: { id: string; name: string; onClose: () => void }) {
   const { t } = useTranslation()
@@ -2252,8 +2082,6 @@ function PropertyDetail({ property, onDeleted }: { property: Property; onDeleted
   const [showAddLease, setShowAddLease] = useState(false)
   const [showRecordPayment, setShowRecordPayment] = useState(false)
   const [receiptPaymentId, setReceiptPaymentId] = useState<string | null>(null)
-  const [showAddMaint, setShowAddMaint] = useState(false)
-  const [updatingMaint, setUpdatingMaint] = useState<MaintenanceRequest | null>(null)
   const [showAddMortgage, setShowAddMortgage] = useState(false)
   const [showAddUtility, setShowAddUtility] = useState(false)
   const [showAddInvoice, setShowAddInvoice] = useState(false)
@@ -2289,11 +2117,6 @@ function PropertyDetail({ property, onDeleted }: { property: Property; onDeleted
     queryKey: ['properties', property.id, 'mortgages'],
     queryFn: () => propertiesApi.getMortgages(property.id),
     enabled: detailTab === 'overview',
-  })
-  const { data: maintenance = [] } = useQuery({
-    queryKey: ['properties', property.id, 'maintenance'],
-    queryFn: () => propertiesApi.getMaintenance(property.id),
-    enabled: detailTab === 'maintenance',
   })
   const { data: utilities = [] } = useQuery({
     queryKey: ['properties', property.id, 'utilities'],
@@ -2353,7 +2176,6 @@ function PropertyDetail({ property, onDeleted }: { property: Property; onDeleted
     { id: 'overview',    label: t('propertiesPanel.detailTabs.overview') },
     { id: 'leases',      label: t('propertiesPanel.detailTabs.leases') },
     { id: 'payments',    label: t('propertiesPanel.detailTabs.payments') },
-    { id: 'maintenance', label: t('propertiesPanel.detailTabs.maintenance') },
     { id: 'utilities',   label: t('propertiesPanel.detailTabs.utilities') },
     { id: 'invoices',    label: t('propertiesPanel.detailTabs.invoices') },
     { id: 'insurance',   label: t('propertiesPanel.detailTabs.insurance') },
@@ -2576,42 +2398,6 @@ function PropertyDetail({ property, onDeleted }: { property: Property; onDeleted
                     ))}
                   </tbody>
                 </table>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Maintenance */}
-        {detailTab === 'maintenance' && (
-          <div>
-            <div className="flex justify-end mb-3">
-              <button onClick={() => setShowAddMaint(true)}
-                className="text-xs px-3 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors">
-                + Add Request
-              </button>
-            </div>
-            {maintenance.length === 0 ? <Empty /> : (
-              <div className="space-y-2">
-                {maintenance.map((m: MaintenanceRequest) => (
-                  <div key={m.id} className="p-3 bg-slate-700/30 rounded">
-                    <div className="flex justify-between items-start mb-1">
-                      <p className="text-sm text-slate-100">{m.description}</p>
-                      <div className="flex gap-1.5 ml-2 shrink-0 items-center">
-                        <span className={`text-xs px-1.5 py-0.5 rounded border ${PRIORITY_STYLES[m.priority]}`}>{m.priority}</span>
-                        <span className={`text-xs px-1.5 py-0.5 rounded border ${STATUS_STYLES_MAINT[m.status] ?? 'border-slate-600 text-slate-400'}`}>{m.status}</span>
-                        <button onClick={() => setUpdatingMaint(m)}
-                          className="text-xs text-slate-500 hover:text-blue-400 ml-1 transition-colors">Edit</button>
-                      </div>
-                    </div>
-                    <div className="flex gap-3 text-xs text-slate-400">
-                      <span>{m.category}</span>
-                      <span>Reported: {fmtDate(m.reported_date)}</span>
-                      {m.assigned_to && <span>→ {m.assigned_to}</span>}
-                      {m.estimated_cost && <span>Est: {fmtTTD(m.estimated_cost)}</span>}
-                      {m.actual_cost && <span>Actual: {fmtTTD(m.actual_cost)}</span>}
-                    </div>
-                  </div>
-                ))}
               </div>
             )}
           </div>
@@ -3097,10 +2883,6 @@ function PropertyDetail({ property, onDeleted }: { property: Property; onDeleted
           setReceiptPaymentId(paymentId)
         }} />}
       {receiptPaymentId && <ReceiptModal propertyId={property.id} paymentId={receiptPaymentId} onClose={() => setReceiptPaymentId(null)} />}
-      {showAddMaint     && <AddMaintenanceModal propertyId={property.id} onClose={() => setShowAddMaint(false)}
-        onCreated={() => void qc.invalidateQueries({ queryKey: ['properties', property.id, 'maintenance'] })} />}
-      {updatingMaint    && <UpdateMaintModal propertyId={property.id} req={updatingMaint} onClose={() => setUpdatingMaint(null)}
-        onUpdated={() => void qc.invalidateQueries({ queryKey: ['properties', property.id, 'maintenance'] })} />}
       {showAddMortgage  && <AddMortgageModal propertyId={property.id} onClose={() => setShowAddMortgage(false)}
         onCreated={() => { void qc.invalidateQueries({ queryKey: ['properties', property.id, 'mortgages'] }); refreshTab('overview') }} />}
       {showAddUtility   && <AddUtilityModal propertyId={property.id} onClose={() => setShowAddUtility(false)}

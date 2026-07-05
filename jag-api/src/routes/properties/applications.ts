@@ -69,7 +69,7 @@ const docUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 
 
 applicationsRouter.get('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const ownerId = (req as Request & { user?: { jag_user_id?: string } }).user?.jag_user_id;
+    const ownerId = req.rlsCtx.userId;
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
 
     const unitId = req.query['unit_id'] as string | undefined;
@@ -98,7 +98,7 @@ applicationsRouter.get('/', async (req: Request, res: Response, next: NextFuncti
 
 applicationsRouter.post('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const ownerId = (req as Request & { user?: { jag_user_id?: string } }).user?.jag_user_id;
+    const ownerId = req.rlsCtx.userId;
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
     const body = CreateApplicationSchema.parse(req.body);
 
@@ -129,7 +129,7 @@ applicationsRouter.post('/', async (req: Request, res: Response, next: NextFunct
 
 applicationsRouter.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const ownerId = (req as Request & { user?: { jag_user_id?: string } }).user?.jag_user_id;
+    const ownerId = req.rlsCtx.userId;
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
     const { id } = IdParam.parse(req.params);
 
@@ -151,7 +151,7 @@ applicationsRouter.get('/:id', async (req: Request, res: Response, next: NextFun
 
 applicationsRouter.patch('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const ownerId = (req as Request & { user?: { jag_user_id?: string } }).user?.jag_user_id;
+    const ownerId = req.rlsCtx.userId;
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
     const { id } = IdParam.parse(req.params);
     const body = PatchApplicationSchema.parse(req.body);
@@ -178,7 +178,7 @@ applicationsRouter.patch('/:id', async (req: Request, res: Response, next: NextF
 
 applicationsRouter.post('/:id/decide', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const ownerId = (req as Request & { user?: { jag_user_id?: string } }).user?.jag_user_id;
+    const ownerId = req.rlsCtx.userId;
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
     const { id } = IdParam.parse(req.params);
     const { decision, rejection_reason } = DecideSchema.parse(req.body);
@@ -211,7 +211,7 @@ applicationsRouter.post('/:id/decide', async (req: Request, res: Response, next:
 // Fires jag_onb_lease_ready template when tenancy agreement is sent to tenant for signing
 applicationsRouter.post('/:id/send-lease-signed', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const ownerId = (req as Request & { user?: { jag_user_id?: string } }).user?.jag_user_id;
+    const ownerId = req.rlsCtx.userId;
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
     const { id } = IdParam.parse(req.params);
 
@@ -247,7 +247,7 @@ applicationsRouter.post('/:id/send-lease-signed', async (req: Request, res: Resp
 // POST /:id/upload-doc — multipart/form-data (file + doc_type)
 applicationsRouter.post('/:id/upload-doc', docUpload.single('file'), async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const ownerId = (req as Request & { user?: { jag_user_id?: string } }).user?.jag_user_id;
+    const ownerId = req.rlsCtx.userId;
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
     const { id } = IdParam.parse(req.params);
     const file = req.file;
@@ -278,7 +278,7 @@ applicationsRouter.post('/:id/upload-doc', docUpload.single('file'), async (req:
 // GET /:id/documents — list application docs
 applicationsRouter.get('/:id/documents', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const ownerId = (req as Request & { user?: { jag_user_id?: string } }).user?.jag_user_id;
+    const ownerId = req.rlsCtx.userId;
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
     const { id } = IdParam.parse(req.params);
 
@@ -298,7 +298,7 @@ applicationsRouter.get('/:id/documents', async (req: Request, res: Response, nex
 // GET /:id/documents/:docId/download — stream application doc from MinIO
 applicationsRouter.get('/:id/documents/:docId/download', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const ownerId = (req as Request & { user?: { jag_user_id?: string } }).user?.jag_user_id;
+    const ownerId = req.rlsCtx.userId;
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
     const { id } = IdParam.parse(req.params);
     const { docId } = z.object({ docId: z.string().uuid() }).parse(req.params);
@@ -342,7 +342,7 @@ const DOC_TYPE_MAP: Record<string, string> = {
 // copies all prop_application_documents into prop_tenant_documents.
 applicationsRouter.post('/:id/create-tenant', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const ownerId = (req as Request & { user?: { jag_user_id?: string } }).user?.jag_user_id;
+    const ownerId = req.rlsCtx.userId;
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
     const { id } = IdParam.parse(req.params);
     const body = CreateTenantFromAppSchema.parse(req.body);

@@ -3,6 +3,7 @@ import type {
   CompaniesResponse, Company,
   ContactsResponse, Contact,
   Interaction,
+  InteractionType,
   CreateCompanyPayload,
   UpdateCompanyPayload,
   CreateContactPayload,
@@ -52,6 +53,16 @@ export const crmApi = {
 
   logInteraction: (data: LogInteractionPayload): Promise<Interaction> =>
     client.post('/crm/interactions', data),
+
+  // Fire-and-forget log for Call/WhatsApp/Email quick-action links — records intent
+  // to reach the contact, not confirmed delivery (mailto:/tel:/wa.me hand off to the OS).
+  quickLog: (contactId: string, interactionType: InteractionType, subject: string): Promise<Interaction> =>
+    client.post('/crm/interactions', {
+      contact_id: contactId,
+      interaction_type: interactionType,
+      subject,
+      occurred_at: new Date().toISOString(),
+    } as LogInteractionPayload),
 
   deleteCompany: (id: string) =>
     client.delete<{ deleted: boolean; id: string }>(`/crm/companies/${id}`),

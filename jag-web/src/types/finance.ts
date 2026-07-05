@@ -226,7 +226,7 @@ export type InsurancePolicyType =
   | 'BUILDING' | 'CONTENTS' | 'FLOOD' | 'FIRE' | 'COMPREHENSIVE'
   | 'OTHER'
 
-export type InsuranceAssetType = 'VEHICLE' | 'PROPERTY' | 'BUSINESS' | 'PERSON' | 'OTHER'
+export type InsuranceAssetType = 'VEHICLE' | 'PROPERTY' | 'BUSINESS' | 'PERSON' | 'PROJECT' | 'OTHER'
 export type PremiumFrequency = 'MONTHLY' | 'QUARTERLY' | 'SEMI_ANNUAL' | 'ANNUAL' | 'ONE_OFF'
 export type PremiumStatus = 'DUE' | 'PAID' | 'OVERDUE' | 'WAIVED'
 export type ClaimStatus = 'SUBMITTED' | 'UNDER_REVIEW' | 'APPROVED' | 'REJECTED' | 'SETTLED' | 'WITHDRAWN'

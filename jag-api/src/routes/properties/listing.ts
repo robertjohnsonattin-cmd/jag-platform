@@ -95,7 +95,7 @@ async function sendSmsViaTwilio(to: string, message: string): Promise<void> {
 
 listingRouter.post('/list', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const ownerId = (req as Request & { user?: { jag_user_id?: string } }).user?.jag_user_id;
+    const ownerId = req.rlsCtx.userId;
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
     const { id } = IdParam.parse(req.params);
 
@@ -244,7 +244,7 @@ export async function triggerAutoListing(ownerId: string, unitId: string): Promi
 
 listingRouter.post('/suggest-price', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const ownerId = (req as Request & { user?: { jag_user_id?: string } }).user?.jag_user_id;
+    const ownerId = req.rlsCtx.userId;
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
     const { id } = IdParam.parse(req.params);
 
@@ -341,7 +341,7 @@ Base your suggestion on current Trinidad rental market conditions.`;
 
 listingRouter.post('/sms-broadcast', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const ownerId = (req as Request & { user?: { jag_user_id?: string } }).user?.jag_user_id;
+    const ownerId = req.rlsCtx.userId;
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
     const { id } = IdParam.parse(req.params);
     const { contacts } = SmsSchema.parse(req.body);
@@ -382,7 +382,7 @@ listingRouter.post('/sms-broadcast', async (req: Request, res: Response, next: N
 // (cannot use listingRouter which requires :id prefix)
 export async function handleAlertStale(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const ownerId = (req as Request & { user?: { jag_user_id?: string } }).user?.jag_user_id;
+    const ownerId = req.rlsCtx.userId;
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
     const staleDays = z.object({ stale_days: z.number().int().min(7).max(60).default(14) }).parse(req.body).stale_days;
     const ownerPhone = process.env.JAG_OWNER_PHONE;
@@ -437,7 +437,7 @@ export async function handleAlertStale(req: Request, res: Response, next: NextFu
 
 listingRouter.post('/unlist', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const ownerId = (req as Request & { user?: { jag_user_id?: string } }).user?.jag_user_id;
+    const ownerId = req.rlsCtx.userId;
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
     const { id } = IdParam.parse(req.params);
 
@@ -477,7 +477,7 @@ const ListingInfoSchema = z.object({
 // GET /properties/units/:id/photos
 listingRouter.get('/photos', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const ownerId = (req as Request & { user?: { jag_user_id?: string } }).user?.jag_user_id;
+    const ownerId = req.rlsCtx.userId;
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
     const { id } = IdParam.parse(req.params);
 
@@ -505,7 +505,7 @@ listingRouter.get('/photos', async (req: Request, res: Response, next: NextFunct
 // POST /properties/units/:id/photos/upload-url — returns a presigned PUT URL
 listingRouter.post('/photos/upload-url', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const ownerId = (req as Request & { user?: { jag_user_id?: string } }).user?.jag_user_id;
+    const ownerId = req.rlsCtx.userId;
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
     const { id } = IdParam.parse(req.params);
     const { filename } = z.object({ filename: z.string().min(1) }).parse(req.body);
@@ -526,7 +526,7 @@ listingRouter.post('/photos/upload-url', async (req: Request, res: Response, nex
 // POST /properties/units/:id/photos — confirm upload, save record
 listingRouter.post('/photos', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const ownerId = (req as Request & { user?: { jag_user_id?: string } }).user?.jag_user_id;
+    const ownerId = req.rlsCtx.userId;
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
     const { id } = IdParam.parse(req.params);
     const body = ConfirmSchema.parse(req.body);
@@ -547,7 +547,7 @@ listingRouter.post('/photos', async (req: Request, res: Response, next: NextFunc
 // DELETE /properties/units/:id/photos/:photoId
 listingRouter.delete('/photos/:photoId', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const ownerId = (req as Request & { user?: { jag_user_id?: string } }).user?.jag_user_id;
+    const ownerId = req.rlsCtx.userId;
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
     const { id, photoId } = PhotoIdParam.parse(req.params);
 
@@ -570,7 +570,7 @@ listingRouter.delete('/photos/:photoId', async (req: Request, res: Response, nex
 // PATCH /properties/units/:id/listing-info — update description + utilities
 listingRouter.patch('/listing-info', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const ownerId = (req as Request & { user?: { jag_user_id?: string } }).user?.jag_user_id;
+    const ownerId = req.rlsCtx.userId;
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
     const { id } = IdParam.parse(req.params);
     const body = ListingInfoSchema.parse(req.body);

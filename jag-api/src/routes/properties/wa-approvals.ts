@@ -16,7 +16,7 @@ const IdParam = z.object({ id: z.string().uuid() });
 
 waApprovalsRouter.get('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const ownerId = (req as Request & { user?: { jag_user_id?: string } }).user?.jag_user_id;
+    const ownerId = req.rlsCtx.userId;
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
 
     const statusFilter = (req.query['status'] as string | undefined) ?? 'PENDING';
@@ -36,7 +36,7 @@ waApprovalsRouter.get('/', async (req: Request, res: Response, next: NextFunctio
 
 waApprovalsRouter.post('/:id/send', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const ownerId = (req as Request & { user?: { jag_user_id?: string } }).user?.jag_user_id;
+    const ownerId = req.rlsCtx.userId;
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
     const { id } = IdParam.parse(req.params);
 
@@ -72,7 +72,7 @@ waApprovalsRouter.post('/:id/send', async (req: Request, res: Response, next: Ne
 
 waApprovalsRouter.post('/:id/dismiss', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const ownerId = (req as Request & { user?: { jag_user_id?: string } }).user?.jag_user_id;
+    const ownerId = req.rlsCtx.userId;
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
     const { id } = IdParam.parse(req.params);
 

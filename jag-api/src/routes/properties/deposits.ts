@@ -44,7 +44,7 @@ function padSeq(n: number) { return String(n).padStart(6, '0'); }
 
 depositsRouter.get('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const ownerId = (req as Request & { user?: { jag_user_id?: string } }).user?.jag_user_id;
+    const ownerId = req.rlsCtx.userId;
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
 
     const unitId = req.query['unit_id'] as string | undefined;
@@ -70,7 +70,7 @@ depositsRouter.get('/', async (req: Request, res: Response, next: NextFunction) 
 
 depositsRouter.post('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const ownerId = (req as Request & { user?: { jag_user_id?: string } }).user?.jag_user_id;
+    const ownerId = req.rlsCtx.userId;
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
     const body = CreateDepositSchema.parse(req.body);
 
@@ -131,7 +131,7 @@ depositsRouter.post('/', async (req: Request, res: Response, next: NextFunction)
 
 depositsRouter.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const ownerId = (req as Request & { user?: { jag_user_id?: string } }).user?.jag_user_id;
+    const ownerId = req.rlsCtx.userId;
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
     const { id } = IdParam.parse(req.params);
 
@@ -153,7 +153,7 @@ depositsRouter.get('/:id', async (req: Request, res: Response, next: NextFunctio
 
 depositsRouter.patch('/:id/reconcile', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const ownerId = (req as Request & { user?: { jag_user_id?: string } }).user?.jag_user_id;
+    const ownerId = req.rlsCtx.userId;
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
     const { id } = IdParam.parse(req.params);
     const body = ReconcileSchema.parse(req.body);
@@ -215,7 +215,7 @@ depositsRouter.patch('/:id/reconcile', async (req: Request, res: Response, next:
 
 depositsRouter.get('/:id/receipt', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const ownerId = (req as Request & { user?: { jag_user_id?: string } }).user?.jag_user_id;
+    const ownerId = req.rlsCtx.userId;
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
     const { id } = IdParam.parse(req.params);
 

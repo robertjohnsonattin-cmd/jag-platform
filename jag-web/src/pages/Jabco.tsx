@@ -3,17 +3,22 @@ import { useTranslation } from 'react-i18next'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { jabcoApi } from '../api/jabco'
 import { crmApi } from '../api/crm'
+import { financeApi } from '../api/finance'
 import ConfirmDeleteModal from '../components/ui/ConfirmDeleteModal'
 import type {
   Project, BoqItem, VariationOrder, ProgressClaim, PaymentCertificate,
   VendorInvoice, SiteDiaryEntry, ProjectStatus,
   ProjectTask, PunchListItem, SiteIncident, QualityInspection,
 } from '../types/jabco'
+import type { InsurancePolicy, InsurancePolicyType } from '../types/finance'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 // Robert's jag_core user ID — sole project manager for now
 const ROBERT_USER_ID = '95ca3f77-60ba-4a0f-af70-2832b247b525'
+
+// JABCO Limited tenant UUID — owner_entity_id for project bonds/insurance
+const JABCO_ENTITY_ID = '00000000-0000-0000-0001-000000000002'
 
 const cls = 'w-full bg-slate-700 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:outline-none focus:border-orange-500 placeholder-slate-500'
 
@@ -2032,6 +2037,179 @@ function QualityTab({ project }: { project: Project }) {
   )
 }
 
+// ── Bonds Tab (tender bonds, performance bonds — via Finance Insurance module) ─
+
+const BOND_POLICY_TYPES: InsurancePolicyType[] = ['SURETY_BOND', 'PERFORMANCE_BOND', 'OTHER']
+
+function BondsTab({ project }: { project: Project }) {
+  const { t } = useTranslation()
+  const qc = useQueryClient()
+  const [showAdd, setShowAdd] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
+  const [isSaving, setIsSaving] = useState(false)
+  const [form, setForm] = useState({
+    policy_type: 'PERFORMANCE_BOND' as InsurancePolicyType,
+    sub_type: '', policy_number: '', insurer_name: '', broker_name: '',
+    coverage_amount: '', premium_amount: '', premium_frequency: 'ONE_OFF',
+    start_date: '', expiry_date: '', notes: '',
+  })
+  const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
+    setForm(f => ({ ...f, [k]: e.target.value }))
+
+  const bondsKey = ['finance', 'insurance', 'policies', 'project', project.id]
+  const { data: bonds = [], isLoading } = useQuery({
+    queryKey: bondsKey,
+    queryFn: () => financeApi.getPolicies({ insured_asset_ref: project.id }),
+  })
+
+  const handleSave = async () => {
+    setSaveError(null)
+    setIsSaving(true)
+    try {
+      await financeApi.createPolicy({
+        owner_entity_id: JABCO_ENTITY_ID,
+        policy_type: form.policy_type,
+        sub_type: form.sub_type || undefined,
+        insured_asset_type: 'PROJECT',
+        insured_asset_ref: project.id,
+        policy_number: form.policy_number || `${project.project_code}-BOND-${Date.now()}`,
+        insurer_name: form.insurer_name,
+        broker_name: form.broker_name || undefined,
+        coverage_amount: parseFloat(form.coverage_amount) || 1,
+        coverage_amount_ttd: parseFloat(form.coverage_amount) || 1,
+        currency: 'TTD',
+        premium_amount: parseFloat(form.premium_amount) || 1,
+        premium_amount_ttd: parseFloat(form.premium_amount) || 1,
+        premium_frequency: form.premium_frequency as Parameters<typeof financeApi.createPolicy>[0]['premium_frequency'],
+        start_date: form.start_date || new Date().toISOString().slice(0, 10),
+        expiry_date: form.expiry_date || new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
+        renewal_alert_days: 60,
+        notes: form.notes || undefined,
+      })
+      await qc.invalidateQueries({ queryKey: bondsKey })
+      setShowAdd(false)
+      setForm({ policy_type: 'PERFORMANCE_BOND', sub_type: '', policy_number: '', insurer_name: '', broker_name: '', coverage_amount: '', premium_amount: '', premium_frequency: 'ONE_OFF', start_date: '', expiry_date: '', notes: '' })
+    } catch (e: unknown) {
+      setSaveError(e instanceof Error ? e.message : 'Save failed — check all required fields.')
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  if (isLoading) return <div className="text-center text-slate-500 text-sm py-8">{t('common.loading', 'Loading…')}</div>
+
+  return (
+    <div className="space-y-4">
+      <div className="flex justify-end">
+        <button onClick={() => setShowAdd(true)}
+          className="px-3 py-1.5 bg-orange-700 hover:bg-orange-600 text-white text-xs rounded-lg transition-colors">
+          {t('jabco.addBond', '+ Add Bond / Policy')}
+        </button>
+      </div>
+
+      {bonds.length === 0 && (
+        <div className="text-center text-slate-500 text-sm py-8">{t('jabco.noBonds', 'No bonds or policies linked to this project')}</div>
+      )}
+
+      {(bonds as InsurancePolicy[]).map(p => {
+        const days = Math.ceil((new Date(p.expiry_date).getTime() - Date.now()) / 86_400_000)
+        const expiring = days < 60
+        return (
+          <div key={p.id} className="bg-slate-800 rounded-lg p-3 border border-slate-700">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-sm font-medium text-slate-100">{p.insurer_name}</span>
+              <span className="text-xs px-1.5 py-0.5 rounded bg-slate-700 text-slate-300">
+                {t(`insurance.policyTypes.${p.policy_type}`)}
+                {p.sub_type && ` — ${p.sub_type}`}
+              </span>
+              {!p.is_active && <span className="text-xs px-1.5 py-0.5 rounded bg-slate-700 text-slate-500">Inactive</span>}
+              {p.is_active && expiring && <span className="text-xs px-1.5 py-0.5 rounded bg-red-900/60 text-red-300 border border-red-700">{t('propertiesPanel.expiringSoon', 'Expiring soon')}</span>}
+            </div>
+            {p.policy_number && <p className="text-xs text-slate-400 mt-0.5 font-mono">{p.policy_number}</p>}
+            <div className="grid grid-cols-2 gap-x-4 mt-1.5 text-xs text-slate-400">
+              <span>{t('propertiesPanel.insurancePremium', 'Premium')} <span className="text-slate-200">{fmtMoney(p.premium_amount_ttd)} / {p.premium_frequency.toLowerCase()}</span></span>
+              <span>{t('propertiesPanel.insuranceCoverage', 'Coverage')} <span className="text-slate-200">{fmtMoney(p.coverage_amount_ttd)}</span></span>
+              <span>{t('propertiesPanel.insuranceFrom', 'From')} <span className="text-slate-200">{fmtDate(p.start_date)}</span></span>
+              <span className={expiring && p.is_active ? 'text-red-400' : ''}>{t('propertiesPanel.insuranceExpires', 'Expires')} <span className="text-slate-200">{fmtDate(p.expiry_date)}</span></span>
+            </div>
+            {p.notes && <p className="text-xs text-slate-500 mt-1">{p.notes}</p>}
+          </div>
+        )
+      })}
+
+      {showAdd && (
+        <Modal title={t('jabco.addBond', 'Add Bond / Policy')} onClose={() => setShowAdd(false)}>
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">{t('jabco.bondType', 'Type *')}</label>
+                <select value={form.policy_type} onChange={set('policy_type')} className={cls}>
+                  {BOND_POLICY_TYPES.map(tp => <option key={tp} value={tp}>{t(`insurance.policyTypes.${tp}`)}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">{t('jabco.bondSubType', 'Sub-type')}</label>
+                <input value={form.sub_type} onChange={set('sub_type')} className={cls} placeholder={t('jabco.bondSubTypePlaceholder', 'e.g. Tender/Bid bond')} />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">{t('jabco.bondIssuer', 'Issuer / Surety *')}</label>
+                <input value={form.insurer_name} onChange={set('insurer_name')} className={cls} placeholder="Guardian General" />
+              </div>
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">{t('jabco.bondNumber', 'Bond / Policy Number')}</label>
+                <input value={form.policy_number} onChange={set('policy_number')} className={cls} />
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">{t('jabco.bondBroker', 'Broker')}</label>
+              <input value={form.broker_name} onChange={set('broker_name')} className={cls} placeholder={t('common.optional', 'Optional')} />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">{t('jabco.bondCoverage', 'Bond Value (TTD)')}</label>
+                <input type="number" min="0" step="0.01" value={form.coverage_amount} onChange={set('coverage_amount')} className={cls} />
+              </div>
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">{t('jabco.bondPremium', 'Premium (TTD)')}</label>
+                <input type="number" min="0" step="0.01" value={form.premium_amount} onChange={set('premium_amount')} className={cls} />
+              </div>
+            </div>
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">{t('jabco.bondFrequency', 'Frequency')}</label>
+                <select value={form.premium_frequency} onChange={set('premium_frequency')} className={cls}>
+                  {['ONE_OFF', 'ANNUAL', 'SEMI_ANNUAL', 'QUARTERLY', 'MONTHLY'].map(f => <option key={f} value={f}>{f}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">{t('jabco.bondStartDate', 'Start Date')}</label>
+                <input type="date" value={form.start_date} onChange={set('start_date')} className={cls} />
+              </div>
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">{t('jabco.bondExpiryDate', 'Expiry Date')}</label>
+                <input type="date" value={form.expiry_date} onChange={set('expiry_date')} className={cls} />
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">{t('common.notes', 'Notes')}</label>
+              <textarea rows={2} value={form.notes} onChange={set('notes')} className={cls + ' resize-none'} />
+            </div>
+            {saveError && <p className="text-red-400 text-xs rounded bg-red-900/30 border border-red-700 px-3 py-2">{saveError}</p>}
+            <div className="flex justify-end pt-2">
+              <button onClick={() => void handleSave()} disabled={!form.insurer_name || isSaving}
+                className="px-4 py-2 bg-orange-700 hover:bg-orange-600 disabled:opacity-50 text-white text-sm rounded-lg transition-colors">
+                {isSaving ? t('jabco.adding', 'Adding…') : t('jabco.addBond', 'Add Bond / Policy')}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+    </div>
+  )
+}
+
 // ── Closeout Tab ──────────────────────────────────────────────────────────────
 
 function CloseoutTab({ project }: { project: Project }) {
@@ -2149,7 +2327,7 @@ function CloseoutTab({ project }: { project: Project }) {
 
 // ── Detail Panel ──────────────────────────────────────────────────────────────
 
-type DetailTab = 'overview' | 'boq' | 'vos' | 'certs' | 'invoices' | 'diary' | 'tasks' | 'punch-list' | 'incidents' | 'quality' | 'closeout'
+type DetailTab = 'overview' | 'boq' | 'vos' | 'certs' | 'invoices' | 'diary' | 'tasks' | 'punch-list' | 'incidents' | 'quality' | 'bonds' | 'closeout'
 
 function DetailPanel({ project, onClose }: { project: Project; onClose: () => void }) {
   const { t } = useTranslation()
@@ -2166,6 +2344,7 @@ function DetailPanel({ project, onClose }: { project: Project; onClose: () => vo
     { id: 'punch-list', label: t('jabco.tabs.punchList', 'Punch List') },
     { id: 'incidents',  label: t('jabco.tabs.incidents', 'Incidents') },
     { id: 'quality',    label: t('jabco.tabs.quality', 'Quality') },
+    { id: 'bonds',      label: t('jabco.tabs.bonds', 'Bonds') },
     { id: 'closeout',   label: t('jabco.tabs.closeout', 'Closeout') },
   ]
 
@@ -2215,6 +2394,7 @@ function DetailPanel({ project, onClose }: { project: Project; onClose: () => vo
         {tab === 'punch-list' && <PunchListTab       project={project} />}
         {tab === 'incidents'  && <IncidentsTab       project={project} />}
         {tab === 'quality'    && <QualityTab         project={project} />}
+        {tab === 'bonds'      && <BondsTab           project={project} />}
         {tab === 'closeout'   && <CloseoutTab        project={project} />}
       </div>
     </div>

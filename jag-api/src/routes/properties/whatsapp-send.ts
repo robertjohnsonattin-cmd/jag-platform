@@ -69,7 +69,7 @@ async function logMessage(
 
 whatsappSendRouter.post('/send-text', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const ownerId = (req as Request & { user?: { jag_user_id?: string } }).user?.jag_user_id;
+    const ownerId = req.rlsCtx.userId;
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
     const body = SendTextSchema.parse(req.body);
 
@@ -82,7 +82,7 @@ whatsappSendRouter.post('/send-text', async (req: Request, res: Response, next: 
 
 whatsappSendRouter.post('/send-template', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const ownerId = (req as Request & { user?: { jag_user_id?: string } }).user?.jag_user_id;
+    const ownerId = req.rlsCtx.userId;
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
     const body = SendTemplateSchema.parse(req.body);
 
@@ -96,7 +96,7 @@ whatsappSendRouter.post('/send-template', async (req: Request, res: Response, ne
 
 whatsappSendRouter.post('/send-interactive', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const ownerId = (req as Request & { user?: { jag_user_id?: string } }).user?.jag_user_id;
+    const ownerId = req.rlsCtx.userId;
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
     const body = SendInteractiveSchema.parse(req.body);
 
@@ -109,7 +109,7 @@ whatsappSendRouter.post('/send-interactive', async (req: Request, res: Response,
 
 whatsappSendRouter.get('/conversations', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const ownerId = (req as Request & { user?: { jag_user_id?: string } }).user?.jag_user_id;
+    const ownerId = req.rlsCtx.userId;
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
 
     const rows = await withOwnerRLS(propertiesPool, ownerId, async client => {
@@ -132,7 +132,7 @@ whatsappSendRouter.get('/conversations', async (req: Request, res: Response, nex
 
 whatsappSendRouter.get('/conversations/:phone', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const ownerId = (req as Request & { user?: { jag_user_id?: string } }).user?.jag_user_id;
+    const ownerId = req.rlsCtx.userId;
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
     const { phone } = PhoneParam.parse(req.params);
 

@@ -63,9 +63,17 @@ function makeHrApi(entityId?: string) {
     // Payroll runs
     getPayrollRuns: (params?: object) => a.get<HrPayrollRun[]>(`/hr/payroll/runs${qs(params)}`),
     createPayrollRun: (d: object)     => a.post<HrPayrollRun>('/hr/payroll/runs', d),
-    getPayrollEntries: (runId: string) => a.get<HrPayrollEntry[]>(`/hr/payroll/runs/${runId}/entries`),
+    getPayrollRun: (runId: string)    => a.get<HrPayrollRun & { entries: HrPayrollEntry[] }>(`/hr/payroll/runs/${runId}`),
     calculatePayrollRun: (runId: string) => a.post<HrPayrollRun>(`/hr/payroll/runs/${runId}/calculate`, {}),
-    finalizePayrollRun: (runId: string) => a.post<HrPayrollRun>(`/hr/payroll/runs/${runId}/finalize`, {}),
+    finalizePayrollRun: (runId: string, d: {
+      pay_date: string
+      salary_expense_account_id?: string
+      nis_expense_account_id?: string
+      salaries_payable_account_id?: string
+      nis_payable_account_id?: string
+      paye_payable_account_id?: string
+      health_surcharge_payable_account_id?: string
+    }) => a.post<HrPayrollRun>(`/hr/payroll/runs/${runId}/finalize`, d),
     updatePayrollEntry: (runId: string, entryId: string, d: object) =>
       a.patch<HrPayrollEntry>(`/hr/payroll/runs/${runId}/entries/${entryId}`, d),
     getPayslip: (runId: string, empId: string) =>
