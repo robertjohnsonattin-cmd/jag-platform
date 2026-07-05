@@ -10,8 +10,8 @@
 
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import { z } from 'zod';
-import { withTenantRLS } from '../../middleware/rls';
-import { commercialPool } from '../../db/index';
+import { withTenantRLS, withOwnerRLS, type RLSContext } from '../../middleware/rls';
+import { commercialPool, familyPool } from '../../db/index';
 import { logger } from '../../lib/logger';
 import { ok, err } from '../../lib/response';
 
@@ -131,9 +131,13 @@ vmsCostsRouter.post('/:id/fuel-logs', async (req: Request, res: Response, next: 
 
     const client = await commercialPool.connect();
     try {
-      const row = await withTenantRLS(client, req.rlsCtx, async (c) => {
-        const veh = await c.query(`SELECT id FROM ims_vehicles WHERE id = $1`, [vehicleId]);
+      const { row, vehicleLabel } = await withTenantRLS(client, req.rlsCtx, async (c) => {
+        const veh = await c.query(
+          `SELECT id, registration_number, make, model FROM ims_vehicles WHERE id = $1`, [vehicleId],
+        );
         if (veh.rows.length === 0) throw Object.assign(new Error('Vehicle not found.'), { status: 404, code: 'VEHICLE_NOT_FOUND' });
+        const v = veh.rows[0];
+        const label = `${v.registration_number ?? ''} — ${v.make ?? ''} ${v.model ?? ''}`.trim();
 
         // Update vehicle odometer if this fill has a higher reading
         if (b.odometer_km !== undefined) {
@@ -143,7 +147,7 @@ vmsCostsRouter.post('/:id/fuel-logs', async (req: Request, res: Response, next: 
           );
         }
 
-        return c.query(
+        const inserted = await c.query(
           `INSERT INTO vms_fuel_logs
              (tenant_id, vehicle_id, log_date, odometer_km, litres,
               cost_per_litre_ttd, total_cost_ttd, fuel_type, station_name, is_full_tank,
@@ -158,10 +162,30 @@ vmsCostsRouter.post('/:id/fuel-logs', async (req: Request, res: Response, next: 
             b.reference_type ?? null, b.reference_id ?? null,
             b.notes ?? null, b.idempotency_key, userId,
           ],
-        ).then(r => r.rows[0]);
+        );
+        return { row: inserted.rows[0], vehicleLabel: label };
       });
 
       logger.info({ entity: 'VMS', action: 'FUEL_LOG_CREATED', user_id: userId, tenant_id: tenantId, record_id: row.id });
+
+      // Auto-sync to Finance/Expenses — only for fresh manual entries (not backfills
+      // already tagged with a reference, e.g. ones created from the Expenses page).
+      if (!b.reference_type) {
+        void autoInsertFuelExpense({
+          ownerEntityId: tenantId,
+          vehicleId,
+          vehicleLabel,
+          fuelLogId:     row.id,
+          logDate:       b.log_date,
+          totalCostTtd:  total,
+          litres:        b.litres,
+          odometerKm:    b.odometer_km,
+          fuelType:      b.fuel_type,
+          stationName:   b.station_name,
+          rlsCtx:        req.rlsCtx,
+        });
+      }
+
       res.status(201).json(ok(row));
     } finally { client.release(); }
   } catch (e: unknown) {
@@ -171,6 +195,50 @@ vmsCostsRouter.post('/:id/fuel-logs', async (req: Request, res: Response, next: 
     next(e);
   }
 });
+
+// ── Auto-expense helper ────────────────────────────────────────────────────────
+// Mirrors the reverse sync in finance/expenses.ts (autoInsertFuelLog) so a fill-up
+// logged directly on the vehicle's Fuel & Costs tab also lands in Finance/Expenses.
+// Fire-and-forget — a failure here must never block the fuel log write itself.
+
+async function autoInsertFuelExpense(opts: {
+  ownerEntityId: string;
+  vehicleId:     string;
+  vehicleLabel:  string;
+  fuelLogId:     string;
+  logDate:       string;
+  totalCostTtd:  number;
+  litres:        number;
+  odometerKm?:   number;
+  fuelType:      string;
+  stationName?:  string;
+  rlsCtx:        RLSContext;
+}): Promise<void> {
+  const { ownerEntityId, vehicleId, vehicleLabel, fuelLogId, logDate,
+          totalCostTtd, litres, odometerKm, fuelType, stationName, rlsCtx } = opts;
+  const client = await familyPool.connect();
+  try {
+    await withOwnerRLS(client, rlsCtx, (c) =>
+      c.query(
+        `INSERT INTO fin_expenses
+           (owner_id, owner_entity_id, submitted_by, expense_date, description, payee_name,
+            amount, currency, amount_ttd, payment_method, category, status, submitted_at,
+            idempotency_key, linked_record_type, linked_record_id, linked_record_label,
+            fuel_litres, fuel_odometer_km, fuel_type)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,'TTD',$7,'CASH','FUEL','SUBMITTED',now(),
+                 $8,'VEHICLE',$9,$10,$11,$12,$13)`,
+        [rlsCtx.ownerId, ownerEntityId, rlsCtx.userId, logDate,
+         `Fuel — ${vehicleLabel}`, stationName ?? null, totalCostTtd,
+         fuelLogId, vehicleId, vehicleLabel, litres, odometerKm ?? null, fuelType],
+      ),
+    );
+    logger.info({ entity: 'FINANCE', action: 'FUEL_EXPENSE_AUTO_CREATED', vehicle_id: vehicleId, fuel_log_id: fuelLogId });
+  } catch (e) {
+    logger.warn({ entity: 'FINANCE', action: 'FUEL_EXPENSE_AUTO_CREATE_FAILED', fuel_log_id: fuelLogId, error: String(e) });
+  } finally {
+    client.release();
+  }
+}
 
 // ── DELETE /vehicles/:id/fuel-logs/:fid ───────────────────────────────────────
 
