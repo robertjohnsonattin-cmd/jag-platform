@@ -99,7 +99,7 @@ function CreateModal({ onClose, onCreated }: { onClose: () => void; onCreated: (
 
   const { data: vehiclesData } = useQuery({
     queryKey: ['expense-picker-vehicles'],
-    queryFn: () => imsApi.getVehicles({ limit: 200 }),
+    queryFn: () => imsApi.getVehicles({ limit: 100 }),
     enabled: showVehiclePicker,
   })
   const { data: policies = [] } = useQuery({
