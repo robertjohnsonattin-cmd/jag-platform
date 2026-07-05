@@ -43,6 +43,14 @@ export interface CreateExpenseBody {
   card_id?: string
   notes?: string
   idempotency_key: string
+  // Cross-module link — set when category=FUEL and a vehicle is chosen;
+  // triggers the backend's auto fuel-log sync (autoInsertFuelLog).
+  linked_record_type?: 'VEHICLE' | 'INSURANCE_POLICY' | 'PROPERTY' | 'FAMILY_MEMBER'
+  linked_record_id?: string
+  linked_record_label?: string
+  fuel_litres?: number
+  fuel_odometer_km?: number
+  fuel_type?: string
 }
 
 // ── API calls ─────────────────────────────────────────────────────────────────

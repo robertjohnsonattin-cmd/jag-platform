@@ -2409,7 +2409,8 @@ function NewPMForm({ vehicleId, onClose }: { vehicleId: string; onClose: () => v
 
 // ── VMS: Fuel & Costs Tab ─────────────────────────────────────────────────────
 
-function VehicleFuelCostsTab({ vehicleId }: { vehicleId: string }) {
+function VehicleFuelCostsTab({ vehicle }: { vehicle: Vehicle }) {
+  const vehicleId = vehicle.id
   const qc = useQueryClient()
   const [showFuelForm, setShowFuelForm] = useState(false)
   const [showCostForm, setShowCostForm] = useState(false)
@@ -2445,7 +2446,8 @@ function VehicleFuelCostsTab({ vehicleId }: { vehicleId: string }) {
         </div>
 
         {showFuelForm && (
-          <NewFuelLogForm vehicleId={vehicleId} onClose={() => { setShowFuelForm(false); qc.invalidateQueries({ queryKey: ['vms-fuel-logs', vehicleId] }); qc.invalidateQueries({ queryKey: ['vms-tco', vehicleId] }) }} />
+          <NewFuelLogForm vehicle={vehicle} lastLog={logs[0]}
+            onClose={() => { setShowFuelForm(false); qc.invalidateQueries({ queryKey: ['vms-fuel-logs', vehicleId] }); qc.invalidateQueries({ queryKey: ['vms-tco', vehicleId] }) }} />
         )}
 
         {fuelLoading && <p className="text-slate-400 text-sm">Loading…</p>}
@@ -2456,7 +2458,7 @@ function VehicleFuelCostsTab({ vehicleId }: { vehicleId: string }) {
             <table className="w-full text-xs">
               <thead className="bg-slate-700/50 text-slate-400">
                 <tr>
-                  {['Date','Litres','Price/L','Total','Mileage','Station','Full?',''].map(h => (
+                  {['Date','Litres','Price/L','Total','Odometer','km/L','Station','Full?',''].map(h => (
                     <th key={h} className="px-3 py-2 text-left font-medium">{h}</th>
                   ))}
                 </tr>
@@ -2464,13 +2466,14 @@ function VehicleFuelCostsTab({ vehicleId }: { vehicleId: string }) {
               <tbody>
                 {logs.map(log => (
                   <tr key={log.id} className="border-t border-slate-700/50 hover:bg-slate-700/20">
-                    <td className="px-3 py-2 text-white">{fmtDate(log.fill_date)}</td>
+                    <td className="px-3 py-2 text-white">{fmtDate(log.log_date)}</td>
                     <td className="px-3 py-2 text-slate-300">{parseFloat(log.litres).toFixed(2)} L</td>
-                    <td className="px-3 py-2 text-slate-300">{parseFloat(log.price_per_litre).toFixed(2)}</td>
+                    <td className="px-3 py-2 text-slate-300">{parseFloat(log.cost_per_litre_ttd).toFixed(2)}</td>
                     <td className="px-3 py-2 text-orange-400 font-medium">{fmtTTDv(log.total_cost_ttd)}</td>
-                    <td className="px-3 py-2 text-slate-400">{log.mileage_km != null ? `${log.mileage_km.toLocaleString()} km` : '—'}</td>
+                    <td className="px-3 py-2 text-slate-400">{log.odometer_km != null ? `${log.odometer_km.toLocaleString()} km` : '—'}</td>
+                    <td className="px-3 py-2 text-slate-400">{log.km_per_litre ? `${parseFloat(log.km_per_litre).toFixed(1)}` : '—'}</td>
                     <td className="px-3 py-2 text-slate-400">{log.station_name ?? '—'}</td>
-                    <td className="px-3 py-2 text-center">{log.full_tank ? '✓' : '—'}</td>
+                    <td className="px-3 py-2 text-center">{log.is_full_tank ? '✓' : '—'}</td>
                     <td className="px-3 py-2">
                       <button onClick={() => delFuel(log.id)} className="text-slate-600 hover:text-red-400 transition-colors">×</button>
                     </td>
@@ -2531,22 +2534,43 @@ function VehicleFuelCostsTab({ vehicleId }: { vehicleId: string }) {
   )
 }
 
-function NewFuelLogForm({ vehicleId, onClose }: { vehicleId: string; onClose: () => void }) {
-  const [form, setForm] = useState({ fill_date: new Date().toISOString().slice(0, 10), litres: '', price_per_litre: '', mileage_km: '', station_name: '', full_tank: true })
+const FUEL_TYPES = ['PETROL', 'DIESEL', 'CNG', 'ELECTRIC'] as const
+
+// Quick entry: driver enters date, odometer, and amount paid at the pump.
+// Price/litre defaults to the last fill-up (TT pump prices rarely change) but stays editable;
+// litres is derived, never typed. Fuel type / station default from the last log too.
+function NewFuelLogForm({ vehicle, lastLog, onClose }: { vehicle: Vehicle; lastLog?: FuelLog; onClose: () => void }) {
+  const [logDate, setLogDate] = useState(new Date().toISOString().slice(0, 10))
+  const [odometerKm, setOdometerKm] = useState(String(vehicle.current_mileage_km ?? ''))
+  const [amountPaid, setAmountPaid] = useState('')
+  const [pricePerLitre, setPricePerLitre] = useState(lastLog ? parseFloat(lastLog.cost_per_litre_ttd).toFixed(2) : '')
+  const [isFullTank, setIsFullTank] = useState(true)
+  const [showMore, setShowMore] = useState(false)
+  const [fuelType, setFuelType] = useState(lastLog?.fuel_type ?? 'PETROL')
+  const [stationName, setStationName] = useState(lastLog?.station_name ?? '')
+  const [notes, setNotes] = useState('')
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState('')
-  const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement>) => setForm(f => ({ ...f, [k]: e.target.value }))
 
-  const total = form.litres && form.price_per_litre ? (Number(form.litres) * Number(form.price_per_litre)).toFixed(2) : ''
+  const litres = amountPaid && pricePerLitre && Number(pricePerLitre) > 0
+    ? Number(amountPaid) / Number(pricePerLitre)
+    : 0
 
   const submit = async () => {
-    if (!form.litres || !form.price_per_litre) { setErr('Litres and price are required.'); return }
+    if (!amountPaid || Number(amountPaid) <= 0) { setErr('Enter the amount paid.'); return }
+    if (!pricePerLitre || Number(pricePerLitre) <= 0) { setErr('Enter the price per litre.'); return }
+    if (litres <= 0) { setErr('Could not calculate litres — check amount and price.'); return }
     setSaving(true); setErr('')
     try {
-      await imsApi.addFuelLog(vehicleId, {
-        fill_date: form.fill_date, litres: Number(form.litres), price_per_litre: Number(form.price_per_litre),
-        mileage_km: form.mileage_km ? Number(form.mileage_km) : undefined,
-        station_name: form.station_name || undefined, full_tank: form.full_tank,
+      await imsApi.addFuelLog(vehicle.id, {
+        log_date: logDate,
+        litres: Math.round(litres * 100) / 100,
+        cost_per_litre_ttd: Number(pricePerLitre),
+        odometer_km: odometerKm ? Number(odometerKm) : undefined,
+        fuel_type: fuelType,
+        station_name: stationName || undefined,
+        is_full_tank: isFullTank,
+        notes: notes || undefined,
       })
       onClose()
     } catch (e) { setErr((e as Error).message); setSaving(false) }
@@ -2555,17 +2579,38 @@ function NewFuelLogForm({ vehicleId, onClose }: { vehicleId: string; onClose: ()
   return (
     <div className="bg-slate-800 border border-slate-600 rounded-lg p-3 mb-3 space-y-2">
       <div className="grid grid-cols-2 gap-2">
-        <div><label className="block text-xs text-slate-400 mb-1">Date *</label><input type="date" value={form.fill_date} onChange={set('fill_date')} className={cls} /></div>
-        <div><label className="block text-xs text-slate-400 mb-1">Litres *</label><input type="number" min="0.01" step="0.01" value={form.litres} onChange={set('litres')} className={cls} placeholder="0.00" /></div>
-        <div><label className="block text-xs text-slate-400 mb-1">Price/Litre (TTD) *</label><input type="number" min="0.01" step="0.01" value={form.price_per_litre} onChange={set('price_per_litre')} className={cls} placeholder="0.00" /></div>
-        <div><label className="block text-xs text-slate-400 mb-1">Total{total ? ` = TTD ${total}` : ''}</label><input readOnly value={total ? `TTD ${total}` : ''} className="w-full bg-slate-700/50 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-300 cursor-default" /></div>
-        <div><label className="block text-xs text-slate-400 mb-1">Mileage (km)</label><input type="number" min="0" value={form.mileage_km} onChange={set('mileage_km')} className={cls} /></div>
-        <div><label className="block text-xs text-slate-400 mb-1">Station</label><input value={form.station_name} onChange={set('station_name')} className={cls} /></div>
+        <div><label className="block text-xs text-slate-400 mb-1">Date *</label><input type="date" value={logDate} onChange={e => setLogDate(e.target.value)} className={cls} /></div>
+        <div><label className="block text-xs text-slate-400 mb-1">Odometer (km)</label><input type="number" min="0" value={odometerKm} onChange={e => setOdometerKm(e.target.value)} className={cls} placeholder="Current mileage" /></div>
+        <div><label className="block text-xs text-slate-400 mb-1">Amount Paid (TTD) *</label><input type="number" min="0.01" step="0.01" value={amountPaid} onChange={e => setAmountPaid(e.target.value)} className={cls} placeholder="0.00" autoFocus /></div>
+        <div>
+          <label className="block text-xs text-slate-400 mb-1">Price/Litre (TTD) *</label>
+          <input type="number" min="0.01" step="0.01" value={pricePerLitre} onChange={e => setPricePerLitre(e.target.value)} className={cls} placeholder="0.00" />
+        </div>
+      </div>
+      <div className="text-xs text-slate-400 bg-slate-900/50 rounded px-3 py-1.5">
+        {litres > 0 ? <>≈ <span className="text-white font-medium">{litres.toFixed(2)} L</span></> : 'Enter amount and price to calculate litres'}
       </div>
       <div className="flex items-center gap-2">
-        <input type="checkbox" id="ft" checked={form.full_tank} onChange={e => setForm(f => ({ ...f, full_tank: e.target.checked }))} className="rounded" />
+        <input type="checkbox" id="ft" checked={isFullTank} onChange={e => setIsFullTank(e.target.checked)} className="rounded" />
         <label htmlFor="ft" className="text-sm text-slate-300">Full tank</label>
       </div>
+
+      <button type="button" onClick={() => setShowMore(v => !v)} className="text-xs text-slate-400 hover:text-white">
+        {showMore ? '▾ Hide details' : '▸ Fuel type / station / notes'}
+      </button>
+      {showMore && (
+        <div className="grid grid-cols-2 gap-2">
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">Fuel Type</label>
+            <select value={fuelType} onChange={e => setFuelType(e.target.value)} className={cls}>
+              {FUEL_TYPES.map(ft => <option key={ft} value={ft}>{ft}</option>)}
+            </select>
+          </div>
+          <div><label className="block text-xs text-slate-400 mb-1">Station</label><input value={stationName} onChange={e => setStationName(e.target.value)} className={cls} /></div>
+          <div className="col-span-2"><label className="block text-xs text-slate-400 mb-1">Notes</label><input value={notes} onChange={e => setNotes(e.target.value)} className={cls} /></div>
+        </div>
+      )}
+
       {err && <p className="text-red-400 text-xs">{err}</p>}
       <div className="flex gap-2">
         <button onClick={submit} disabled={saving} className="px-3 py-1.5 text-xs bg-orange-600 hover:bg-orange-500 disabled:opacity-50 text-white rounded">{saving ? 'Saving…' : 'Log Fill-up'}</button>
@@ -3236,7 +3281,7 @@ function VehicleManageModal({ vehicle, onClose }: { vehicle: Vehicle; onClose: (
           {tab === 'photos'      && <VehiclePhotosTab      itemId={vehicle.item_id} />}
           {tab === 'maintenance' && <VehicleMaintenanceTab vehicleId={vehicle.id} />}
           {tab === 'service-log' && <VehicleServiceLogTab  vehicle={vehicle} />}
-          {tab === 'fuel-costs'  && <VehicleFuelCostsTab   vehicleId={vehicle.id} />}
+          {tab === 'fuel-costs'  && <VehicleFuelCostsTab   vehicle={vehicle} />}
           {tab === 'compliance'  && <VehicleComplianceTab  vehicleId={vehicle.id} />}
           {tab === 'insurance'   && <VehicleInsuranceTab   vehicleId={vehicle.id} ownerEntity={vehicle.owner_entity ?? vehicle.fleet_type ?? ''} />}
           {tab === 'gps'         && <VehicleGpsTab         vehicleId={vehicle.id} registration={vehicle.registration_number} />}

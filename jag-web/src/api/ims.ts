@@ -342,18 +342,18 @@ export const imsApi = {
   },
 
   addFuelLog: (vehicleId: string, data: {
-    fill_date: string; litres: number; price_per_litre: number;
-    mileage_km?: number; fuel_type?: string; station_name?: string;
-    full_tank?: boolean; notes?: string;
+    log_date: string; litres: number; cost_per_litre_ttd: number;
+    odometer_km?: number; fuel_type?: string; station_name?: string;
+    is_full_tank?: boolean; notes?: string;
   }): Promise<FuelLog> =>
     client.post(`/ims/vehicles/${vehicleId}/fuel-logs`, {
-      log_date:           data.fill_date,
+      log_date:           data.log_date,
       litres:             data.litres,
-      cost_per_litre_ttd: data.price_per_litre,
-      odometer_km:        data.mileage_km,
+      cost_per_litre_ttd: data.cost_per_litre_ttd,
+      odometer_km:        data.odometer_km,
       fuel_type:          data.fuel_type,
       station_name:       data.station_name,
-      is_full_tank:       data.full_tank ?? true,
+      is_full_tank:       data.is_full_tank ?? true,
       notes:              data.notes,
       idempotency_key:    crypto.randomUUID(),
     }),

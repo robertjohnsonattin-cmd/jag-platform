@@ -53,7 +53,7 @@ async function autoInsertFuelLog(opts: {
         [tenantId, vehicleId, logDate, odometerKm ?? null, litres,
          costPerLitre, totalCostTtd, fuelType, stationName ?? null,
          expenseId, description,
-         `exp-${expenseId}`,
+         expenseId,
          userId],
       ),
     );
@@ -236,11 +236,14 @@ expensesRouter.post('/', async (req: Request, res: Response, next: NextFunction)
       });
       logger.info({ entity: 'EXPENSE', action: 'CREATED', user_id: ownerId, record_id: rec.id });
 
-      // Auto-sync fuel log when a FUEL expense is linked to a vehicle with litres provided
+      // Auto-sync fuel log when a FUEL expense is linked to a vehicle with litres provided.
+      // Uses the requester's actual tenant context (jag_commercial RLS scope for the vehicle),
+      // NOT the expense's owner_entity_id — that field is a free-choice grouping (can be a
+      // personal entity like "Personal — Robert") and won't match the vehicle's real tenant_id.
       if (b.category === 'FUEL' && b.linked_record_type === 'VEHICLE' && b.linked_record_id && b.fuel_litres) {
         void autoInsertFuelLog({
           vehicleId:      b.linked_record_id,
-          tenantId:       b.owner_entity_id,
+          tenantId:       req.rlsCtx.tenantId,
           expenseId:      rec.id,
           logDate:        b.expense_date,
           litres:         b.fuel_litres,

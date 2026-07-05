@@ -369,14 +369,15 @@ export interface PMSchedule {
 export interface FuelLog {
   id: string
   vehicle_id: string
-  fill_date: string
+  log_date: string
+  odometer_km: number | null
   litres: string
-  price_per_litre: string
+  cost_per_litre_ttd: string
   total_cost_ttd: string
-  mileage_km: number | null
   fuel_type: string
   station_name: string | null
-  full_tank: boolean
+  is_full_tank: boolean
+  km_per_litre: string | null
   notes: string | null
   created_at: string
 }

@@ -15,6 +15,7 @@ import * as ImagePicker from 'expo-image-picker'
 import { useRouter } from 'expo-router'
 import { logout } from '../src/auth/keycloak'
 import { expensesApi, creditCardsApi, fxRatesApi, type CreditCard } from '../src/api/expenses'
+import { vehiclesApi, type MobileVehicle } from '../src/api/vehicles'
 import {
   CATEGORIES,
   CATEGORY_LABELS,
@@ -31,6 +32,12 @@ const FALLBACK_FX: Record<string, number> = {
   TTD: 1, USD: 6.78, CNY: 0.94, EUR: 7.35, GBP: 8.60,
 }
 
+const FUEL_TYPES = ['PETROL', 'DIESEL', 'CNG', 'ELECTRIC'] as const
+
+function vehicleLabel(v: MobileVehicle): string {
+  return `${v.registration_number} — ${v.make} ${v.model}`
+}
+
 function toTTD(amount: number, currency: Currency, rateMap: Record<string, number>): number {
   const rate = rateMap[currency] ?? FALLBACK_FX[currency] ?? 1
   return parseFloat((amount * rate).toFixed(2))
@@ -44,7 +51,7 @@ function cardLabel(card: CreditCard): string {
   return card.last_four ? `${card.card_name} •••• ${card.last_four}` : card.card_name
 }
 
-type PickerField = 'category' | 'entity' | 'paymentMethod' | 'currency' | 'card' | null
+type PickerField = 'category' | 'entity' | 'paymentMethod' | 'currency' | 'card' | 'vehicle' | 'fuelType' | null
 
 export default function ExpenseForm() {
   const router = useRouter()
@@ -75,6 +82,14 @@ export default function ExpenseForm() {
   // Live FX rates fetched from API — fallback to hardcoded if unavailable
   const [rateMap, setRateMap] = useState<Record<string, number>>(FALLBACK_FX)
 
+  // Fuel quick-entry — only loaded/shown when category === 'FUEL'
+  const [vehicles, setVehicles]           = useState<MobileVehicle[]>([])
+  const [vehiclesLoaded, setVehiclesLoaded] = useState(false)
+  const [selectedVehicleId, setSelectedVehicleId] = useState<string | null>(null)
+  const [odometerKm, setOdometerKm]       = useState('')
+  const [pricePerLitre, setPricePerLitre] = useState('')
+  const [fuelType, setFuelType]           = useState<string>('PETROL')
+
   useEffect(() => {
     creditCardsApi.list().then(setCards).catch(() => {})
     fxRatesApi.getAll().then(rates => {
@@ -83,6 +98,34 @@ export default function ExpenseForm() {
       setRateMap(map)
     }).catch(() => {}) // keep fallback on network error
   }, [])
+
+  // Lazy-load the vehicle list the first time the user picks Fuel.
+  useEffect(() => {
+    if (category === 'FUEL' && !vehiclesLoaded) {
+      vehiclesApi.list()
+        .then(res => { setVehicles(res.vehicles); setVehiclesLoaded(true) })
+        .catch(() => setVehiclesLoaded(true)) // avoid retry-looping on failure
+    }
+  }, [category, vehiclesLoaded])
+
+  const selectedVehicle = vehicles.find(v => v.id === selectedVehicleId) ?? null
+
+  // Prefill odometer + last-used price/litre + fuel type from the vehicle's own history —
+  // same "don't retype it" behaviour as the web Fuel & Costs quick-entry form.
+  useEffect(() => {
+    if (!selectedVehicle) return
+    setOdometerKm(prev => prev || (selectedVehicle.current_mileage_km != null ? String(selectedVehicle.current_mileage_km) : ''))
+    vehiclesApi.lastFuelLog(selectedVehicle.id).then(res => {
+      const last = res.fuel_logs[0]
+      if (!last) return
+      setPricePerLitre(prev => prev || parseFloat(last.cost_per_litre_ttd).toFixed(2))
+      setFuelType(prev => (prev === 'PETROL' ? last.fuel_type : prev))
+    }).catch(() => {})
+  }, [selectedVehicleId])
+
+  const fuelLitres = category === 'FUEL' && selectedVehicleId && pricePerLitre && Number(pricePerLitre) > 0 && amount && !isNaN(parseFloat(amount))
+    ? toTTD(parseFloat(amount), currency, rateMap) / Number(pricePerLitre)
+    : 0
 
   // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -153,6 +196,11 @@ export default function ExpenseForm() {
       return
     }
 
+    if (category === 'FUEL' && selectedVehicleId && !pricePerLitre) {
+      Alert.alert('Validation', 'Enter the price per litre to log this fill-up against the vehicle.')
+      return
+    }
+
     setSaving(true)
     try {
       const expense = await expensesApi.create({
@@ -168,6 +216,14 @@ export default function ExpenseForm() {
         card_id:         (paymentMethod === 'CREDIT_CARD' || paymentMethod === 'DEBIT_CARD') ? selectedCardId ?? undefined : undefined,
         notes:           note.trim() || undefined,
         idempotency_key: randomKey(),
+        ...(category === 'FUEL' && selectedVehicle && fuelLitres > 0 ? {
+          linked_record_type:  'VEHICLE' as const,
+          linked_record_id:    selectedVehicle.id,
+          linked_record_label: vehicleLabel(selectedVehicle),
+          fuel_litres:         Math.round(fuelLitres * 100) / 100,
+          fuel_odometer_km:    odometerKm ? Number(odometerKm) : undefined,
+          fuel_type:           fuelType,
+        } : {}),
       })
 
       if (receiptUri) {
@@ -190,6 +246,10 @@ export default function ExpenseForm() {
           setReceiptUri(null)
           setSelectedCardId(null)
           setExpenseDate(new Date().toISOString().slice(0, 10))
+          setSelectedVehicleId(null)
+          setOdometerKm('')
+          setPricePerLitre('')
+          setFuelType('PETROL')
         },
       }])
     } catch (err: unknown) {
@@ -275,6 +335,14 @@ export default function ExpenseForm() {
         if (v !== 'CREDIT_CARD' && v !== 'DEBIT_CARD') setSelectedCardId(null)
         setActivePicker(null)
       }
+    } else if (activePicker === 'vehicle') {
+      options  = vehicles.map(v => ({ label: vehicleLabel(v), value: v.id }))
+      current  = selectedVehicleId ?? ''
+      onSelect = v => { setSelectedVehicleId(v); setActivePicker(null) }
+    } else if (activePicker === 'fuelType') {
+      options  = FUEL_TYPES.map(f => ({ label: f, value: f }))
+      current  = fuelType
+      onSelect = v => { setFuelType(v); setActivePicker(null) }
     } else if (activePicker === 'card') {
       options  = [
         { label: 'No card', value: '' },
@@ -388,6 +456,56 @@ export default function ExpenseForm() {
           <Text style={styles.selectText}>{CATEGORY_LABELS[category]}</Text>
           <Text style={styles.chevron}>▾</Text>
         </TouchableOpacity>
+
+        {/* Fuel quick-entry — vehicle, odometer, price/litre; litres calculated automatically */}
+        {category === 'FUEL' && (
+          <>
+            <Text style={styles.label}>Vehicle</Text>
+            <TouchableOpacity
+              style={[styles.select, !selectedVehicleId && styles.selectPlaceholder]}
+              onPress={() => setActivePicker('vehicle')}
+            >
+              <Text style={[styles.selectText, !selectedVehicleId && styles.placeholderText]}>
+                {selectedVehicle ? vehicleLabel(selectedVehicle) : (vehiclesLoaded ? 'Select vehicle...' : 'Loading vehicles…')}
+              </Text>
+              <Text style={styles.chevron}>▾</Text>
+            </TouchableOpacity>
+
+            {selectedVehicleId && (
+              <>
+                <Text style={styles.label}>Odometer (km)</Text>
+                <TextInput
+                  style={styles.input}
+                  value={odometerKm}
+                  onChangeText={setOdometerKm}
+                  placeholder="Current mileage"
+                  placeholderTextColor="#475569"
+                  keyboardType="number-pad"
+                />
+
+                <Text style={styles.label}>Price / Litre (TTD)</Text>
+                <TextInput
+                  style={styles.input}
+                  value={pricePerLitre}
+                  onChangeText={setPricePerLitre}
+                  placeholder="0.00"
+                  placeholderTextColor="#475569"
+                  keyboardType="decimal-pad"
+                />
+
+                <Text style={styles.hint}>
+                  {fuelLitres > 0 ? `≈ ${fuelLitres.toFixed(2)} L` : 'Enter amount + price above to calculate litres'}
+                </Text>
+
+                <Text style={styles.label}>Fuel Type</Text>
+                <TouchableOpacity style={styles.select} onPress={() => setActivePicker('fuelType')}>
+                  <Text style={styles.selectText}>{fuelType}</Text>
+                  <Text style={styles.chevron}>▾</Text>
+                </TouchableOpacity>
+              </>
+            )}
+          </>
+        )}
 
         {/* Entity */}
         <Text style={styles.label}>Entity</Text>
