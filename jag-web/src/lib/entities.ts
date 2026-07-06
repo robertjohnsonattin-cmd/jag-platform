@@ -30,7 +30,12 @@ export function fmtTTD(value: string | number | null | undefined): string {
 }
 
 export function fmtDate(iso: string): string {
-  return new Date(iso).toLocaleDateString('en-TT', {
+  // Parse the Y/M/D components directly rather than `new Date(iso)` — the
+  // latter parses a date-only string ('2026-09-30') as UTC midnight, which
+  // toLocaleDateString then renders in the browser's local timezone (TT is
+  // UTC-4), shifting the displayed date back a day.
+  const [y, m, d] = iso.slice(0, 10).split('-').map(Number)
+  return new Date(y, m - 1, d).toLocaleDateString('en-TT', {
     day: '2-digit',
     month: 'short',
     year: 'numeric',
