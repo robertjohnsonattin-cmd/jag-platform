@@ -27,8 +27,11 @@ const cls = 'w-full bg-slate-700 border border-slate-600 rounded px-3 py-1.5 tex
 const fmt = new Intl.NumberFormat('en-TT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const fmtMoney = (v: string | number, currency = 'TTD') =>
   `${currency} ${fmt.format(Number(v))}`
-const fmtDate = (d: string | null) =>
-  d ? new Date(d).toLocaleDateString('en-TT', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'
+const fmtDate = (d: string | null) => {
+  if (!d) return '—'
+  const [y, m, day] = d.slice(0, 10).split('-').map(Number)
+  return new Date(y, m - 1, day).toLocaleDateString('en-TT', { day: '2-digit', month: 'short', year: 'numeric' })
+}
 
 const STATUS_STYLES: Record<ProjectStatus, string> = {
   TENDER:               'bg-yellow-900/50 text-yellow-300 border border-yellow-700',

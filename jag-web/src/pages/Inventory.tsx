@@ -32,8 +32,23 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 const fmt = new Intl.NumberFormat('en-TT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const fmtMoney = (v: number | null, currency = 'TTD') =>
   v == null ? '—' : `${currency} ${fmt.format(v)}`
+// For real timestamps (last_modified_at, created_at) -- local-time conversion of an instant is correct here.
 const fmtDate = (d: string | null) =>
   d ? new Date(d).toLocaleDateString('en-TT', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'
+// For date-only fields (registration_expiry, next_service_date, disposal_date) -- new Date(iso)
+// parses as UTC midnight, which shifts back a day when rendered in Trinidad's timezone (UTC-4).
+// Parse Y/M/D components directly instead.
+const fmtDateOnly = (d: string | null) => {
+  if (!d) return '—'
+  const [y, m, day] = d.slice(0, 10).split('-').map(Number)
+  return new Date(y, m - 1, day).toLocaleDateString('en-TT', { day: '2-digit', month: 'short', year: 'numeric' })
+}
+// Same fix, month/year granularity only (depreciation period_start/period_end/last_posted_period
+// -- a date like '2026-10-01' shifted back to Sept 30 local would show the wrong month, not just day).
+const fmtMonthYear = (d: string) => {
+  const [y, m] = d.slice(0, 10).split('-').map(Number)
+  return new Date(y, m - 1, 1).toLocaleDateString('en-TT', { month: 'short', year: 'numeric' })
+}
 const fmtDateTime = (d: string) =>
   new Date(d).toLocaleString('en-TT', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
 
@@ -1737,7 +1752,7 @@ function VehiclesTab() {
           <span className="text-base">📋</span>
           <div>
             <span className="font-semibold">{t('inv.registrationAlert')} </span>
-            {alertReg.map(v => `${v.registration_number} (${isExpired(v.registration_expiry) ? t('inv.expired') : fmtDate(v.registration_expiry)})`).join(' · ')}
+            {alertReg.map(v => `${v.registration_number} (${isExpired(v.registration_expiry) ? t('inv.expired') : fmtDateOnly(v.registration_expiry)})`).join(' · ')}
           </div>
         </div>
       )}
@@ -1746,7 +1761,7 @@ function VehiclesTab() {
           <span className="text-base">🔧</span>
           <div>
             <span className="font-semibold">{t('inv.serviceDueAlert')} </span>
-            {alertService.map(v => `${v.registration_number} (${t('inv.due')} ${v.next_service_date ? fmtDate(v.next_service_date) : t('inv.overdue')})`).join(' · ')}
+            {alertService.map(v => `${v.registration_number} (${t('inv.due')} ${v.next_service_date ? fmtDateOnly(v.next_service_date) : t('inv.overdue')})`).join(' · ')}
           </div>
         </div>
       )}
@@ -1856,7 +1871,7 @@ function VehiclesTab() {
                   </td>
                   <td className={`px-4 py-2.5 text-xs ${isServiceDue(v) ? 'text-yellow-400 font-medium' : 'text-slate-300'}`}>
                     <div className="flex items-center gap-1">
-                      {v.next_service_date ? fmtDate(v.next_service_date) : v.last_service_date ? '—' : <span className="text-slate-500 italic">{t('inv.notSet')}</span>}
+                      {v.next_service_date ? fmtDateOnly(v.next_service_date) : v.last_service_date ? '—' : <span className="text-slate-500 italic">{t('inv.notSet')}</span>}
                       {isServiceDue(v) && <span>🔧</span>}
                       {v.next_service_date && (
                         <span title={v.cal_service_event_id ? t('inv.calSynced') : t('inv.calNotSynced')}
@@ -2850,7 +2865,7 @@ function VehicleDisposalTab({ vehicle }: { vehicle: Vehicle }) {
         <div className="grid grid-cols-2 gap-3">
           {([
             { key: 'type',   label: 'Disposal Type',    value: disposal.disposal_type },
-            { key: 'date',   label: 'Disposal Date',    value: fmtDate(disposal.disposal_date) },
+            { key: 'date',   label: 'Disposal Date',    value: fmtDateOnly(disposal.disposal_date) },
             { key: 'cost',   label: 'Cost at Disposal', value: fmtTTDv(disposal.cost_at_disposal) },
             { key: 'dep',    label: 'Accumulated Dep',  value: fmtTTDv(disposal.accumulated_dep) },
             { key: 'nbv',    label: 'Net Book Value',   value: fmtTTDv(disposal.nbv_at_disposal) },
@@ -3052,7 +3067,11 @@ function VehicleInsuranceTab({ vehicleId, ownerEntity }: { vehicleId: string; ow
     }
   }
 
-  const fmtDate = (d: string | null) => d ? new Date(d).toLocaleDateString('en-TT') : '—'
+  const fmtDate = (d: string | null) => {
+    if (!d) return '—'
+    const [y, m, day] = d.slice(0, 10).split('-').map(Number)
+    return new Date(y, m - 1, day).toLocaleDateString('en-TT')
+  }
   const fmtMoney = (v: string) => `$${parseFloat(v).toLocaleString('en-TT', { minimumFractionDigits: 2 })}`
 
   return (
@@ -4043,9 +4062,9 @@ function ScheduleDetail({ sched, onClose }: { sched: DepreciationSchedule; onClo
               {[...entries].reverse().map(e => (
                 <tr key={e.id} className="border-b border-slate-700/40">
                   <td className="px-5 py-2.5 text-slate-300 text-xs">
-                    {new Date(e.period_start).toLocaleDateString('en-TT', { month: 'short', year: 'numeric' })}
+                    {fmtMonthYear(e.period_start)}
                     {' → '}
-                    {new Date(e.period_end).toLocaleDateString('en-TT', { month: 'short', year: 'numeric' })}
+                    {fmtMonthYear(e.period_end)}
                   </td>
                   <td className="px-5 py-2.5 text-orange-400 font-medium">{fmtMon(e.depreciation_amount)}</td>
                   <td className="px-5 py-2.5 text-slate-300">{fmtMon(e.accumulated_depreciation)}</td>
@@ -4111,7 +4130,7 @@ function DepreciationTab() {
                     <td className="px-4 py-2.5 text-white text-xs font-medium">{fmtMon(s.net_book_value)}</td>
                     <td className="px-4 py-2.5 text-slate-400 text-xs">
                       {s.last_posted_period
-                        ? new Date(s.last_posted_period).toLocaleDateString('en-TT', { month: 'short', year: 'numeric' })
+                        ? fmtMonthYear(s.last_posted_period)
                         : '—'}
                     </td>
                   </tr>

@@ -8,7 +8,15 @@ import type { SessionSummary, Settlement, NLCBGame, NLCBScratchGame, NLCBBiller 
 
 const fmt = new Intl.NumberFormat('en-TT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const fmtM   = (v: number | null | undefined) => v == null ? '—' : `$${fmt.format(v)}`
-const fmtDate = (d: string | null | undefined) =>
+// For date-only fields (session_date, week_start, week_end) -- new Date(iso) parses as UTC
+// midnight, which shifts back a day when rendered in Trinidad's timezone (UTC-4). Parse Y/M/D
+// components directly instead. NOTE: paid_at is a real timestamp -- keep using fmtDateTimestamp for it.
+const fmtDate = (d: string | null | undefined) => {
+  if (!d) return '—'
+  const [y, m, day] = d.slice(0, 10).split('-').map(Number)
+  return new Date(y, m - 1, day).toLocaleDateString('en-TT', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' })
+}
+const fmtDateTimestamp = (d: string | null | undefined) =>
   d ? new Date(d).toLocaleDateString('en-TT', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' }) : '—'
 const cls = 'w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-orange-500'
 
@@ -749,7 +757,7 @@ function SettlementsTab() {
                     <span className={`px-2 py-0.5 rounded-full text-xs ${s.status === 'PAID' ? 'bg-green-900/40 text-green-300' : 'bg-yellow-900/40 text-yellow-400'}`}>
                       {s.status}
                     </span>
-                    {s.status === 'PAID' && s.paid_at && <p className="text-slate-500 text-xs mt-0.5">{fmtDate(s.paid_at)}</p>}
+                    {s.status === 'PAID' && s.paid_at && <p className="text-slate-500 text-xs mt-0.5">{fmtDateTimestamp(s.paid_at)}</p>}
                   </td>
                   <td className="px-4 py-3">
                     {s.status === 'PENDING' && (

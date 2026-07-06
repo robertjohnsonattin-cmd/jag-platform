@@ -13,8 +13,16 @@ import CrmContactPicker, { CrmContactBadge } from '../components/crm/CrmContactP
 const fmt = new Intl.NumberFormat('en-TT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const fmtM   = (v: number | null | undefined) => v == null ? '—' : `TTD ${fmt.format(v)}`
 const fmtCNY = (v: number) => `¥${fmt.format(v)}`
+// For real timestamps (created_at) -- local-time conversion of an instant is correct here.
 const fmtDate = (d: string | null | undefined) =>
   d ? new Date(d).toLocaleDateString('en-TT', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'
+// For date-only fields (scheduled_date, etd, eta) -- new Date(iso) parses as UTC midnight, which
+// shifts back a day when rendered in Trinidad's timezone (UTC-4). Parse Y/M/D directly instead.
+const fmtDateOnly = (d: string | null | undefined) => {
+  if (!d) return '—'
+  const [y, m, day] = d.slice(0, 10).split('-').map(Number)
+  return new Date(y, m - 1, day).toLocaleDateString('en-TT', { day: '2-digit', month: 'short', year: 'numeric' })
+}
 const cls = 'w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-orange-500'
 
 function uuidv4(): string {
@@ -1029,7 +1037,7 @@ function OrderDetailPanel({ orderId, onClose }: { orderId: string; onClose: () =
                 <p className="text-white text-sm">{order.delivery.delivery_address}</p>
                 <span className="text-slate-400 text-xs">{order.delivery.status}</span>
               </div>
-              {order.delivery.scheduled_date && <p className="text-slate-400 text-xs">{t('db.scheduled')}: {fmtDate(order.delivery.scheduled_date)}</p>}
+              {order.delivery.scheduled_date && <p className="text-slate-400 text-xs">{t('db.scheduled')}: {fmtDateOnly(order.delivery.scheduled_date)}</p>}
               {order.delivery.contact_name && <p className="text-slate-400 text-xs">{order.delivery.contact_name} · {order.delivery.contact_phone}</p>}
               <div className="flex gap-2 mt-2">
                 {order.delivery.status === 'PENDING' && (
@@ -1229,8 +1237,8 @@ function ShipmentsTab() {
                     <p>{sh.port_of_origin}</p>
                     <p className="text-slate-500">→ {sh.port_of_destination}</p>
                   </td>
-                  <td className="px-4 py-3 text-slate-400 text-xs">{fmtDate(sh.etd)}</td>
-                  <td className="px-4 py-3 text-slate-400 text-xs">{fmtDate(sh.eta)}</td>
+                  <td className="px-4 py-3 text-slate-400 text-xs">{fmtDateOnly(sh.etd)}</td>
+                  <td className="px-4 py-3 text-slate-400 text-xs">{fmtDateOnly(sh.eta)}</td>
                   <td className="px-4 py-3 text-slate-300">{sh.order_count}</td>
                   <td className="px-4 py-3">
                     <span className={`px-2 py-0.5 rounded-full text-xs ${SHIP_STYLES[sh.status]}`}>{sh.status}</span>

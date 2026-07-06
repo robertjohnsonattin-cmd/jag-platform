@@ -19,11 +19,20 @@ import type {
 
 const fmt = new Intl.NumberFormat('en-TT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const fmtM = (v: number | null | undefined) => v == null ? '—' : `TTD ${fmt.format(v)}`
+// For real timestamps (e.g. event starts_at/ends_at via fmtDT) -- local-time conversion of an instant is correct here.
 const fmtDate = (d: string | null) =>
   d ? new Date(d).toLocaleDateString('en-TT', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'
 const fmtTime = (d: string) =>
   new Date(d).toLocaleTimeString('en-TT', { hour: '2-digit', minute: '2-digit' })
 const fmtDT = (d: string) => `${fmtDate(d)} ${fmtTime(d)}`
+// For date-only fields (invoice_date, bill_date, float_date, membership started_at/expires_at which
+// are `date` columns despite the name) -- new Date(iso) parses as UTC midnight, which shifts back a
+// day when rendered in Trinidad's timezone (UTC-4). Parse Y/M/D directly instead.
+const fmtDateOnly = (d: string | null) => {
+  if (!d) return '—'
+  const [y, m, day] = d.slice(0, 10).split('-').map(Number)
+  return new Date(y, m - 1, day).toLocaleDateString('en-TT', { day: '2-digit', month: 'short', year: 'numeric' })
+}
 
 function uuidv4(): string {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
@@ -104,7 +113,7 @@ function InvoicePanel({ prefix }: { prefix: 'bar' | 'club' }) {
           <div key={inv.id} className="bg-slate-700/40 rounded-lg px-4 py-3 flex items-center justify-between gap-4">
             <div>
               <p className="text-white text-sm font-medium">{inv.supplier_name}</p>
-              <p className="text-slate-400 text-xs">{inv.invoice_ref ?? t('ent.noRef')} · {fmtDate(inv.invoice_date)} · {fmtM(inv.amount + inv.vat_amount)} {t('ent.inclVat')}</p>
+              <p className="text-slate-400 text-xs">{inv.invoice_ref ?? t('ent.noRef')} · {fmtDateOnly(inv.invoice_date)} · {fmtM(inv.amount + inv.vat_amount)} {t('ent.inclVat')}</p>
             </div>
             <div className="flex items-center gap-2 shrink-0">
               <span className={`px-2 py-0.5 rounded text-xs font-medium ${inv.status === 'PAID' ? 'bg-green-900/50 text-green-300' : inv.status === 'APPROVED' ? 'bg-blue-900/50 text-blue-300' : 'bg-yellow-900/50 text-yellow-300'}`}>{inv.status}</span>
@@ -174,7 +183,7 @@ function UtilitiesPanel({ prefix }: { prefix: 'bar' | 'club' }) {
           <div key={u.id} className="bg-slate-700/40 rounded-lg px-4 py-3 flex justify-between items-center">
             <div>
               <p className="text-white text-sm font-medium">{u.utility_type} · {u.provider}</p>
-              <p className="text-slate-400 text-xs">{fmtDate(u.bill_date)} · {fmtM(u.amount + u.vat_amount)} {t('ent.inclVat')}</p>
+              <p className="text-slate-400 text-xs">{fmtDateOnly(u.bill_date)} · {fmtM(u.amount + u.vat_amount)} {t('ent.inclVat')}</p>
             </div>
             <span className={`px-2 py-0.5 rounded text-xs ${u.paid_date ? 'bg-green-900/50 text-green-300' : 'bg-yellow-900/50 text-yellow-300'}`}>{u.paid_date ? t('ent.paid') : t('ent.unpaid')}</span>
           </div>
@@ -708,7 +717,7 @@ function ClubMembers() {
               <div className="bg-slate-700/40 rounded-lg p-3">
                 <p className="text-slate-400 text-xs font-medium uppercase tracking-wide mb-2">{t('ent.activeMembership')}</p>
                 <p className="text-white text-sm font-medium">{selected.active_membership.tier_name}</p>
-                <p className="text-slate-400 text-xs">{fmtDate(selected.active_membership.started_at)} → {fmtDate(selected.active_membership.expires_at)} · {t('ent.barDiscount', { pct: selected.active_membership.bar_discount_pct })}</p>
+                <p className="text-slate-400 text-xs">{fmtDateOnly(selected.active_membership.started_at)} → {fmtDateOnly(selected.active_membership.expires_at)} · {t('ent.barDiscount', { pct: selected.active_membership.bar_discount_pct })}</p>
               </div>
             ) : (
               <div className="bg-slate-700/40 rounded-lg p-3">
@@ -996,7 +1005,7 @@ function ClubChipFloat() {
           <div key={f.id} className="bg-slate-700/40 rounded-lg px-4 py-3">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-white text-sm font-medium">{fmtDate(f.float_date)}</p>
+                <p className="text-white text-sm font-medium">{fmtDateOnly(f.float_date)}</p>
                 <p className="text-slate-400 text-xs">{t('ent.cashInLabel', { open: f.opening_cash, close: f.closing_cash ?? '?' })} · {t('ent.chipsLabel', { open: f.opening_chips, close: f.closing_chips ?? '?' })}</p>
                 {f.status === 'CLOSED' && (
                   <p className={`text-xs mt-0.5 ${(f.cash_variance ?? 0) !== 0 ? 'text-red-400' : 'text-green-400'}`}>
@@ -1090,7 +1099,7 @@ function PLReportSection() {
 
       {report && (
         <div className="space-y-4">
-          <h3 className="text-white font-semibold">{report.venue} · {fmtDate(report.period.from)} — {fmtDate(report.period.to)}</h3>
+          <h3 className="text-white font-semibold">{report.venue} · {fmtDateOnly(report.period.from)} — {fmtDateOnly(report.period.to)}</h3>
 
           <div className="bg-slate-700/40 rounded-lg p-4 space-y-2">
             <p className="text-slate-400 text-xs font-medium uppercase tracking-wide">{t('ent.revenue')}</p>

@@ -82,8 +82,17 @@ function fmtSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
+// For real timestamps (created_at) -- local-time conversion of an instant is correct here.
 function fmtDate(d: string | null) {
   return d ? new Date(d).toLocaleDateString('en-TT', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'
+}
+
+// For date-only fields (expires_date) -- new Date(iso) parses as UTC midnight, which then
+// shifts back a day when rendered in Trinidad's timezone (UTC-4). Parse Y/M/D directly instead.
+function fmtDateOnly(d: string | null) {
+  if (!d) return '—'
+  const [y, m, day] = d.slice(0, 10).split('-').map(Number)
+  return new Date(y, m - 1, day).toLocaleDateString('en-TT', { day: '2-digit', month: 'short', year: 'numeric' })
 }
 
 function isExpiringSoon(date: string | null): boolean {
@@ -361,12 +370,12 @@ function DocDetailPanel({ doc, onClose }: { doc: DocFile; onClose: () => void })
         {/* Expiry warning */}
         {expired && (
           <div className="flex items-center gap-2 p-3 bg-red-950/40 border border-red-700 rounded-lg text-red-400 text-sm">
-            <span>⚠</span> {t('docvault.expiredOn')} {fmtDate(doc.expires_date)}
+            <span>⚠</span> {t('docvault.expiredOn')} {fmtDateOnly(doc.expires_date)}
           </div>
         )}
         {!expired && expiring && (
           <div className="flex items-center gap-2 p-3 bg-yellow-950/40 border border-yellow-700 rounded-lg text-yellow-400 text-sm">
-            <span>⏰</span> {t('docvault.expiresLabel')} {fmtDate(doc.expires_date)} {t('docvault.renewSoon')}
+            <span>⏰</span> {t('docvault.expiresLabel')} {fmtDateOnly(doc.expires_date)} {t('docvault.renewSoon')}
           </div>
         )}
 
@@ -377,7 +386,7 @@ function DocDetailPanel({ doc, onClose }: { doc: DocFile; onClose: () => void })
             { label: t('docvault.fileSize'),  value: fmtSize(doc.file_size_bytes) },
             { label: t('docvault.fileType'),  value: doc.mime_type },
             { label: t('docvault.uploaded'),  value: fmtDate(doc.created_at) },
-            { label: t('docvault.expiresLabel'), value: fmtDate(doc.expires_date) },
+            { label: t('docvault.expiresLabel'), value: fmtDateOnly(doc.expires_date) },
             { label: t('docvault.dataRoom'),  value: doc.is_data_room ? (doc.data_room_entity ?? t('docvault.dataRoomYes')) : t('docvault.dataRoomNo') },
           ].map(({ label, value }) => (
             <div key={label}>
@@ -586,7 +595,7 @@ export default function DocVault() {
                     </div>
                     {f.expires_date && (
                       <p className={`text-xs mt-1 ${expired ? 'text-red-400' : expiring ? 'text-yellow-400' : 'text-slate-500'}`}>
-                        {t('docvault.expiresLabel')} {fmtDate(f.expires_date)}
+                        {t('docvault.expiresLabel')} {fmtDateOnly(f.expires_date)}
                       </p>
                     )}
                   </button>

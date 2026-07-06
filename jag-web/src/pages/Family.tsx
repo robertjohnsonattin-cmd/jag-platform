@@ -57,7 +57,9 @@ function daysToNextBirthday(dob: string | null): number | null {
 }
 
 function fmtDate(d: string | null) {
-  return d ? new Date(d).toLocaleDateString('en-TT', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'
+  if (!d) return '—'
+  const [y, m, day] = d.slice(0, 10).split('-').map(Number)
+  return new Date(y, m - 1, day).toLocaleDateString('en-TT', { day: '2-digit', month: 'short', year: 'numeric' })
 }
 
 // ── Add / Edit Modal ────────────────────────────────────────────────────────────

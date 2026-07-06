@@ -11,8 +11,18 @@ import ConfirmDeleteModal from '../components/ui/ConfirmDeleteModal'
 
 const TT_TZ = 'America/Port_of_Spain'
 
+// For real timestamps (created_at) -- local-time conversion of an instant is correct here.
 const fmtDate = (d: string) =>
   new Date(d).toLocaleDateString('en-TT', { day: '2-digit', month: 'short', year: 'numeric', timeZone: TT_TZ })
+
+// For date-only fields (follow_up_date) -- new Date(iso) parses as UTC midnight, which shifts
+// back a day when rendered in Trinidad's timezone regardless of an explicit timeZone option
+// (that still converts the same UTC instant, it just makes the shift deterministic). Parse
+// Y/M/D directly instead.
+const fmtDateOnly = (d: string) => {
+  const [y, m, day] = d.slice(0, 10).split('-').map(Number)
+  return new Date(y, m - 1, day).toLocaleDateString('en-TT', { day: '2-digit', month: 'short', year: 'numeric' })
+}
 
 const fmtDateTime = (d: string) =>
   new Date(d).toLocaleString('en-TT', {
@@ -1007,7 +1017,7 @@ function ContactPanel({ contactId, onClose }: { contactId: string; onClose: () =
               <p className="text-slate-500 text-xs">{ix.interaction_type}</p>
               {ix.follow_up_date && (
                 <p className="text-xs mt-1 flex items-center gap-1">
-                  <span className="text-slate-400">Follow-up: {fmtDate(ix.follow_up_date)}</span>
+                  <span className="text-slate-400">Follow-up: {fmtDateOnly(ix.follow_up_date)}</span>
                   {ix.calendar_event_id
                     ? <span className="text-green-500" title="Synced to Google Calendar">&#10003;</span>
                     : <span className="text-amber-400" title="Calendar sync failed — not in Google Calendar">&#9888;</span>
@@ -1142,8 +1152,16 @@ function ContactsTab() {
 
 const tenderFmt = new Intl.NumberFormat('en-TT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const fmtMoney = (v: string | number | null) => v ? `TTD ${tenderFmt.format(Number(v))}` : '—'
+// For real timestamps (submitted_at, created_at) -- local-time conversion of an instant is correct here.
 const fmtDeadline = (d: string | null) =>
   d ? new Date(d).toLocaleDateString('en-TT', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'
+// For date-only fields (bid_deadline) -- new Date(iso) parses as UTC midnight, which shifts
+// back a day when rendered in Trinidad's timezone (UTC-4). Parse Y/M/D directly instead.
+const fmtDeadlineOnly = (d: string | null) => {
+  if (!d) return '—'
+  const [y, m, day] = d.slice(0, 10).split('-').map(Number)
+  return new Date(y, m - 1, day).toLocaleDateString('en-TT', { day: '2-digit', month: 'short', year: 'numeric' })
+}
 
 const ACTIVE_STAGES: PipelineStage[] = ['PREQUALIFICATION', 'LEAD', 'QUALIFIED', 'PROPOSAL', 'SUBMITTED', 'NEGOTIATION']
 const CLOSED_STAGES: PipelineStage[] = ['WON', 'LOST', 'NO_GO']
@@ -1881,7 +1899,7 @@ function OppDetail({
         <div className="px-5 py-3 border-b border-slate-700 space-y-2">
           {[
             ['estValue', 'Est. Value', fmtMoney(opp.estimated_value)],
-            ['bidDeadline', 'Bid Deadline', fmtDeadline(opp.bid_deadline)],
+            ['bidDeadline', 'Bid Deadline', fmtDeadlineOnly(opp.bid_deadline)],
             ['submittedAt', 'Submitted', opp.submitted_at ? fmtDeadline(opp.submitted_at) : '—'],
             ['proposalUrl', t('tender.proposalUrl', 'Proposal URL'), opp.proposal_document_url ?? '—'],
             ['assignedTo', 'Assigned To', opp.assigned_to ?? '—'],
@@ -1981,7 +1999,7 @@ function OppCard({ opp, onClick }: { opp: PipelineOpportunity; onClick: () => vo
       <div className="flex items-center justify-between gap-2">
         <span className="text-orange-300 text-xs font-medium">{fmtMoney(opp.estimated_value)}</span>
         {opp.bid_deadline && (
-          <span className="text-slate-500 text-xs shrink-0">{fmtDeadline(opp.bid_deadline)}</span>
+          <span className="text-slate-500 text-xs shrink-0">{fmtDeadlineOnly(opp.bid_deadline)}</span>
         )}
       </div>
       <StageBadge stage={opp.stage} />
