@@ -271,7 +271,7 @@ export interface Unit {
   floor: number | null
   bedrooms: number | null
   bathrooms: number | null
-  floor_area_sqm: string | null
+  floor_area_sqft: string | null
   is_rented: boolean
   notes: string | null
   created_at: string

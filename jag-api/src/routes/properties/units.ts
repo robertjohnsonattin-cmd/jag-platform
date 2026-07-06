@@ -15,22 +15,22 @@ const PropertyParam = z.object({ propertyId: z.string().uuid() });
 const RecordParam   = z.object({ propertyId: z.string().uuid(), id: z.string().uuid() });
 
 const CreateUnitSchema = z.object({
-  unit_number:    z.string().min(1).max(50),
-  floor:          z.number().int().optional(),
-  bedrooms:       z.number().int().min(0).optional(),
-  bathrooms:      z.number().min(0).optional(),
-  floor_area_sqm: z.number().positive().optional(),
-  notes:          z.string().max(2000).optional(),
+  unit_number:     z.string().min(1).max(50),
+  floor:           z.number().int().optional(),
+  bedrooms:        z.number().int().min(0).optional(),
+  bathrooms:       z.number().min(0).optional(),
+  floor_area_sqft: z.number().positive().optional(),
+  notes:           z.string().max(2000).optional(),
 }).strict();
 
 const PatchUnitSchema = z.object({
-  unit_number:    z.string().min(1).max(50).optional(),
-  floor:          z.number().int().nullable().optional(),
-  bedrooms:       z.number().int().min(0).nullable().optional(),
-  bathrooms:      z.number().min(0).nullable().optional(),
-  floor_area_sqm: z.number().positive().nullable().optional(),
-  is_rented:      z.boolean().optional(),
-  notes:          z.string().max(2000).nullable().optional(),
+  unit_number:     z.string().min(1).max(50).optional(),
+  floor:           z.number().int().nullable().optional(),
+  bedrooms:        z.number().int().min(0).nullable().optional(),
+  bathrooms:       z.number().min(0).nullable().optional(),
+  floor_area_sqft: z.number().positive().nullable().optional(),
+  is_rented:       z.boolean().optional(),
+  notes:           z.string().max(2000).nullable().optional(),
 }).strict();
 
 async function auditLog(ownerId: string, entity: string, action: string, recordId: string, newValues: unknown): Promise<void> {
@@ -62,7 +62,10 @@ unitsRouter.get('/', async (req: Request, res: Response, next: NextFunction): Pr
       const rows = await withOwnerRLS(client, req.rlsCtx, async (c) => {
         const result = await c.query(
           `SELECT u.id, u.unit_number, u.floor, u.bedrooms, u.bathrooms,
-                  u.floor_area_sqm, u.is_rented, u.notes, u.created_at,
+                  u.floor_area_sqft, u.is_rented, u.notes, u.created_at,
+                  u.listing_status, u.listing_description, u.rent_amount,
+                  u.wasa_included, u.electricity_included, u.internet_included,
+                  u.suggested_rent_recommended_ttd, u.booking_slug,
                   la.id         AS lease_id,
                   la.monthly_rent,
                   la.currency,
@@ -110,11 +113,11 @@ unitsRouter.post('/', async (req: Request, res: Response, next: NextFunction): P
 
         const result = await c.query(
           `INSERT INTO prop_units
-             (owner_id, property_id, unit_number, floor, bedrooms, bathrooms, floor_area_sqm, notes)
+             (owner_id, property_id, unit_number, floor, bedrooms, bathrooms, floor_area_sqft, notes)
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
            RETURNING *`,
           [ownerId, propertyId, b.unit_number, b.floor ?? null, b.bedrooms ?? null,
-           b.bathrooms ?? null, b.floor_area_sqm ?? null, b.notes ?? null],
+           b.bathrooms ?? null, b.floor_area_sqft ?? null, b.notes ?? null],
         );
         return result.rows[0];
       });
@@ -153,7 +156,7 @@ unitsRouter.patch('/:id', async (req: Request, res: Response, next: NextFunction
         if (b.floor          !== undefined) sets.push(`floor = ${push(b.floor)}`);
         if (b.bedrooms       !== undefined) sets.push(`bedrooms = ${push(b.bedrooms)}`);
         if (b.bathrooms      !== undefined) sets.push(`bathrooms = ${push(b.bathrooms)}`);
-        if (b.floor_area_sqm !== undefined) sets.push(`floor_area_sqm = ${push(b.floor_area_sqm)}`);
+        if (b.floor_area_sqft !== undefined) sets.push(`floor_area_sqft = ${push(b.floor_area_sqft)}`);
         if (b.is_rented      !== undefined) sets.push(`is_rented = ${push(b.is_rented)}`);
         if (b.notes          !== undefined) sets.push(`notes = ${push(b.notes)}`);
 

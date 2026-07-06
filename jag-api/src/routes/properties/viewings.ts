@@ -17,6 +17,12 @@ import { BUCKET_PHOTOS, getPresignedGetUrl } from '../../lib/minio';
 export const viewingsRouter = Router();
 export const publicBookingRouter = Router();
 
+// The public booking page has no authenticated user/owner context, but prop_units
+// is RLS-protected on owner_id. JAG is a single-owner platform, so the public route
+// scopes to the known platform owner rather than bypassing RLS.
+const PUBLIC_LISTING_OWNER_ID =
+  process.env['NOTIFY_OWNER_USER_ID'] ?? '95ca3f77-60ba-4a0f-af70-2832b247b525';
+
 const IdParam      = z.object({ id: z.string().uuid() });
 const SlugParam    = z.object({ slug: z.string().min(1) });
 const ViewingStatusEnum = z.enum(['SCHEDULED','CONFIRMED','COMPLETED','NO_SHOW','CANCELLED','RESCHEDULED']);
@@ -27,11 +33,28 @@ const PatchViewingSchema = z.object({
   scheduled_at: z.string().optional(),
 }).strict();
 
+const ScreeningAnswersSchema = z.object({
+  employment_status:        z.string().max(50),
+  monthly_income_range:     z.string().max(50),
+  adults:                    z.number().int().min(1).max(50),
+  children:                  z.number().int().min(0).max(50),
+  has_pets:                  z.boolean(),
+  pet_details:               z.string().max(200).optional(),
+  is_smoker:                 z.boolean(),
+  move_in_date:              z.string(), // YYYY-MM-DD
+  reason_for_moving:         z.string().max(500),
+  consents_background_check: z.boolean(),
+  evicted_or_broke_lease:    z.boolean(),
+  eviction_details:          z.string().max(500).optional(),
+  can_provide_references:    z.boolean(),
+}).strict();
+
 const BookingSchema = z.object({
-  prospect_name:  z.string().min(1).max(200),
-  prospect_phone: z.string().min(7).max(30),
-  prospect_email: z.string().email().optional(),
-  slot_start:     z.string(), // ISO datetime
+  prospect_name:      z.string().min(1).max(200),
+  prospect_phone:     z.string().min(7).max(30),
+  prospect_email:     z.string().email().optional(),
+  slot_start:         z.string(), // ISO datetime
+  screening_answers:  ScreeningAnswersSchema,
 }).strict();
 
 viewingsRouter.get('/available-slots', async (req: Request, res: Response, next: NextFunction) => {
@@ -258,31 +281,27 @@ publicBookingRouter.get('/:slug', async (req: Request, res: Response, next: Next
     const from = new Date();
     const to   = new Date(Date.now() + lookahead * 86400_000);
 
-    const unit = await propertiesPool.connect().then(async client => {
-      try {
-        const { rows } = await client.query(
-          `SELECT u.*, p.name AS property_name, p.address_line1, p.city
-           FROM prop_units u
-           LEFT JOIN prop_properties p ON p.id = u.property_id
-           WHERE u.booking_slug = $1 AND u.listing_status = 'LISTED'`,
-          [slug],
-        );
-        return rows[0] ?? null;
-      } finally { client.release(); }
+    const unit = await withOwnerRLS(propertiesPool, PUBLIC_LISTING_OWNER_ID, async client => {
+      const { rows } = await client.query(
+        `SELECT u.*, p.name AS property_name, p.address_line1, p.city
+         FROM prop_units u
+         LEFT JOIN prop_properties p ON p.id = u.property_id
+         WHERE u.booking_slug = $1 AND u.listing_status = 'LISTED'`,
+        [slug],
+      );
+      return rows[0] ?? null;
     });
 
     if (!unit) return void res.status(404).json(err('Unit not found or not currently listed', 'NOT_FOUND'));
 
     // Fetch unit photos (presigned GET, 1-hour TTL — public booking page is ephemeral)
-    const photoRows = await propertiesPool.connect().then(async client => {
-      try {
-        const { rows } = await client.query(
-          `SELECT object_key, caption, display_order FROM prop_unit_photos
-           WHERE unit_id = $1 ORDER BY display_order, created_at`,
-          [unit.id],
-        );
-        return rows as Array<{ object_key: string; caption: string | null; display_order: number }>;
-      } finally { client.release(); }
+    const photoRows = await withOwnerRLS(propertiesPool, PUBLIC_LISTING_OWNER_ID, async client => {
+      const { rows } = await client.query(
+        `SELECT object_key, caption, display_order FROM prop_unit_photos
+         WHERE unit_id = $1 ORDER BY display_order, created_at`,
+        [unit.id],
+      );
+      return rows as Array<{ object_key: string; caption: string | null; display_order: number }>;
     });
     const photos = await Promise.all(
       photoRows.map(async p => ({
@@ -306,17 +325,15 @@ publicBookingRouter.post('/:slug', async (req: Request, res: Response, next: Nex
     const { slug } = SlugParam.parse(req.params);
     const body = BookingSchema.parse(req.body);
 
-    const unit = await propertiesPool.connect().then(async client => {
-      try {
-        const { rows } = await client.query(
-          `SELECT u.*, p.name AS property_name, p.address_line1, p.city, p.owner_id
-           FROM prop_units u
-           LEFT JOIN prop_properties p ON p.id = u.property_id
-           WHERE u.booking_slug = $1 AND u.listing_status = 'LISTED'`,
-          [slug],
-        );
-        return rows[0] ?? null;
-      } finally { client.release(); }
+    const unit = await withOwnerRLS(propertiesPool, PUBLIC_LISTING_OWNER_ID, async client => {
+      const { rows } = await client.query(
+        `SELECT u.*, p.name AS property_name, p.address_line1, p.city, p.owner_id
+         FROM prop_units u
+         LEFT JOIN prop_properties p ON p.id = u.property_id
+         WHERE u.booking_slug = $1 AND u.listing_status = 'LISTED'`,
+        [slug],
+      );
+      return rows[0] ?? null;
     });
 
     if (!unit) return void res.status(404).json(err('Unit not found or not listed', 'NOT_FOUND'));
@@ -341,9 +358,10 @@ publicBookingRouter.post('/:slug', async (req: Request, res: Response, next: Nex
 
     const result = await withOwnerRLS(propertiesPool, ownerId, async client => {
       const { rows: [enquiry] } = await client.query(
-        `INSERT INTO prop_enquiries (owner_id, unit_id, property_id, prospect_name, prospect_phone, prospect_email, channel, stage)
-         VALUES ($1,$2,$3,$4,$5,$6,'WHATSAPP','VIEWING_SCHEDULED') RETURNING id`,
-        [ownerId, unit.id, unit.property_id, body.prospect_name, body.prospect_phone, body.prospect_email ?? null],
+        `INSERT INTO prop_enquiries (owner_id, unit_id, property_id, prospect_name, prospect_phone, prospect_email, channel, stage, screening_answers)
+         VALUES ($1,$2,$3,$4,$5,$6,'WHATSAPP','VIEWING_SCHEDULED',$7) RETURNING id`,
+        [ownerId, unit.id, unit.property_id, body.prospect_name, body.prospect_phone, body.prospect_email ?? null,
+         JSON.stringify(body.screening_answers)],
       );
       const { rows: [viewing] } = await client.query(
         `INSERT INTO prop_viewings (owner_id, enquiry_id, unit_id, scheduled_at, google_event_id)

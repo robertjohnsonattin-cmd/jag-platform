@@ -218,6 +218,8 @@ export const propertiesApi = {
     api.post<UnitPhoto>(`/properties/units/${unitId}/photos`, body),
   deleteUnitPhoto: (unitId: string, photoId: string) =>
     api.delete<{ deleted: boolean }>(`/properties/units/${unitId}/photos/${photoId}`),
+  updateUnitPhoto: (unitId: string, photoId: string, body: { display_order?: number; caption?: string | null }) =>
+    api.patch<UnitPhoto>(`/properties/units/${unitId}/photos/${photoId}`, body),
 
   // ── Late Fee ─────────────────────────────────────────────────────────────────
   chargeLateFee: (propertyId: string, paymentId: string, amount: number) =>

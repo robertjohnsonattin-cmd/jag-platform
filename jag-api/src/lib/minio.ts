@@ -33,6 +33,22 @@ export const minioClient = new MinioClient({
   secretKey: requireEnv('MINIO_SECRET_KEY'),
 });
 
+// Presigned URLs are handed to the BROWSER, which cannot resolve the internal
+// Docker-network hostname (MINIO_ENDPOINT, e.g. "minio"). A second client,
+// identical credentials but pointed at a public hostname reachable from the
+// internet (proxied by Caddy straight through to the same MinIO server), is
+// used only for generating presigned GET/PUT URLs. Falls back to the internal
+// client's config if no public endpoint is set (e.g. local dev).
+const presignClient = process.env['MINIO_PUBLIC_ENDPOINT']
+  ? new MinioClient({
+      endPoint:  process.env['MINIO_PUBLIC_ENDPOINT'] as string,
+      port:      parseInt(process.env['MINIO_PUBLIC_PORT'] ?? '443', 10),
+      useSSL:    process.env['MINIO_PUBLIC_SSL'] !== 'false',
+      accessKey: requireEnv('MINIO_ACCESS_KEY'),
+      secretKey: requireEnv('MINIO_SECRET_KEY'),
+    })
+  : minioClient;
+
 // ── Bucket bootstrap ──────────────────────────────────────────────────────────
 // ensureBucket is idempotent — safe to call on every upload. Results are cached
 // per process so only the first call per bucket hits MinIO.
@@ -89,11 +105,11 @@ export async function getObjectStat(bucket: string, key: string): Promise<{ size
 
 export async function getPresignedPutUrl(bucket: string, key: string, expirySeconds = 900): Promise<string> {
   await ensureBucket(bucket);
-  return minioClient.presignedPutObject(bucket, key, expirySeconds);
+  return presignClient.presignedPutObject(bucket, key, expirySeconds);
 }
 
 export async function getPresignedGetUrl(bucket: string, key: string, expirySeconds = 3600): Promise<string> {
-  return minioClient.presignedGetObject(bucket, key, expirySeconds);
+  return presignClient.presignedGetObject(bucket, key, expirySeconds);
 }
 
 export async function deleteObject(bucket: string, key: string): Promise<void> {

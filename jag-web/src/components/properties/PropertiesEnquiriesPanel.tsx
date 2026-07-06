@@ -108,6 +108,37 @@ export default function PropertiesEnquiriesPanel() {
               </select>
             </div>
 
+            {/* Pre-viewing screening answers (collected on the public booking page) */}
+            {detail['screening_answers'] != null && (() => {
+              const sa = detail['screening_answers'] as Record<string, unknown>
+              const rows: Array<[string, string]> = [
+                ['Employment status', String(sa['employment_status'] ?? '—')],
+                ['Monthly income range', String(sa['monthly_income_range'] ?? '—')],
+                ['Adults', String(sa['adults'] ?? '—')],
+                ['Children (12 & under)', String(sa['children'] ?? '—')],
+                ['Pets', sa['has_pets'] ? String(sa['pet_details'] ?? 'Yes') : 'No'],
+                ['Smoker in household', sa['is_smoker'] ? 'Yes' : 'No'],
+                ['Desired move-in date', String(sa['move_in_date'] ?? '—')],
+                ['Reason for moving', String(sa['reason_for_moving'] ?? '—')],
+                ['Consents to background check', sa['consents_background_check'] ? 'Yes' : 'No'],
+                ['Evicted / broke lease before', sa['evicted_or_broke_lease'] ? String(sa['eviction_details'] ?? 'Yes') : 'No'],
+                ['Can provide references', sa['can_provide_references'] ? 'Yes' : 'No'],
+              ]
+              return (
+                <div className="bg-slate-900/60 rounded p-3 border border-slate-700">
+                  <p className="text-xs font-semibold text-slate-400 mb-2">{t('tenancy.screeningAnswers', 'Pre-Screening Answers')}</p>
+                  <div className="space-y-1">
+                    {rows.map(([label, value]) => (
+                      <div key={label} className="flex justify-between gap-2 text-xs">
+                        <span className="text-slate-500">{label}</span>
+                        <span className="text-slate-300 text-right">{value}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )
+            })()}
+
             {/* WA thread */}
             <div className="flex-1">
               <p className="text-xs text-slate-500 mb-1">{t('tenancy.messages', 'Messages')}</p>

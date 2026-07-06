@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { propertiesApi } from '../../api/properties'
@@ -1324,7 +1324,7 @@ function AddUtilityAccountModal({ propertyId, onClose, onCreated }: { propertyId
 // ─── Add Unit Modal ───────────────────────────────────────────────────────────
 function AddUnitModal({ propertyId, onClose, onCreated }: { propertyId: string; onClose: () => void; onCreated: () => void }) {
   const { t } = useTranslation()
-  const [form, setForm] = useState({ unit_number: '', floor: '', bedrooms: '', bathrooms: '', floor_area_sqm: '', notes: '' })
+  const [form, setForm] = useState({ unit_number: '', floor: '', bedrooms: '', bathrooms: '', floor_area_sqft: '', notes: '' })
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
     setForm(f => ({ ...f, [k]: e.target.value }))
 
@@ -1334,7 +1334,7 @@ function AddUnitModal({ propertyId, onClose, onCreated }: { propertyId: string; 
       floor: form.floor ? Number(form.floor) : undefined,
       bedrooms: form.bedrooms ? Number(form.bedrooms) : undefined,
       bathrooms: form.bathrooms ? Number(form.bathrooms) : undefined,
-      floor_area_sqm: form.floor_area_sqm ? Number(form.floor_area_sqm) : undefined,
+      floor_area_sqft: form.floor_area_sqft ? Number(form.floor_area_sqft) : undefined,
       notes: form.notes || undefined,
     }),
     onSuccess: () => { onCreated(); onClose() },
@@ -1366,7 +1366,7 @@ function AddUnitModal({ propertyId, onClose, onCreated }: { propertyId: string; 
             </div>
             <div className="flex-1">
               <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.area')}</label>
-              <input type="number" step="0.1" min="0" value={form.floor_area_sqm} onChange={set('floor_area_sqm')} className={cls} />
+              <input type="number" step="0.1" min="0" value={form.floor_area_sqft} onChange={set('floor_area_sqft')} className={cls} />
             </div>
           </div>
           <div>
@@ -1395,7 +1395,7 @@ function EditUnitModal({ propertyId, unit, onClose, onSaved }: { propertyId: str
     floor: unit.floor != null ? String(unit.floor) : '',
     bedrooms: unit.bedrooms != null ? String(unit.bedrooms) : '',
     bathrooms: unit.bathrooms != null ? String(unit.bathrooms) : '',
-    floor_area_sqm: unit.floor_area_sqm != null ? String(parseFloat(String(unit.floor_area_sqm))) : '',
+    floor_area_sqft: unit.floor_area_sqft != null ? String(parseFloat(String(unit.floor_area_sqft))) : '',
     notes: unit.notes ?? '',
   })
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
@@ -1407,7 +1407,7 @@ function EditUnitModal({ propertyId, unit, onClose, onSaved }: { propertyId: str
       floor: form.floor !== '' ? Number(form.floor) : null,
       bedrooms: form.bedrooms !== '' ? Number(form.bedrooms) : null,
       bathrooms: form.bathrooms !== '' ? Number(form.bathrooms) : null,
-      floor_area_sqm: form.floor_area_sqm !== '' ? Number(form.floor_area_sqm) : null,
+      floor_area_sqft: form.floor_area_sqft !== '' ? Number(form.floor_area_sqft) : null,
       notes: form.notes || null,
     }),
     onSuccess: () => { onSaved(); onClose() },
@@ -1439,7 +1439,7 @@ function EditUnitModal({ propertyId, unit, onClose, onSaved }: { propertyId: str
             </div>
             <div className="flex-1">
               <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.area')}</label>
-              <input type="number" step="0.1" min="0" value={form.floor_area_sqm} onChange={set('floor_area_sqm')} className={cls} />
+              <input type="number" step="0.1" min="0" value={form.floor_area_sqft} onChange={set('floor_area_sqft')} className={cls} />
             </div>
           </div>
           <div>
@@ -2708,7 +2708,7 @@ function PropertyDetail({ property, onDeleted }: { property: Property; onDeleted
                         <div className="flex gap-3 text-xs text-slate-400 mt-1">
                           {u.bedrooms != null && <span>{u.bedrooms}BR</span>}
                           {u.bathrooms != null && <span>{u.bathrooms}BA</span>}
-                          {u.floor_area_sqm && <span>{u.floor_area_sqm} m²</span>}
+                          {u.floor_area_sqft && <span>{u.floor_area_sqft} ft²</span>}
                         </div>
                         {u.lease_id && (
                           <p className="text-xs text-slate-300 mt-1">
@@ -3033,6 +3033,31 @@ function ManageListingModal({ unit, propertyId, onClose, onChanged }: {
 
   const bookingBase = import.meta.env['VITE_BOOKING_BASE_URL'] as string ?? 'https://jagcorporate.com/book'
   const bookingUrl = unit.booking_slug ? `${bookingBase}/${unit.booking_slug}` : null
+  const bookingLinkRef = useRef<HTMLInputElement>(null)
+
+  async function copyBookingLink() {
+    if (!bookingUrl) return
+    try {
+      await navigator.clipboard.writeText(bookingUrl)
+      setMsg('Link copied!')
+    } catch {
+      // Clipboard API unavailable/blocked in this context — fall back to
+      // select + execCommand, which works without any special permission.
+      const el = bookingLinkRef.current
+      if (el) {
+        el.focus()
+        el.select()
+        try {
+          document.execCommand('copy')
+          setMsg('Link copied!')
+        } catch {
+          setMsg('Could not copy automatically — the link is selected, press Ctrl+C.')
+        }
+      } else {
+        setMsg('Could not copy the link. Please copy it manually.')
+      }
+    }
+  }
 
   const { data: photos = [], refetch: refetchPhotos } = useQuery({
     queryKey: ['unit-photos', unit.id],
@@ -3058,6 +3083,26 @@ function ManageListingModal({ unit, propertyId, onClose, onChanged }: {
     mutationFn: (photoId: string) => propertiesApi.deleteUnitPhoto(unit.id, photoId),
     onSuccess: () => void refetchPhotos(),
   })
+  const { mutate: reorderPhoto } = useMutation({
+    mutationFn: (args: { photoId: string; display_order: number }) =>
+      propertiesApi.updateUnitPhoto(unit.id, args.photoId, { display_order: args.display_order }),
+    onSuccess: () => void refetchPhotos(),
+  })
+  const { mutate: updatePhotoCaption } = useMutation({
+    mutationFn: (args: { photoId: string; caption: string }) =>
+      propertiesApi.updateUnitPhoto(unit.id, args.photoId, { caption: args.caption || null }),
+    onSuccess: () => void refetchPhotos(),
+  })
+
+  function movePhoto(idx: number, dir: -1 | 1) {
+    const list = photos as UnitPhoto[]
+    const swapIdx = idx + dir
+    if (swapIdx < 0 || swapIdx >= list.length) return
+    const a = list[idx]
+    const b = list[swapIdx]
+    reorderPhoto({ photoId: a.id, display_order: swapIdx })
+    reorderPhoto({ photoId: b.id, display_order: idx })
+  }
 
   async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -3143,9 +3188,10 @@ function ManageListingModal({ unit, propertyId, onClose, onChanged }: {
             <div>
               <p className="text-xs text-slate-400 mb-1">Public booking link</p>
               <div className="flex gap-2">
-                <input readOnly value={bookingUrl}
+                <input readOnly value={bookingUrl} ref={bookingLinkRef}
+                  onFocus={e => e.target.select()}
                   className="flex-1 bg-slate-700/50 border border-slate-600 rounded px-2 py-1 text-xs text-slate-300 font-mono" />
-                <button onClick={() => { void navigator.clipboard.writeText(bookingUrl); setMsg('Link copied!') }}
+                <button onClick={() => void copyBookingLink()}
                   className="text-xs px-2 py-1 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded border border-slate-600">
                   Copy
                 </button>
@@ -3158,13 +3204,32 @@ function ManageListingModal({ unit, propertyId, onClose, onChanged }: {
             {(photos as UnitPhoto[]).length > 0 && (
               <div className="grid grid-cols-3 gap-2 mb-3">
                 {(photos as UnitPhoto[]).map((p: UnitPhoto, idx: number) => (
-                  <div key={p.id} className="relative group rounded overflow-hidden border border-slate-700 bg-slate-900">
-                    <img src={p.url} alt={p.caption ?? ('Photo ' + (idx + 1))} className="w-full aspect-square object-cover" />
-                    <button onClick={() => deletePhoto(p.id)}
-                      className="absolute top-1 right-1 bg-red-900/80 hover:bg-red-700 text-white text-xs w-5 h-5 flex items-center justify-center rounded opacity-0 group-hover:opacity-100 transition-opacity">
-                      &#x2715;
-                    </button>
-                    {p.caption && <p className="text-xs text-slate-400 truncate px-1 py-0.5 bg-black/40">{p.caption}</p>}
+                  <div key={p.id} className="rounded overflow-hidden border border-slate-700 bg-slate-900">
+                    <div className="relative group">
+                      <img src={p.url} alt={p.caption ?? ('Photo ' + (idx + 1))} className="w-full aspect-square object-cover" />
+                      <button onClick={() => deletePhoto(p.id)}
+                        className="absolute top-1 right-1 bg-red-900/80 hover:bg-red-700 text-white text-xs w-5 h-5 flex items-center justify-center rounded opacity-0 group-hover:opacity-100 transition-opacity">
+                        &#x2715;
+                      </button>
+                      <div className="absolute bottom-1 left-1 right-1 flex justify-between opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button onClick={() => movePhoto(idx, -1)} disabled={idx === 0}
+                          className="bg-black/60 hover:bg-black/80 disabled:opacity-30 disabled:cursor-not-allowed text-white text-xs w-5 h-5 flex items-center justify-center rounded">
+                          &#x2039;
+                        </button>
+                        <button onClick={() => movePhoto(idx, 1)} disabled={idx === (photos as UnitPhoto[]).length - 1}
+                          className="bg-black/60 hover:bg-black/80 disabled:opacity-30 disabled:cursor-not-allowed text-white text-xs w-5 h-5 flex items-center justify-center rounded">
+                          &#x203a;
+                        </button>
+                      </div>
+                    </div>
+                    <input
+                      defaultValue={p.caption ?? ''}
+                      placeholder="Add a label…"
+                      onBlur={e => {
+                        if (e.target.value !== (p.caption ?? '')) updatePhotoCaption({ photoId: p.id, caption: e.target.value })
+                      }}
+                      className="w-full bg-slate-800 text-xs text-slate-300 placeholder-slate-500 px-1.5 py-1 border-0 border-t border-slate-700 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    />
                   </div>
                 ))}
               </div>

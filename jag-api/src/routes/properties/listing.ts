@@ -255,7 +255,7 @@ listingRouter.post('/suggest-price', async (req: Request, res: Response, next: N
         [id],
       );
       const { rows: comps } = await client.query(
-        `SELECT u.bedrooms, u.bathrooms, l.rent_amount_ttd, u.wasa_included
+        `SELECT u.bedrooms, u.bathrooms, l.monthly_rent, u.wasa_included
          FROM prop_units u
          JOIN prop_lease_agreements l ON l.unit_id = u.id
          WHERE l.status = 'ACTIVE' AND u.bedrooms = $1 AND u.id != $2
@@ -273,12 +273,12 @@ listingRouter.post('/suggest-price', async (req: Request, res: Response, next: N
     const prompt = `You are a Trinidad & Tobago real estate expert. Suggest a monthly rent range in TTD for this residential unit:
 - Location: ${unit.address_line1 ?? 'Trinidad'}, ${unit.city ?? ''}
 - Bedrooms: ${unit.bedrooms ?? 'unknown'}, Bathrooms: ${unit.bathrooms ?? 'unknown'}
-- Floor area: ${unit.floor_area_sqm ?? 'unknown'} sqm
+- Floor area: ${unit.floor_area_sqft ?? 'unknown'} sqft
 - WASA included: ${unit.wasa_included ? 'Yes' : 'No'}
 - Electricity: ${unit.electricity_included ? 'included' : 'tenant pays'}
 - Internet: ${unit.internet_included ? 'included' : 'tenant pays'}
 ${(comparables as Array<Record<string, unknown>>).length > 0
-  ? `- Comparable units currently renting at: ${(comparables as Array<Record<string, unknown>>).map(c => `TTD $${c['rent_amount_ttd']}`).join(', ')}`
+  ? `- Comparable units currently renting at: ${(comparables as Array<Record<string, unknown>>).map(c => `TTD $${c['monthly_rent']}`).join(', ')}`
   : '- No comparable data available'}
 
 Base your suggestion on current Trinidad rental market conditions.`;
@@ -466,6 +466,10 @@ listingRouter.post('/unlist', async (req: Request, res: Response, next: NextFunc
 // ── Photo schemas ─────────────────────────────────────────────────────────────
 const PhotoIdParam   = z.object({ id: z.string().uuid(), photoId: z.string().uuid() });
 const ConfirmSchema  = z.object({ object_key: z.string().min(1), caption: z.string().max(200).optional(), display_order: z.number().int().optional() }).strict();
+const ReorderSchema  = z.object({
+  display_order: z.number().int().min(0).optional(),
+  caption:        z.string().max(200).nullable().optional(),
+}).strict();
 const ListingInfoSchema = z.object({
   listing_description:   z.string().max(2000).nullable().optional(),
   wasa_included:         z.boolean().optional(),
@@ -567,6 +571,35 @@ listingRouter.delete('/photos/:photoId', async (req: Request, res: Response, nex
   } catch (e) { next(e); }
 });
 
+// PATCH /properties/units/:id/photos/:photoId — reorder and/or caption
+listingRouter.patch('/photos/:photoId', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const ownerId = req.rlsCtx.userId;
+    if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
+    const { id, photoId } = PhotoIdParam.parse(req.params);
+    const body = ReorderSchema.parse(req.body);
+    if (Object.keys(body).length === 0) return void res.status(400).json(err('No fields to update', 'VALIDATION_ERROR'));
+
+    const sets: string[] = [];
+    const vals: unknown[] = [];
+    for (const [k, v] of Object.entries(body)) {
+      vals.push(v); sets.push(`${k} = $${vals.length}`);
+    }
+    vals.push(photoId, id, ownerId);
+
+    const photo = await withOwnerRLS(propertiesPool, ownerId, async client => {
+      const { rows } = await client.query(
+        `UPDATE prop_unit_photos SET ${sets.join(', ')}
+         WHERE id = $${vals.length - 2} AND unit_id = $${vals.length - 1} AND owner_id = $${vals.length} RETURNING *`,
+        vals,
+      );
+      return rows[0] ?? null;
+    });
+    if (!photo) return void res.status(404).json(err('Photo not found', 'NOT_FOUND'));
+    res.json(ok(photo));
+  } catch (e) { next(e); }
+});
+
 // PATCH /properties/units/:id/listing-info — update description + utilities
 listingRouter.patch('/listing-info', async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -581,11 +614,11 @@ listingRouter.patch('/listing-info', async (req: Request, res: Response, next: N
     for (const [k, v] of Object.entries(body)) {
       vals.push(v); sets.push(`${k} = $${vals.length}`);
     }
-    vals.push(id); vals.push(ownerId);
+    vals.push(id);
 
     const row = await withOwnerRLS(propertiesPool, ownerId, async client => {
       const { rows } = await client.query(
-        `UPDATE prop_units SET ${sets.join(', ')} WHERE id = $${vals.length - 1} RETURNING *`,
+        `UPDATE prop_units SET ${sets.join(', ')} WHERE id = $${vals.length} RETURNING *`,
         vals,
       );
       return rows[0] ?? null;
