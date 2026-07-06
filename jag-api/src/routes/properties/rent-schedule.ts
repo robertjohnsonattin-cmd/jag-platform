@@ -498,11 +498,14 @@ function generateRentReceiptHtml(r: Record<string, unknown>): string {
   return `<!DOCTYPE html><html><head><meta charset="utf-8">
 <title>Rent Receipt ${r['receipt_number']}</title>
 <style>body{font-family:Arial,sans-serif;max-width:700px;margin:40px auto;color:#222}
+.brand{display:flex;align-items:center;gap:12px;margin-bottom:16px}
+.brand img{width:48px;height:48px;border-radius:6px}
 h1{font-size:20px}table{width:100%;border-collapse:collapse}
 td{padding:8px 12px;border-bottom:1px solid #eee}td:first-child{font-weight:bold;width:40%}</style></head>
 <body>
+<div class="brand"><img src="https://jagcorporate.com/jag-logo.png" alt="JAG Properties"><strong>JAG Properties Management Ltd</strong></div>
 <h1>Rent Receipt</h1>
-<p><strong>JAG Properties Management Ltd</strong><br>Trinidad & Tobago</p>
+<p>Trinidad & Tobago</p>
 <table>
 <tr><td>Receipt No.</td><td>${r['receipt_number']}</td></tr>
 <tr><td>Date</td><td>${r['paid_date']}</td></tr>

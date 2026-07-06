@@ -116,6 +116,10 @@ export default function PublicBooking() {
   const [confirmed, setConfirmed] = useState(false)
 
   useEffect(() => {
+    document.title = 'JAG Properties — For Rent'
+  }, [])
+
+  useEffect(() => {
     if (!slug) return
     fetch(`${API_BASE}/${slug}`)
       .then(async res => {
@@ -212,7 +216,11 @@ export default function PublicBooking() {
   return (
     <div className="min-h-screen bg-slate-900 text-white pb-16">
       <div className="max-w-2xl mx-auto px-4 pt-8">
-        <p className="text-xs font-semibold tracking-wide text-emerald-400 uppercase mb-1">JAG Properties — For Rent</p>
+        <div className="flex items-center gap-2 mb-3">
+          <img src="/jag-logo.png" alt="JAG Properties" className="w-8 h-8 rounded" />
+          <span className="text-sm font-semibold tracking-wide text-slate-200">JAG Properties</span>
+        </div>
+        <p className="text-xs font-semibold tracking-wide text-emerald-400 uppercase mb-1">For Rent</p>
         <h1 className="text-2xl font-bold text-slate-100 mb-1">
           {unit.bedrooms != null ? `${unit.bedrooms}-Bedroom Apartment` : 'Apartment'}
           {unit.city ? ` — ${unit.city}` : ''}

@@ -67,8 +67,11 @@ export default function AppShell() {
         }`}
       >
         <div className="px-5 py-4 border-b border-slate-700 flex items-center justify-between">
-          <span className="text-sm font-semibold tracking-widest text-slate-400 uppercase">
-            {t('nav.jagHoldings')}
+          <span className="flex items-center gap-2 min-w-0">
+            <img src="/jag-logo.png" alt="JAG" className="w-6 h-6 rounded shrink-0" />
+            <span className="text-sm font-semibold tracking-widest text-slate-400 uppercase truncate">
+              {t('nav.jagHoldings')}
+            </span>
           </span>
           <div className="flex items-center gap-2">
             {/* Desktop notification bell — mobile uses the top bar instance */}
@@ -128,8 +131,11 @@ export default function AppShell() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
             </svg>
           </button>
-          <span className="text-sm font-semibold tracking-widest text-slate-400 uppercase flex-1">
-            {t('nav.jagHoldings')}
+          <span className="flex items-center gap-2 flex-1 min-w-0">
+            <img src="/jag-logo.png" alt="JAG" className="w-6 h-6 rounded shrink-0" />
+            <span className="text-sm font-semibold tracking-widest text-slate-400 uppercase truncate">
+              {t('nav.jagHoldings')}
+            </span>
           </span>
           <NotificationBell />
           <LangToggle />
