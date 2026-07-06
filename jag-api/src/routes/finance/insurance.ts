@@ -2,6 +2,7 @@
 //
 // GET    /finance/insurance/policies
 // GET    /finance/insurance/policies/expiring
+// POST   /finance/insurance/policies/check-renewals — cron: fires JAG bell renewal alerts
 // POST   /finance/insurance/policies
 // GET    /finance/insurance/policies/:id
 // PATCH  /finance/insurance/policies/:id
@@ -25,6 +26,7 @@ import { familyPool } from '../../db/index';
 import { logger } from '../../lib/logger';
 import { ok, err } from '../../lib/response';
 import { createAllDayCalendarEvent, deleteCalendarEvent } from '../../lib/google-calendar';
+import { enqueueNotification } from '../../lib/notifications';
 
 export const insuranceRouter = Router();
 
@@ -118,32 +120,46 @@ const UpdateClaimSchema = z.object({
   notes:           z.string().optional(),
 }).strict().refine(d => Object.keys(d).length > 0, { message: 'At least one field required.' });
 
-// ── Renewal alert outbox helper ───────────────────────────────────────────────
-// Idempotent: ON CONFLICT DO NOTHING deduplicates per policy+expiry cycle.
+// ── Renewal alert helper ──────────────────────────────────────────────────────
+// Fires a JAG bell notification (notification_queue) — the same mechanism used
+// by expense/maintenance/enquiry producers. Dedup is handled by the caller via
+// the renewal_notice_sent_at / renewal_notice_urgent_sent_at columns, which are
+// reset to NULL whenever a PATCH changes expiry_date (policy renewed).
 
-async function enqueueRenewalAlert(ownerId: string, policy: {
+async function fireRenewalNotification(policy: {
   id: string; policy_number: string; insurer_name: string;
-  expiry_date: string; renewal_alert_days: number;
-}): Promise<void> {
-  await familyPool.query(
-    `INSERT INTO pending_events (aggregate_type, aggregate_id, event_type, payload)
-     VALUES ($1, $2, $3, $4)
-     ON CONFLICT DO NOTHING`,
-    [
-      'InsurancePolicy',
-      policy.id,
-      'RENEWAL_ALERT',
-      JSON.stringify({
-        owner_id:           ownerId,
-        policy_id:          policy.id,
-        policy_number:      policy.policy_number,
-        insurer_name:       policy.insurer_name,
-        expiry_date:        policy.expiry_date,
-        renewal_alert_days: policy.renewal_alert_days,
-        alerted_at:         new Date().toISOString(),
-      }),
-    ]
-  );
+  policy_type: string; expiry_date: string;
+}, urgent: boolean): Promise<void> {
+  await enqueueNotification({
+    tier: urgent ? 1 : 2,
+    title: urgent
+      ? `Insurance renewal due soon: ${policy.insurer_name}`
+      : `Insurance renewal approaching: ${policy.insurer_name}`,
+    body: `Policy ${policy.policy_number} (${policy.policy_type}) expires ${policy.expiry_date}.`,
+    payload: { policy_id: policy.id, expiry_date: policy.expiry_date, urgent },
+  });
+}
+
+// Creates a dedicated "start renewing" calendar event on the day the standard
+// renewal notice first fires (distinct from the expiry-date event already
+// tracked via calendar_event_id). `runQuery` must be an RLS-scoped query
+// function (the same `c.query` used inside the caller's withOwnerRLS callback)
+// — a bare familyPool.query on an RLS-protected table silently updates 0 rows.
+// Non-blocking on failure — a calendar error must not break the dedup write.
+async function createRenewalReminderCalendarEvent(
+  policy: { id: string; policy_number: string; insurer_name: string; policy_type: string; expiry_date: string },
+  runQuery: (sql: string, params: unknown[]) => Promise<unknown>,
+): Promise<void> {
+  try {
+    const evId = await createAllDayCalendarEvent({
+      title: `Insurance Renewal Reminder: ${policy.policy_type} — ${policy.insurer_name}`,
+      description: `Policy ${policy.policy_number} (${policy.insurer_name}) expires ${policy.expiry_date}. Start the renewal process.`,
+      date: new Date().toISOString().slice(0, 10),
+    });
+    await runQuery(`UPDATE fin_insurance_policies SET renewal_notice_calendar_event_id = $1 WHERE id = $2`, [evId, policy.id]);
+  } catch (calErr) {
+    logger.warn({ entity: 'Insurance', action: 'RENEWAL_REMINDER_CAL_ERROR', error_message: (calErr as Error).message });
+  }
 }
 
 // ── POST /policies/import (Path 2 — direct JSON from local script) ────────────
@@ -221,6 +237,9 @@ insuranceRouter.get('/policies', async (req: Request, res: Response, next: NextF
 });
 
 // GET /policies/expiring  — must be declared before /policies/:id
+// Pure read for the UI — no side effects. Notification firing lives in
+// POST /policies/check-renewals (cron-driven), so opening this panel repeatedly
+// doesn't spam the bell.
 insuranceRouter.get('/policies/expiring', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const client = await familyPool.connect();
@@ -230,13 +249,54 @@ insuranceRouter.get('/policies/expiring', async (req: Request, res: Response, ne
           `SELECT * FROM fin_insurance_policies
            WHERE is_active = true
              AND expiry_date <= CURRENT_DATE + (renewal_alert_days * INTERVAL '1 day')
-             AND expiry_date >= CURRENT_DATE
            ORDER BY expiry_date ASC`
         ).then(r => r.rows)
       );
-      const { ownerId } = req.rlsCtx;
-      for (const p of rows) await enqueueRenewalAlert(ownerId, p);
       ok(res, rows);
+    } finally { client.release(); }
+  } catch (e) { next(e); }
+});
+
+// POST /policies/check-renewals — cron-driven (see insurance-renewal-alerts.sh).
+// Two tiers, each fired exactly once per expiry cycle:
+//   - standard: policy enters its renewal_alert_days window (Tier 2 — daily digest)
+//   - urgent:   policy is within 7 days of expiry, or already past expiry and
+//               still marked active (Tier 1 — immediate)
+// Both dedup flags reset to NULL on PATCH when expiry_date changes (renewed).
+insuranceRouter.post('/policies/check-renewals', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const client = await familyPool.connect();
+    try {
+      const { standard, urgent } = await withOwnerRLS(client, req.rlsCtx, async (c) => {
+        const standardRows = await c.query(
+          `SELECT id, policy_number, insurer_name, policy_type, expiry_date::text
+           FROM fin_insurance_policies
+           WHERE is_active = true
+             AND renewal_notice_sent_at IS NULL
+             AND expiry_date <= CURRENT_DATE + (renewal_alert_days * INTERVAL '1 day')`
+        ).then(r => r.rows);
+        for (const p of standardRows) {
+          await fireRenewalNotification(p, false);
+          await createRenewalReminderCalendarEvent(p, (sql, params) => c.query(sql, params));
+          await c.query(`UPDATE fin_insurance_policies SET renewal_notice_sent_at = now() WHERE id = $1`, [p.id]);
+        }
+
+        const urgentRows = await c.query(
+          `SELECT id, policy_number, insurer_name, policy_type, expiry_date::text
+           FROM fin_insurance_policies
+           WHERE is_active = true
+             AND renewal_notice_urgent_sent_at IS NULL
+             AND expiry_date <= CURRENT_DATE + INTERVAL '7 days'`
+        ).then(r => r.rows);
+        for (const p of urgentRows) {
+          await fireRenewalNotification(p, true);
+          await c.query(`UPDATE fin_insurance_policies SET renewal_notice_urgent_sent_at = now() WHERE id = $1`, [p.id]);
+        }
+
+        return { standard: standardRows.length, urgent: urgentRows.length };
+      });
+      logger.info({ entity: 'Insurance', action: 'RENEWAL_CHECK_COMPLETE', standard_sent: standard, urgent_sent: urgent });
+      ok(res, { standard_sent: standard, urgent_sent: urgent });
     } finally { client.release(); }
   } catch (e) { next(e); }
 });
@@ -337,13 +397,29 @@ insuranceRouter.patch('/policies/:id', async (req: Request, res: Response, next:
     try {
       const rec = await withOwnerRLS(client, req.rlsCtx, async (c) => {
         const setClauses = fields.map((k, i) => `${k} = $${i + 2}`).join(', ');
+
+        let staleRenewalCalEventId: string | null = null;
+        if (b.expiry_date !== undefined) {
+          const { rows: cur } = await c.query(
+            `SELECT renewal_notice_calendar_event_id FROM fin_insurance_policies WHERE id = $1`,
+            [req.params.id],
+          );
+          staleRenewalCalEventId = cur[0]?.renewal_notice_calendar_event_id ?? null;
+        }
+        const renewalReset = b.expiry_date !== undefined
+          ? `, renewal_notice_sent_at = NULL, renewal_notice_urgent_sent_at = NULL, renewal_notice_calendar_event_id = NULL`
+          : '';
         const { rows } = await c.query(
-          `UPDATE fin_insurance_policies SET ${setClauses}, updated_at = now()
+          `UPDATE fin_insurance_policies SET ${setClauses}, updated_at = now()${renewalReset}
            WHERE id = $1 RETURNING *`,
           [req.params.id, ...fields.map(k => b[k])]
         );
         const updated = rows[0] ?? null;
         if (!updated) return null;
+
+        if (staleRenewalCalEventId) {
+          try { await deleteCalendarEvent(staleRenewalCalEventId); } catch { /* stale */ }
+        }
 
         await c.query(
           `INSERT INTO fin_insurance_policy_history
