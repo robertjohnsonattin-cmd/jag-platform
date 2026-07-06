@@ -5,6 +5,7 @@ import { financeApi } from '../../api/finance'
 import { imsApi } from '../../api/ims'
 import { propertiesApi } from '../../api/properties'
 import { jabcoApi } from '../../api/jabco'
+import { tenantApi } from '../../api/client'
 import { entityName, fmtTTD, fmtDate } from '../../lib/entities'
 import type {
   InsurancePolicy, InsurancePremium, InsuranceClaim as _InsuranceClaim,
@@ -609,7 +610,25 @@ export default function InsurancePanel() {
   const [policyHistory, setPolicyHistory] = useState<{ id: string; name: string } | null>(null)
   const [filterActive, setFilterActive] = useState<'true' | 'false' | ''>('')
   const [filterType, setFilterType] = useState<InsurancePolicyType | ''>('')
+  const [syncing, setSyncing] = useState(false)
+  const [syncResult, setSyncResult] = useState<{ total_events_created: number; failed: number } | null>(null)
   const qc = useQueryClient()
+
+  const syncToCalendar = async () => {
+    setSyncing(true); setSyncResult(null)
+    try {
+      const client = tenantApi('00000000-0000-0000-0001-000000000001')
+      const result = await client.post<{ total_events_created: number; insurance_events: number; failed: number }>(
+        '/admin/calendar/backfill', {}
+      )
+      setSyncResult({ total_events_created: result.total_events_created, failed: result.failed })
+      void qc.invalidateQueries({ queryKey: ['finance', 'insurance'] })
+    } catch {
+      setSyncResult({ total_events_created: 0, failed: 1 })
+    } finally {
+      setSyncing(false)
+    }
+  }
 
   const { data: policies = [], isLoading } = useQuery({
     queryKey: ['finance', 'insurance', 'policies', filterActive, filterType],
@@ -711,7 +730,20 @@ export default function InsurancePanel() {
           <option value="true">{t('common.active')}</option>
           <option value="false">{t('common.inactive')}</option>
         </select>
-        <div className="ml-auto">
+        <div className="ml-auto flex items-center gap-2">
+          {syncResult && (
+            <span className={`text-xs ${syncResult.failed > 0 ? 'text-red-400' : 'text-green-400'}`}>
+              {syncResult.failed > 0
+                ? `⚠ ${syncResult.failed} failed`
+                : `✓ ${syncResult.total_events_created} event${syncResult.total_events_created !== 1 ? 's' : ''} synced`}
+            </span>
+          )}
+          <button
+            onClick={syncToCalendar}
+            disabled={syncing}
+            className="px-3 py-1.5 bg-slate-700 hover:bg-green-800 disabled:opacity-50 text-slate-300 hover:text-white text-xs rounded-lg transition-colors"
+            title={t('insurance.syncCalendarTooltip')}
+          >{syncing ? '⏳' : '📅'} {t('insurance.syncCalendarBtn')}</button>
           <button onClick={() => setShowAdd(true)} className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-sm rounded-lg transition-colors">{t('insurance.addBtn')}</button>
         </div>
       </div>
