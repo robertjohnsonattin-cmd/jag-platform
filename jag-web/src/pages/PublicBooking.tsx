@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 
 interface Photo {
@@ -21,15 +21,9 @@ interface BookingUnit {
   city: string | null
 }
 
-interface Slot {
-  start: string
-  end: string
-}
-
 interface BookingData {
   unit: BookingUnit
   photos: Photo[]
-  available_slots: Slot[]
 }
 
 const API_BASE = '/api/v1/public/book'
@@ -65,25 +59,6 @@ function YesNoToggle({ label, value, onChange }: { label: string; value: boolean
   )
 }
 
-const TT_TZ = 'America/Port_of_Spain'
-
-function dayKey(iso: string): string {
-  // en-CA gives YYYY-MM-DD, a stable sortable/groupable key in Trinidad time
-  return new Date(iso).toLocaleDateString('en-CA', { timeZone: TT_TZ })
-}
-
-function fmtDayLabel(iso: string): string {
-  return new Date(iso).toLocaleDateString('en-TT', {
-    weekday: 'short', month: 'short', day: 'numeric', timeZone: TT_TZ,
-  })
-}
-
-function fmtTime(iso: string): string {
-  return new Date(iso).toLocaleTimeString('en-TT', {
-    hour: 'numeric', minute: '2-digit', timeZone: TT_TZ,
-  })
-}
-
 export default function PublicBooking() {
   const { slug } = useParams<{ slug: string }>()
   const [data, setData] = useState<BookingData | null>(null)
@@ -106,8 +81,6 @@ export default function PublicBooking() {
   const [evictionDetails, setEvictionDetails] = useState('')
   const [canProvideReferences, setCanProvideReferences] = useState<boolean | null>(null)
 
-  const [selectedDay, setSelectedDay] = useState<string | null>(null)
-  const [selectedSlot, setSelectedSlot] = useState<string | null>(null)
   const [name, setName] = useState('')
   const [phone, setPhone] = useState('')
   const [email, setEmail] = useState('')
@@ -131,28 +104,13 @@ export default function PublicBooking() {
       .finally(() => setLoading(false))
   }, [slug])
 
-  const slotsByDay = useMemo(() => {
-    const map = new Map<string, Slot[]>()
-    for (const s of data?.available_slots ?? []) {
-      const key = dayKey(s.start)
-      if (!map.has(key)) map.set(key, [])
-      map.get(key)!.push(s)
-    }
-    return map
-  }, [data])
-  const dayKeys = useMemo(() => Array.from(slotsByDay.keys()), [slotsByDay])
-
-  useEffect(() => {
-    if (!selectedDay && dayKeys.length > 0) setSelectedDay(dayKeys[0])
-  }, [dayKeys, selectedDay])
-
   const screeningComplete =
     employmentStatus !== '' && incomeRange !== '' && adults.trim() !== '' && children.trim() !== '' &&
     hasPets !== null && isSmoker !== null && moveInDate.trim() !== '' && reasonForMoving.trim() !== '' &&
     consentsBackgroundCheck !== null && evictedOrBrokeLease !== null && canProvideReferences !== null
 
   async function submitBooking() {
-    if (!slug || !selectedSlot || !name.trim() || !phone.trim() || !screeningComplete) return
+    if (!slug || !name.trim() || !phone.trim() || !screeningComplete) return
     setSubmitting(true)
     setSubmitError(null)
     try {
@@ -163,7 +121,6 @@ export default function PublicBooking() {
           prospect_name: name.trim(),
           prospect_phone: phone.trim(),
           prospect_email: email.trim() || undefined,
-          slot_start: selectedSlot,
           screening_answers: {
             employment_status: employmentStatus,
             monthly_income_range: incomeRange,
@@ -210,7 +167,7 @@ export default function PublicBooking() {
     )
   }
 
-  const { unit, photos, available_slots } = data
+  const { unit, photos } = data
   const rent = fmtMoney(unit.rent_amount) ?? fmtMoney(unit.suggested_rent_recommended_ttd)
 
   return (
@@ -268,17 +225,15 @@ export default function PublicBooking() {
         )}
 
         <div className="border-t border-slate-700 pt-6">
-          <h2 className="text-lg font-semibold mb-4">Book a Viewing</h2>
+          <h2 className="text-lg font-semibold mb-4">Request a Viewing</h2>
 
           {confirmed ? (
             <div className="rounded-lg border border-emerald-700 bg-emerald-900/20 p-4">
-              <p className="text-emerald-300 font-semibold mb-1">Viewing requested!</p>
+              <p className="text-emerald-300 font-semibold mb-1">Request received!</p>
               <p className="text-sm text-slate-300">
-                We've received your request and will confirm the exact address and details by WhatsApp shortly.
+                We're reviewing your details and will send you a WhatsApp message with a link to pick a viewing time shortly.
               </p>
             </div>
-          ) : available_slots.length === 0 ? (
-            <p className="text-sm text-slate-400">No viewing slots are currently available. Please check back soon, or contact us directly.</p>
           ) : !screeningOpen ? (
             <button
               onClick={() => setScreeningOpen(true)}
@@ -363,72 +318,33 @@ export default function PublicBooking() {
               {!screeningComplete ? (
                 <p className="text-xs text-slate-500 mb-6">Please answer all the questions above to continue.</p>
               ) : (
-                <>
-                  <p className="text-sm text-slate-400 mb-2">Choose a day</p>
-                  <div className="flex gap-2 overflow-x-auto pb-1 mb-3 -mx-1 px-1">
-                    {dayKeys.map(dk => {
-                      const first = slotsByDay.get(dk)![0]
-                      return (
-                        <button
-                          key={dk}
-                          onClick={() => { setSelectedDay(dk); setSelectedSlot(null) }}
-                          className={`shrink-0 text-xs px-3 py-2 rounded-lg border whitespace-nowrap transition ${
-                            selectedDay === dk
-                              ? 'border-emerald-500 bg-emerald-900/30 text-emerald-300'
-                              : 'border-slate-700 text-slate-300 hover:border-slate-500'
-                          }`}
-                        >
-                          {fmtDayLabel(first.start)}
-                        </button>
-                      )
-                    })}
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-400 mb-1">Your Name</label>
+                    <input value={name} onChange={e => setName(e.target.value)}
+                      className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm" placeholder="Full name" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-400 mb-1">WhatsApp / Phone Number</label>
+                    <input value={phone} onChange={e => setPhone(e.target.value)}
+                      className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm" placeholder="e.g. 18681234567" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-400 mb-1">Email (optional)</label>
+                    <input value={email} onChange={e => setEmail(e.target.value)}
+                      className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm" placeholder="you@example.com" />
                   </div>
 
-                  <p className="text-sm text-slate-400 mb-2">Choose a time</p>
-                  <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 mb-6">
-                    {(selectedDay ? slotsByDay.get(selectedDay) ?? [] : []).map(s => (
-                      <button
-                        key={s.start}
-                        onClick={() => setSelectedSlot(s.start)}
-                        className={`text-xs px-2 py-1.5 rounded-lg border transition ${
-                          selectedSlot === s.start
-                            ? 'border-emerald-500 bg-emerald-900/30 text-emerald-300'
-                            : 'border-slate-700 text-slate-300 hover:border-slate-500'
-                        }`}
-                      >
-                        {fmtTime(s.start)}
-                      </button>
-                    ))}
-                  </div>
+                  {submitError && <p className="text-xs text-red-400">{submitError}</p>}
 
-                  <div className="space-y-3">
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-400 mb-1">Your Name</label>
-                      <input value={name} onChange={e => setName(e.target.value)}
-                        className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm" placeholder="Full name" />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-400 mb-1">WhatsApp / Phone Number</label>
-                      <input value={phone} onChange={e => setPhone(e.target.value)}
-                        className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm" placeholder="e.g. 18681234567" />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-400 mb-1">Email (optional)</label>
-                      <input value={email} onChange={e => setEmail(e.target.value)}
-                        className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm" placeholder="you@example.com" />
-                    </div>
-
-                    {submitError && <p className="text-xs text-red-400">{submitError}</p>}
-
-                    <button
-                      onClick={() => void submitBooking()}
-                      disabled={!selectedSlot || !name.trim() || !phone.trim() || submitting}
-                      className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-semibold py-2.5 rounded-lg text-sm transition"
-                    >
-                      {submitting ? 'Booking…' : 'Request This Viewing'}
-                    </button>
-                  </div>
-                </>
+                  <button
+                    onClick={() => void submitBooking()}
+                    disabled={!name.trim() || !phone.trim() || submitting}
+                    className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-semibold py-2.5 rounded-lg text-sm transition"
+                  >
+                    {submitting ? 'Submitting…' : 'Submit Request'}
+                  </button>
+                </div>
               )}
             </>
           )}

@@ -5,9 +5,11 @@
 // DELETE /api/v1/properties/enquiries/:id
 // POST   /api/v1/properties/enquiries/:id/send-reply
 // POST   /api/v1/properties/enquiries/:id/send-app-link
+// POST   /api/v1/properties/enquiries/:id/screening-decision
 
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import { z } from 'zod';
+import { randomBytes } from 'crypto';
 import { withOwnerRLS } from '../../middleware/rls';
 import { propertiesPool } from '../../db/index';
 import { logger } from '../../lib/logger';
@@ -48,6 +50,10 @@ const SendReplySchema = z.object({
 
 const SendAppLinkSchema = z.object({
   application_link: z.string().url(),
+}).strict();
+
+const ScreeningDecisionSchema = z.object({
+  decision: z.enum(['APPROVE', 'REJECT']),
 }).strict();
 
 enquiriesRouter.get('/', async (req: Request, res: Response, next: NextFunction) => {
@@ -267,5 +273,77 @@ enquiriesRouter.post('/:id/send-app-link', async (req: Request, res: Response, n
       );
     });
     res.json(ok({ sent: true }));
+  } catch (e) { next(e); }
+});
+
+// Owner reviews screening answers submitted on the public booking page and either
+// approves (issuing a one-time schedule_token the prospect uses to pick a slot at
+// /api/v1/public/schedule/:token) or rejects the request.
+enquiriesRouter.post('/:id/screening-decision', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const ownerId = req.rlsCtx.userId;
+    if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
+    const { id } = IdParam.parse(req.params);
+    const { decision } = ScreeningDecisionSchema.parse(req.body);
+
+    const enquiry = await withOwnerRLS(propertiesPool, ownerId, async client => {
+      const { rows } = await client.query(`SELECT * FROM prop_enquiries WHERE id = $1 AND owner_id = $2`, [id, ownerId]);
+      return rows[0] ?? null;
+    });
+    if (!enquiry) return void res.status(404).json(err('Enquiry not found', 'NOT_FOUND'));
+    if (enquiry.stage !== 'SCREENING') {
+      return void res.status(400).json(err('Enquiry is not awaiting screening review', 'VALIDATION_ERROR'));
+    }
+
+    if (decision === 'APPROVE') {
+      const token = randomBytes(24).toString('hex');
+      const row = await withOwnerRLS(propertiesPool, ownerId, async client => {
+        const { rows } = await client.query(
+          `UPDATE prop_enquiries
+           SET stage = 'APPROVED', schedule_token = $1, schedule_token_expires_at = NOW() + INTERVAL '7 days',
+               screening_reviewed_at = NOW(), screening_reviewed_by = $2
+           WHERE id = $3 RETURNING *`,
+          [token, ownerId, id],
+        );
+        return rows[0];
+      });
+      logger.info({ entity: 'PROPERTIES', action: 'SCREENING_APPROVED', record_id: id, user_id: ownerId });
+
+      // Requires a Meta-approved WhatsApp template ("jag_enq_screening_approved" —
+      // body param: prospect name; button: URL param carrying the schedule link).
+      // Until that template is approved, this call fails silently (logged as a
+      // warning) — approve manually via WhatsApp using the schedule_token URL below.
+      if (enquiry.prospect_phone) {
+        const scheduleBase = process.env.PUBLIC_SCHEDULE_BASE_URL ?? 'https://jagcorporate.com/schedule';
+        sendTemplate({
+          to: enquiry.prospect_phone,
+          templateName: 'jag_enq_screening_approved',
+          components: [
+            { type: 'body', parameters: [{ type: 'text', text: enquiry.prospect_name ?? 'there' }] },
+            { type: 'button', sub_type: 'url', index: '0', parameters: [{ type: 'text', text: `${scheduleBase}/${token}` }] },
+          ],
+        }).catch(e => logger.warn({ entity: 'PROPERTIES', action: 'WA_SCREENING_APPROVED_FAILED', error_message: (e as Error).message }));
+      }
+      res.json(ok(row));
+    } else {
+      const row = await withOwnerRLS(propertiesPool, ownerId, async client => {
+        const { rows } = await client.query(
+          `UPDATE prop_enquiries SET stage = 'REJECTED', screening_reviewed_at = NOW(), screening_reviewed_by = $1 WHERE id = $2 RETURNING *`,
+          [ownerId, id],
+        );
+        return rows[0];
+      });
+      logger.info({ entity: 'PROPERTIES', action: 'SCREENING_REJECTED', record_id: id, user_id: ownerId });
+
+      // Requires a Meta-approved WhatsApp template ("jag_enq_screening_declined" — body param: prospect name).
+      if (enquiry.prospect_phone) {
+        sendTemplate({
+          to: enquiry.prospect_phone,
+          templateName: 'jag_enq_screening_declined',
+          components: [{ type: 'body', parameters: [{ type: 'text', text: enquiry.prospect_name ?? 'there' }] }],
+        }).catch(e => logger.warn({ entity: 'PROPERTIES', action: 'WA_SCREENING_DECLINED_FAILED', error_message: (e as Error).message }));
+      }
+      res.json(ok(row));
+    }
   } catch (e) { next(e); }
 });

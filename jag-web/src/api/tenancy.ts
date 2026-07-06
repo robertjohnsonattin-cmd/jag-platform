@@ -38,6 +38,10 @@ export const tenancyApi = {
   sendAppLink: (id: string) =>
     api.post<void>(`/properties/enquiries/${id}/send-app-link`, {}),
 
+  /** Approve or reject a viewing request after reviewing its screening answers */
+  screeningDecision: (id: string, decision: 'APPROVE' | 'REJECT') =>
+    api.post<Row>(`/properties/enquiries/${id}/screening-decision`, { decision }),
+
   // ── Viewings ─────────────────────────────────────────────
   getViewings: (params?: { status?: string }) =>
     api.get<Row[]>(`/properties/viewings${qs(params)}`),

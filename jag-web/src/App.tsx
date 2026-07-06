@@ -25,6 +25,7 @@ import Reports from './pages/Reports'
 import Export from './pages/Export'
 import HR from './pages/HR'
 import PublicBooking from './pages/PublicBooking'
+import PublicSchedule from './pages/PublicSchedule'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -80,7 +81,7 @@ export default function App() {
   // Public booking pages must never touch Keycloak (AuthProvider forces
   // onLoad: 'login-required', which redirects anonymous prospects to login
   // before anything can render). Checked before AuthProvider ever mounts.
-  const isPublicBooking = window.location.pathname.startsWith('/book/')
+  const isPublicBooking = window.location.pathname.startsWith('/book/') || window.location.pathname.startsWith('/schedule/')
 
   return (
     <QueryClientProvider client={queryClient}>
@@ -88,6 +89,7 @@ export default function App() {
         <BrowserRouter>
           <Routes>
             <Route path="/book/:slug" element={<PublicBooking />} />
+            <Route path="/schedule/:token" element={<PublicSchedule />} />
           </Routes>
         </BrowserRouter>
       ) : (

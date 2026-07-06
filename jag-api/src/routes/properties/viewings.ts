@@ -13,9 +13,11 @@ import { ok, err } from '../../lib/response';
 import { getAvailableSlots, createCalendarEvent } from '../../lib/google-calendar';
 import { sendTemplate } from '../../lib/whatsapp';
 import { BUCKET_PHOTOS, getPresignedGetUrl } from '../../lib/minio';
+import { enqueueNotification } from '../../lib/notifications';
 
 export const viewingsRouter = Router();
 export const publicBookingRouter = Router();
+export const publicScheduleRouter = Router();
 
 // The public booking page has no authenticated user/owner context, but prop_units
 // is RLS-protected on owner_id. JAG is a single-owner platform, so the public route
@@ -25,6 +27,7 @@ const PUBLIC_LISTING_OWNER_ID =
 
 const IdParam      = z.object({ id: z.string().uuid() });
 const SlugParam    = z.object({ slug: z.string().min(1) });
+const TokenParam   = z.object({ token: z.string().min(1) });
 const ViewingStatusEnum = z.enum(['SCHEDULED','CONFIRMED','COMPLETED','NO_SHOW','CANCELLED','RESCHEDULED']);
 
 const PatchViewingSchema = z.object({
@@ -49,12 +52,19 @@ const ScreeningAnswersSchema = z.object({
   can_provide_references:    z.boolean(),
 }).strict();
 
-const BookingSchema = z.object({
+// Step 1 (public, no auth): prospect submits screening answers only — no slot yet.
+// The owner reviews these before any date is offered (see enquiriesRouter POST
+// /:id/screening-decision). Only on approval is a schedule_token issued.
+const ScreeningSubmitSchema = z.object({
   prospect_name:      z.string().min(1).max(200),
   prospect_phone:     z.string().min(7).max(30),
   prospect_email:     z.string().email().optional(),
-  slot_start:         z.string(), // ISO datetime
   screening_answers:  ScreeningAnswersSchema,
+}).strict();
+
+// Step 2 (public, no auth): prospect uses the schedule_token issued after approval to pick a slot.
+const ScheduleBookingSchema = z.object({
+  slot_start: z.string(), // ISO datetime
 }).strict();
 
 viewingsRouter.get('/available-slots', async (req: Request, res: Response, next: NextFunction) => {
@@ -273,13 +283,14 @@ viewingsRouter.patch('/:id', async (req: Request, res: Response, next: NextFunct
 });
 
 // ── Public booking (no Keycloak auth) ────────────────────────────────────────
+// Two steps: (1) prospect submits screening answers only, no date is offered;
+// (2) after the owner reviews and approves (enquiriesRouter POST
+// /:id/screening-decision), a one-time link at /api/v1/public/schedule/:token
+// lets the prospect pick an actual slot.
 
 publicBookingRouter.get('/:slug', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { slug } = SlugParam.parse(req.params);
-    const lookahead = parseInt(process.env.GOOGLE_CALENDAR_LOOKAHEAD_DAYS ?? '14', 10);
-    const from = new Date();
-    const to   = new Date(Date.now() + lookahead * 86400_000);
 
     const unit = await withOwnerRLS(propertiesPool, PUBLIC_LISTING_OWNER_ID, async client => {
       const { rows } = await client.query(
@@ -311,23 +322,18 @@ publicBookingRouter.get('/:slug', async (req: Request, res: Response, next: Next
       })),
     ).then(arr => arr.filter(p => p.url !== null));
 
-    let slots: unknown[] = [];
-    try { slots = await getAvailableSlots(from, to); } catch (e) {
-      logger.warn({ entity: 'PUBLIC_BOOKING', action: 'SLOTS_UNAVAILABLE', error_message: (e as Error).message });
-    }
-
-    res.json(ok({ unit, photos, available_slots: slots }));
+    res.json(ok({ unit, photos }));
   } catch (e) { next(e); }
 });
 
 publicBookingRouter.post('/:slug', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { slug } = SlugParam.parse(req.params);
-    const body = BookingSchema.parse(req.body);
+    const body = ScreeningSubmitSchema.parse(req.body);
 
     const unit = await withOwnerRLS(propertiesPool, PUBLIC_LISTING_OWNER_ID, async client => {
       const { rows } = await client.query(
-        `SELECT u.*, p.name AS property_name, p.address_line1, p.city, p.owner_id
+        `SELECT u.*, p.owner_id
          FROM prop_units u
          LEFT JOIN prop_properties p ON p.id = u.property_id
          WHERE u.booking_slug = $1 AND u.listing_status = 'LISTED'`,
@@ -338,47 +344,129 @@ publicBookingRouter.post('/:slug', async (req: Request, res: Response, next: Nex
 
     if (!unit) return void res.status(404).json(err('Unit not found or not listed', 'NOT_FOUND'));
 
+    const ownerId: string = unit.owner_id;
+
+    const enquiry = await withOwnerRLS(propertiesPool, ownerId, async client => {
+      const { rows: [row] } = await client.query(
+        `INSERT INTO prop_enquiries (owner_id, unit_id, property_id, prospect_name, prospect_phone, prospect_email, channel, stage, screening_answers)
+         VALUES ($1,$2,$3,$4,$5,$6,'WHATSAPP','SCREENING',$7) RETURNING id`,
+        [ownerId, unit.id, unit.property_id, body.prospect_name, body.prospect_phone, body.prospect_email ?? null,
+         JSON.stringify(body.screening_answers)],
+      );
+      return row;
+    });
+
+    logger.info({ entity: 'PROPERTIES', action: 'PUBLIC_SCREENING_SUBMITTED', record_id: enquiry.id });
+
+    // Owner in-app notification — a viewing request is awaiting screening review (non-blocking).
+    void enqueueNotification({
+      tier: 2,
+      title: 'Viewing request awaiting screening review',
+      body: `${body.prospect_name} (${body.prospect_phone}) requested a viewing of ${unit.unit_number ?? 'a unit'} — review their answers to approve or decline.`,
+      payload: { module: 'PROPERTIES', kind: 'ENQUIRY', enquiry_id: enquiry.id },
+    });
+
+    res.status(201).json(ok({ enquiry_id: enquiry.id }));
+  } catch (e) { next(e); }
+});
+
+// ── Public scheduling (no Keycloak auth) — step 2, after owner approval ─────
+
+publicScheduleRouter.get('/:token', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { token } = TokenParam.parse(req.params);
+    const lookahead = parseInt(process.env.GOOGLE_CALENDAR_LOOKAHEAD_DAYS ?? '14', 10);
+    const from = new Date();
+    const to   = new Date(Date.now() + lookahead * 86400_000);
+
+    const enquiry = await withOwnerRLS(propertiesPool, PUBLIC_LISTING_OWNER_ID, async client => {
+      const { rows } = await client.query(
+        `SELECT e.id, e.stage, e.schedule_token_expires_at, e.prospect_name,
+                u.unit_number, p.address_line1, p.city, p.name AS property_name
+         FROM prop_enquiries e
+         JOIN prop_units u ON u.id = e.unit_id
+         LEFT JOIN prop_properties p ON p.id = u.property_id
+         WHERE e.schedule_token = $1`,
+        [token],
+      );
+      return rows[0] ?? null;
+    });
+
+    const expired = enquiry?.schedule_token_expires_at && new Date(enquiry.schedule_token_expires_at) < new Date();
+    if (!enquiry || enquiry.stage !== 'APPROVED' || expired) {
+      return void res.status(404).json(err('This scheduling link is invalid or has expired', 'NOT_FOUND'));
+    }
+
+    let slots: unknown[] = [];
+    try { slots = await getAvailableSlots(from, to); } catch (e) {
+      logger.warn({ entity: 'PUBLIC_SCHEDULE', action: 'SLOTS_UNAVAILABLE', error_message: (e as Error).message });
+    }
+
+    res.json(ok({ enquiry, available_slots: slots }));
+  } catch (e) { next(e); }
+});
+
+publicScheduleRouter.post('/:token', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { token } = TokenParam.parse(req.params);
+    const body = ScheduleBookingSchema.parse(req.body);
+
+    const enquiry = await withOwnerRLS(propertiesPool, PUBLIC_LISTING_OWNER_ID, async client => {
+      const { rows } = await client.query(
+        `SELECT e.*, u.unit_number, p.address_line1, p.city
+         FROM prop_enquiries e
+         JOIN prop_units u ON u.id = e.unit_id
+         LEFT JOIN prop_properties p ON p.id = u.property_id
+         WHERE e.schedule_token = $1`,
+        [token],
+      );
+      return rows[0] ?? null;
+    });
+
+    const expired = enquiry?.schedule_token_expires_at && new Date(enquiry.schedule_token_expires_at) < new Date();
+    if (!enquiry || enquiry.stage !== 'APPROVED' || expired) {
+      return void res.status(404).json(err('This scheduling link is invalid or has expired', 'NOT_FOUND'));
+    }
+
+    const ownerId: string = enquiry.owner_id;
     const slotStart = new Date(body.slot_start);
     const slotEnd   = new Date(slotStart.getTime() + parseInt(process.env.GOOGLE_CALENDAR_SLOT_DURATION_MIN ?? '30', 10) * 60_000);
-    const ownerId: string = unit.owner_id;
-    const address = `${unit.address_line1 ?? unit.unit_number}, ${unit.city ?? ''}`;
+    const address = `${enquiry.address_line1 ?? enquiry.unit_number}, ${enquiry.city ?? ''}`;
 
     let googleEventId: string | null = null;
     try {
       googleEventId = await createCalendarEvent({
-        title: `Property Viewing — ${address} — ${body.prospect_name}`,
-        description: `Unit: ${unit.unit_number}\nAddress: ${address}\nProspect phone: ${body.prospect_phone}\nJAG Properties`,
+        title: `Property Viewing — ${address} — ${enquiry.prospect_name}`,
+        description: `Unit: ${enquiry.unit_number}\nAddress: ${address}\nProspect phone: ${enquiry.prospect_phone}\nJAG Properties`,
         start: slotStart.toISOString(),
         end: slotEnd.toISOString(),
-        attendeeEmails: [process.env.GOOGLE_CALENDAR_ID ?? '', ...(body.prospect_email ? [body.prospect_email] : [])],
+        attendeeEmails: [process.env.GOOGLE_CALENDAR_ID ?? '', ...(enquiry.prospect_email ? [enquiry.prospect_email] : [])],
       });
     } catch (e) {
-      logger.warn({ entity: 'PUBLIC_BOOKING', action: 'CALENDAR_EVENT_FAILED', error_message: (e as Error).message });
+      logger.warn({ entity: 'PUBLIC_SCHEDULE', action: 'CALENDAR_EVENT_FAILED', error_message: (e as Error).message });
     }
 
-    const result = await withOwnerRLS(propertiesPool, ownerId, async client => {
-      const { rows: [enquiry] } = await client.query(
-        `INSERT INTO prop_enquiries (owner_id, unit_id, property_id, prospect_name, prospect_phone, prospect_email, channel, stage, screening_answers)
-         VALUES ($1,$2,$3,$4,$5,$6,'WHATSAPP','VIEWING_SCHEDULED',$7) RETURNING id`,
-        [ownerId, unit.id, unit.property_id, body.prospect_name, body.prospect_phone, body.prospect_email ?? null,
-         JSON.stringify(body.screening_answers)],
-      );
-      const { rows: [viewing] } = await client.query(
+    const viewing = await withOwnerRLS(propertiesPool, ownerId, async client => {
+      const { rows: [v] } = await client.query(
         `INSERT INTO prop_viewings (owner_id, enquiry_id, unit_id, scheduled_at, google_event_id)
          VALUES ($1,$2,$3,$4,$5) RETURNING *`,
-        [ownerId, enquiry.id, unit.id, slotStart, googleEventId],
+        [ownerId, enquiry.id, enquiry.unit_id, slotStart, googleEventId],
       );
-      return { enquiry_id: enquiry.id, viewing };
+      await client.query(
+        `UPDATE prop_enquiries SET stage = 'VIEWING_SCHEDULED', schedule_token = NULL, schedule_token_expires_at = NULL WHERE id = $1`,
+        [enquiry.id],
+      );
+      return v;
     });
 
     try {
       await sendTemplate({
-        to: body.prospect_phone,
+        to: enquiry.prospect_phone,
         templateName: 'jag_enq_viewing_confirm',
         components: [{
           type: 'body',
           parameters: [
-            { type: 'text', text: body.prospect_name },
+            { type: 'text', text: enquiry.prospect_name },
             { type: 'text', text: address },
             { type: 'text', text: slotStart.toLocaleDateString('en-TT') },
             { type: 'text', text: slotStart.toLocaleTimeString('en-TT', { hour: '2-digit', minute: '2-digit' }) },
@@ -386,9 +474,9 @@ publicBookingRouter.post('/:slug', async (req: Request, res: Response, next: Nex
         }],
       });
     } catch (e) {
-      logger.warn({ entity: 'PUBLIC_BOOKING', action: 'WA_CONFIRM_FAILED', error_message: (e as Error).message });
+      logger.warn({ entity: 'PUBLIC_SCHEDULE', action: 'WA_CONFIRM_FAILED', error_message: (e as Error).message });
     }
 
-    res.status(201).json(ok({ ...result, slot_start: slotStart, slot_end: slotEnd }));
+    res.status(201).json(ok({ viewing, slot_start: slotStart, slot_end: slotEnd }));
   } catch (e) { next(e); }
 });

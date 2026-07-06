@@ -68,23 +68,57 @@ export async function getAvailableSlots(from: Date, to: Date): Promise<TimeSlot[
   }
 }
 
+// Returns the calendar date (Y/M/D) that `date` falls on inside `timeZone`.
+function ymdInTz(date: Date, timeZone: string): { y: number; m: number; d: number } {
+  const parts = new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(date);
+  const map: Record<string, string> = {};
+  for (const p of parts) map[p.type] = p.value;
+  return { y: Number(map.year), m: Number(map.month), d: Number(map.day) };
+}
+
+// Finds the UTC instant whose wall-clock reading in `timeZone` is y/m/d hh:mm.
+// The VM's system clock runs in UTC, so building "7:30am Trinidad" via plain
+// Date.setHours() silently produces 7:30am UTC (3:30am Trinidad) instead —
+// this converges on the correct instant regardless of the server's local TZ.
+function zonedWallTimeToUtc(y: number, m: number, d: number, hh: number, mm: number, timeZone: string): Date {
+  const targetMs = Date.UTC(y, m - 1, d, hh, mm, 0);
+  let guessMs = targetMs;
+  for (let i = 0; i < 2; i++) {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone, hourCycle: 'h23',
+      year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',
+    }).formatToParts(new Date(guessMs));
+    const map: Record<string, string> = {};
+    for (const p of parts) map[p.type] = p.value;
+    const wallAsUtc = Date.UTC(Number(map.year), Number(map.month) - 1, Number(map.day), Number(map.hour), Number(map.minute), Number(map.second));
+    const offsetMs = wallAsUtc - guessMs;
+    guessMs = targetMs - offsetMs;
+  }
+  return new Date(guessMs);
+}
+
 function buildAvailableSlots(from: Date, to: Date, busy: TimeSlot[], env: ReturnType<typeof getEnv>): TimeSlot[] {
   const slots: TimeSlot[] = [];
   const [startH, startM] = env.workStart.split(':').map(Number);
   const [endH, endM] = env.workEnd.split(':').map(Number);
   const slotMs = env.slotMinutes * 60_000;
-  const current = new Date(from);
-  current.setHours(0, 0, 0, 0);
 
-  while (current <= to) {
-    const dayOfWeek = current.getDay();
+  const fromYmd = ymdInTz(from, env.timezone);
+  const toYmd = ymdInTz(to, env.timezone);
+  let cursor = Date.UTC(fromYmd.y, fromYmd.m - 1, fromYmd.d);
+  const cursorEnd = Date.UTC(toYmd.y, toYmd.m - 1, toYmd.d);
+
+  while (cursor <= cursorEnd) {
+    const y = new Date(cursor).getUTCFullYear();
+    const m = new Date(cursor).getUTCMonth() + 1;
+    const d = new Date(cursor).getUTCDate();
+    const dayOfWeek = new Date(cursor).getUTCDay();
+
     if (dayOfWeek !== 0) { // skip Sunday
-      const dayStart = new Date(current);
-      dayStart.setHours(startH, startM, 0, 0);
-      const dayEnd = new Date(current);
-      dayEnd.setHours(endH, endM, 0, 0);
+      const dayStart = zonedWallTimeToUtc(y, m, d, startH, startM, env.timezone);
+      const dayEnd = zonedWallTimeToUtc(y, m, d, endH, endM, env.timezone);
 
-      let slotStart = new Date(dayStart);
+      let slotStart = dayStart;
       while (slotStart.getTime() + slotMs <= dayEnd.getTime()) {
         const slotEnd = new Date(slotStart.getTime() + slotMs);
         const overlaps = busy.some(b => {
@@ -98,7 +132,7 @@ function buildAvailableSlots(from: Date, to: Date, busy: TimeSlot[], env: Return
         slotStart = new Date(slotStart.getTime() + slotMs);
       }
     }
-    current.setDate(current.getDate() + 1);
+    cursor += 86_400_000;
   }
   return slots;
 }
@@ -111,6 +145,11 @@ export interface CalendarEventInput {
   attendeeEmails: string[];
 }
 
+// Used exclusively for property viewing bookings. Multiple prospects can be shown
+// an apartment together, so a booked viewing must NOT remove that slot from
+// availability for the next prospect — created as "transparent" (free) so
+// Google's freeBusy check ignores it. Robert's own manually-added calendar
+// events stay opaque/busy by default and still block as normal.
 export async function createCalendarEvent(event: CalendarEventInput): Promise<string> {
   const env = getEnv();
   const token = await getAccessToken();
@@ -123,6 +162,7 @@ export async function createCalendarEvent(event: CalendarEventInput): Promise<st
       start: { dateTime: event.start, timeZone: env.timezone },
       end: { dateTime: event.end, timeZone: env.timezone },
       attendees: event.attendeeEmails.map(email => ({ email })),
+      transparency: 'transparent',
       sendUpdates: 'all',
     }),
   });

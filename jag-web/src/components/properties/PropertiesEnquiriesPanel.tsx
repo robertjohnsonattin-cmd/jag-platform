@@ -54,6 +54,11 @@ export default function PropertiesEnquiriesPanel() {
     onSuccess: () => { setShowAdd(false); qc.invalidateQueries({ queryKey: ['enquiries'] }) },
   })
 
+  const screeningMut = useMutation({
+    mutationFn: (decision: 'APPROVE' | 'REJECT') => tenancyApi.screeningDecision(selected!, decision),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['enquiries'] }); qc.invalidateQueries({ queryKey: ['enquiry', selected] }) },
+  })
+
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
     setForm(f => ({ ...f, [k]: e.target.value }))
 
@@ -102,10 +107,16 @@ export default function PropertiesEnquiriesPanel() {
 
             <div>
               <p className="text-xs text-slate-500 mb-1">{t('tenancy.stage', 'Stage')}</p>
-              <select className={cls} value={String(detail['stage'])}
-                onChange={e => patchMut.mutate({ id: selected!, body: { stage: e.target.value } })}>
-                {STAGE_ORDER.map(s => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}
-              </select>
+              {detail['stage'] === 'SCREENING' ? (
+                <p className="text-sm px-3 py-1.5 rounded border border-purple-700 bg-purple-900/30 text-purple-300">
+                  {t('tenancy.awaitingScreeningReview', 'Awaiting your screening review — see below')}
+                </p>
+              ) : (
+                <select className={cls} value={String(detail['stage'])}
+                  onChange={e => patchMut.mutate({ id: selected!, body: { stage: e.target.value } })}>
+                  {STAGE_ORDER.map(s => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}
+                </select>
+              )}
             </div>
 
             {/* Pre-viewing screening answers (collected on the public booking page) */}
@@ -135,6 +146,23 @@ export default function PropertiesEnquiriesPanel() {
                       </div>
                     ))}
                   </div>
+                  {detail['stage'] === 'SCREENING' && (
+                    <div className="flex gap-2 mt-3">
+                      <button onClick={() => screeningMut.mutate('APPROVE')} disabled={screeningMut.isPending}
+                        className="flex-1 px-3 py-1.5 text-sm bg-emerald-700 hover:bg-emerald-600 text-white rounded disabled:opacity-40">
+                        {t('tenancy.approve', 'Approve')}
+                      </button>
+                      <button onClick={() => screeningMut.mutate('REJECT')} disabled={screeningMut.isPending}
+                        className="flex-1 px-3 py-1.5 text-sm bg-red-800 hover:bg-red-700 text-white rounded disabled:opacity-40">
+                        {t('tenancy.decline', 'Decline')}
+                      </button>
+                    </div>
+                  )}
+                  {detail['stage'] === 'APPROVED' && Boolean(detail['schedule_token']) && (
+                    <p className="text-xs text-emerald-400 mt-3">
+                      {t('tenancy.awaitingSlotPick', 'Approved — waiting for prospect to pick a time via their scheduling link.')}
+                    </p>
+                  )}
                 </div>
               )
             })()}
