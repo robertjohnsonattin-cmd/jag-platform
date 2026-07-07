@@ -24,8 +24,8 @@ const RENT_RESTRICTION_THRESHOLD_UNFURNISHED = 1500;
 
 export interface LeasePdfData {
   lease_type: string;
-  start_date: string;
-  end_date: string | null;
+  start_date: string | Date;
+  end_date: string | Date | null;
   monthly_rent: string;
   currency: string;
   security_deposit: string;
@@ -54,12 +54,20 @@ function tenantName(d: LeasePdfData): string {
   return `${d.tenant_first_name ?? ''} ${d.tenant_last_name ?? ''}`.trim();
 }
 
-function parseYMD(iso: string): { y: number; m: number; d: number } {
+// node-postgres returns DATE columns as native Date objects (UTC midnight for
+// that calendar date), not strings — despite most of the rest of the codebase
+// only ever having seen the ISO-string shape from JSON API responses. Handle
+// both: for a Date, read UTC getters (never local getters — Trinidad is
+// UTC-4, so local getters on a UTC-midnight Date shift the day back one).
+function parseYMD(iso: string | Date): { y: number; m: number; d: number } {
+  if (iso instanceof Date) {
+    return { y: iso.getUTCFullYear(), m: iso.getUTCMonth() + 1, d: iso.getUTCDate() };
+  }
   const [y, m, d] = iso.slice(0, 10).split('-').map(Number);
   return { y, m, d };
 }
 
-function fmtDate(iso: string | null): string {
+function fmtDate(iso: string | Date | null): string {
   if (!iso) return 'N/A';
   const { y, m, d } = parseYMD(iso);
   return new Date(y, m - 1, d).toLocaleDateString('en-TT', { day: '2-digit', month: 'long', year: 'numeric' });
@@ -78,7 +86,7 @@ function monthName(m: number): string {
   return new Date(2000, m - 1, 1).toLocaleDateString('en-US', { month: 'long' });
 }
 
-function monthsBetween(startIso: string, endIso: string): number {
+function monthsBetween(startIso: string | Date, endIso: string | Date): number {
   const s = parseYMD(startIso);
   const e = parseYMD(endIso);
   let months = (e.y - s.y) * 12 + (e.m - s.m);
@@ -186,7 +194,7 @@ export function generateLeaseAgreementPdf(d: LeasePdfData, fieldSink?: LeaseSign
     'DURATION',
     isMonthToMonth
       ? `This Agreement shall be on a month-to-month basis commencing on the date stated in Clause 2 above, unless sooner determined in accordance with the terms herein.`
-      : `This Agreement shall be in full force and effect for a term of ${monthsBetween(d.start_date, d.end_date as string)} month(s), commencing on the date stated in Clause 2 above, and shall expire on ${fmtDate(d.end_date)} ("the Expiry Date"), unless sooner determined in accordance with the terms herein.`,
+      : `This Agreement shall be in full force and effect for a term of ${monthsBetween(d.start_date, d.end_date as string | Date)} month(s), commencing on the date stated in Clause 2 above, and shall expire on ${fmtDate(d.end_date)} ("the Expiry Date"), unless sooner determined in accordance with the terms herein.`,
   );
 
   // ── PART II — RENT & PAYMENTS ───────────────────────────────────────────────

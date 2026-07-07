@@ -18,7 +18,7 @@ export interface ConditionReportData {
   property_address: string;
   unit_number: string | null;
   tenant_name: string;
-  event_date: string; // ISO date, the handover's created_at or a supplied date
+  event_date: string | Date; // the handover's created_at (TIMESTAMPTZ, arrives as a Date from pg) or a supplied ISO date
   condition_items: ConditionItem[];
 }
 
@@ -32,12 +32,18 @@ export interface ConditionSignField {
 
 type PDFDoc = InstanceType<typeof PDFDocument>;
 
-function parseYMD(iso: string): { y: number; m: number; d: number } {
+// node-postgres returns DATE/TIMESTAMPTZ columns as native Date objects, not
+// strings — read UTC getters (never local getters, Trinidad is UTC-4) to
+// avoid shifting the calendar day back by one.
+function parseYMD(iso: string | Date): { y: number; m: number; d: number } {
+  if (iso instanceof Date) {
+    return { y: iso.getUTCFullYear(), m: iso.getUTCMonth() + 1, d: iso.getUTCDate() };
+  }
   const [y, m, d] = iso.slice(0, 10).split('-').map(Number);
   return { y, m, d };
 }
 
-function fmtDate(iso: string): string {
+function fmtDate(iso: string | Date): string {
   const { y, m, d } = parseYMD(iso);
   return new Date(y, m - 1, d).toLocaleDateString('en-TT', { day: '2-digit', month: 'long', year: 'numeric' });
 }
