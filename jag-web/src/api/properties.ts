@@ -31,6 +31,11 @@ export const propertiesApi = {
   downloadLeaseAgreement: (propertyId: string, leaseId: string) =>
     api.download(`/properties/${propertyId}/leases/${leaseId}/agreement-pdf`, `lease-agreement-${leaseId}.pdf`),
 
+  sendLeaseForSigning: (propertyId: string, leaseId: string) =>
+    api.post<{ submissionId: string; landlordSigningUrl?: string; tenantSigningUrl?: string }>(
+      `/properties/${propertyId}/leases/${leaseId}/send-for-signing`, {}
+    ),
+
   getRentPayments: (propertyId: string, params?: { page?: number; limit?: number }) =>
     api.get<{ payments: RentPayment[]; pagination: { page: number; limit: number; total: number; pages: number } }>(
       `/properties/${propertyId}/rent-payments${qs(params)}`

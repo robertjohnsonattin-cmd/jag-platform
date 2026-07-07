@@ -115,6 +115,32 @@ traccar.jagcorporate.com {
 	}
 }
 
+# ── sign.jagcorporate.com — DocuSeal e-signature (own UI, jag-api reaches it internally) ─────
+# Tenants/landlord only ever open the embed_src signing page returned by the API —
+# never DocuSeal's own login/dashboard. Embedded as an iframe from jagcorporate.com
+# for the on-site handover-checklist signing flow (see frame-src on the SPA block below).
+
+sign.jagcorporate.com {
+	import cloudflare_tls
+
+	request_body {
+		max_size 10MB
+	}
+
+	reverse_proxy docuseal:3000 {
+		header_up X-Real-IP {http.request.header.CF-Connecting-IP}
+		header_up X-Forwarded-For {http.request.header.CF-Connecting-IP}
+		header_up X-Forwarded-Proto https
+	}
+
+	header {
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+		-Server
+	}
+}
+
 # ── jagcorporate.com / www.jagcorporate.com — JAG React frontend ─────────────────────────────
 
 jagcorporate.com, www.jagcorporate.com {
@@ -127,7 +153,7 @@ jagcorporate.com, www.jagcorporate.com {
 		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
 		# React SPA — scripts/styles from self; API + auth calls to JAG subdomains;
 		# Keycloak iframes allowed for silent token refresh
-		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://*.tile.openstreetmap.org; connect-src 'self' https://api.jagcorporate.com https://auth.jagcorporate.com; font-src 'self'; frame-src https://auth.jagcorporate.com; object-src 'none'; base-uri 'self'; form-action 'self' https://auth.jagcorporate.com"
+		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://*.tile.openstreetmap.org; connect-src 'self' https://api.jagcorporate.com https://auth.jagcorporate.com; font-src 'self'; frame-src https://auth.jagcorporate.com https://sign.jagcorporate.com; object-src 'none'; base-uri 'self'; form-action 'self' https://auth.jagcorporate.com"
 		Cross-Origin-Resource-Policy same-origin
 		-Server
 	}

@@ -21,8 +21,9 @@ export const BUCKET_STATEMENTS = process.env['MINIO_BUCKET_STATEMENTS'] ?? 'jag-
 export const BUCKET_RECEIPTS   = process.env['MINIO_BUCKET_RECEIPTS']   ?? 'jag-receipts';
 export const BUCKET_DOCUMENTS  = process.env['MINIO_BUCKET_DOCUMENTS']  ?? 'jag-documents';
 export const BUCKET_PHOTOS     = process.env['MINIO_BUCKET_PHOTOS']     ?? 'jag-photos';
+export const BUCKET_SIGNED_DOCUMENTS = process.env['MINIO_BUCKET_SIGNED_DOCUMENTS'] ?? 'jag-signed-documents';
 
-export const ALL_BUCKETS = [BUCKET_STATEMENTS, BUCKET_RECEIPTS, BUCKET_DOCUMENTS, BUCKET_PHOTOS] as const;
+export const ALL_BUCKETS = [BUCKET_STATEMENTS, BUCKET_RECEIPTS, BUCKET_DOCUMENTS, BUCKET_PHOTOS, BUCKET_SIGNED_DOCUMENTS] as const;
 export type KnownBucket = typeof ALL_BUCKETS[number];
 
 export const minioClient = new MinioClient({

@@ -45,6 +45,23 @@ export default function PropertiesHandoverPanel() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['handover', unitId] }),
   })
 
+  const [signingUrls, setSigningUrls] = useState<{ landlord?: string; tenant?: string } | null>(null)
+  const [signingRole, setSigningRole] = useState<'TENANT' | 'LANDLORD'>('TENANT')
+
+  const sendForSigningMut = useMutation({
+    mutationFn: (id: string) => tenancyApi.sendHandoverForSigning(id),
+    onSuccess: (result) => {
+      setSigningUrls({ landlord: result.landlordSigningUrl, tenant: result.tenantSigningUrl })
+      setSigningRole('TENANT')
+    },
+    onError: () => alert('Could not start digital signing for this checklist.'),
+  })
+
+  const closeSigningModal = () => {
+    setSigningUrls(null)
+    void qc.invalidateQueries({ queryKey: ['handover', unitId] })
+  }
+
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => setForm(f => ({ ...f, [k]: e.target.value }))
 
   return (
@@ -77,16 +94,25 @@ export default function PropertiesHandoverPanel() {
                     {t('tenancy.compareWithEntry', 'Compare vs Entry')}
                   </button>
                 )}
+                {!cl['tenant_signed'] && !cl['manager_signed'] && (
+                  <button onClick={() => sendForSigningMut.mutate(String(cl['id']))}
+                    disabled={sendForSigningMut.isPending}
+                    className="text-xs bg-blue-700 hover:bg-blue-600 disabled:opacity-50 text-white px-2 py-0.5 rounded">
+                    ✍ {t('tenancy.signNow', 'Sign Now')}
+                  </button>
+                )}
                 {!cl['tenant_signed'] && (
                   <button onClick={() => signMut.mutate({ id: String(cl['id']), field: 'tenant_signed' })}
-                    className="text-xs bg-slate-700 hover:bg-slate-600 text-slate-200 px-2 py-0.5 rounded">
-                    {t('tenancy.tenantSign', 'Tenant Sign')}
+                    className="text-xs bg-slate-700 hover:bg-slate-600 text-slate-200 px-2 py-0.5 rounded"
+                    title="Offline fallback — use only if digital signing isn't possible">
+                    {t('tenancy.tenantSign', 'Tenant Sign (manual)')}
                   </button>
                 )}
                 {Boolean(cl['tenant_signed']) && !cl['manager_signed'] && (
                   <button onClick={() => signMut.mutate({ id: String(cl['id']), field: 'manager_signed' })}
-                    className="text-xs bg-green-800 hover:bg-green-700 text-white px-2 py-0.5 rounded">
-                    {t('tenancy.managerSign', 'Manager Sign')}
+                    className="text-xs bg-green-800 hover:bg-green-700 text-white px-2 py-0.5 rounded"
+                    title="Offline fallback — use only if digital signing isn't possible">
+                    {t('tenancy.managerSign', 'Manager Sign (manual)')}
                   </button>
                 )}
               </div>
@@ -160,6 +186,37 @@ export default function PropertiesHandoverPanel() {
                 className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded disabled:opacity-40">
                 {createMut.isPending ? t('common.saving','Saving...') : t('common.save','Save')}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {signingUrls && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-slate-800 rounded-lg w-full max-w-3xl h-[85vh] flex flex-col">
+            <div className="flex items-center justify-between p-4 border-b border-slate-700">
+              <h2 className="text-lg font-semibold">
+                {signingRole === 'TENANT' ? t('tenancy.tenantSigning', 'Tenant — please sign below') : t('tenancy.landlordSigning', 'Landlord — please sign below')}
+              </h2>
+              <button onClick={closeSigningModal} className="text-slate-400 hover:text-slate-200 text-sm">{t('common.close', 'Close')}</button>
+            </div>
+            <iframe
+              key={signingRole}
+              src={signingRole === 'TENANT' ? signingUrls.tenant : signingUrls.landlord}
+              className="flex-1 w-full"
+              title="DocuSeal signing"
+            />
+            <div className="flex justify-between items-center p-4 border-t border-slate-700">
+              <p className="text-xs text-slate-500">{t('tenancy.signingHint', 'Hand the device to the other party once you\'re done signing.')}</p>
+              {signingRole === 'TENANT' ? (
+                <button onClick={() => setSigningRole('LANDLORD')} className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded">
+                  {t('tenancy.tenantDoneNowLandlord', "Tenant done — Landlord's turn")}
+                </button>
+              ) : (
+                <button onClick={closeSigningModal} className="px-4 py-2 text-sm bg-green-700 hover:bg-green-600 text-white rounded">
+                  {t('tenancy.bothSignedDone', 'Both signed — Done')}
+                </button>
+              )}
             </div>
           </div>
         </div>

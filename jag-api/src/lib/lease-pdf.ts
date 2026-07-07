@@ -88,8 +88,37 @@ function monthsBetween(startIso: string, endIso: string): number {
 
 type PDFDoc = InstanceType<typeof PDFDocument>;
 
-export function generateLeaseAgreementPdf(d: LeasePdfData): PDFDoc {
+// One entry per fillable/signable spot in the PDF — collected only when a
+// `fieldSink` array is passed in (used by the DocuSeal send-for-signing route;
+// the plain draft-download path leaves this undefined and pays no extra cost).
+// Coordinates are fractions (0-1) of the page's own width/height, top-left
+// origin (matches PDFKit's own coordinate system) — convert to DocuSeal's
+// `areas` format at the call site.
+export interface LeaseSignField {
+  name: string;
+  type: 'text' | 'date' | 'signature';
+  role: 'LANDLORD' | 'TENANT';
+  page: number;
+  x: number; y: number; w: number; h: number;
+}
+
+export function generateLeaseAgreementPdf(d: LeasePdfData, fieldSink?: LeaseSignField[]): PDFDoc {
   const doc = new PDFDocument({ size: 'A4', margin: 56 });
+
+  // PDFKit fires 'pageAdded' for every new page — manual (doc.addPage()) or
+  // automatic (text overflow) — so this stays accurate even though the exact
+  // page count varies with lease data (longer names/addresses can push a
+  // clause across a page boundary).
+  let pageIndex = 0;
+  doc.on('pageAdded', () => { pageIndex += 1; });
+
+  const recordField = (name: string, type: LeaseSignField['type'], role: LeaseSignField['role'], x: number, y: number, w: number, h: number) => {
+    if (!fieldSink) return;
+    fieldSink.push({
+      name, type, role, page: pageIndex,
+      x: x / doc.page.width, y: y / doc.page.height, w: w / doc.page.width, h: h / doc.page.height,
+    });
+  };
 
   const fullAddress = [d.address_line1, d.address_line2, d.city].filter(Boolean).join(', ');
   const tName = tenantName(d);
@@ -385,25 +414,29 @@ export function generateLeaseAgreementPdf(d: LeasePdfData): PDFDoc {
   );
   doc.moveDown(2);
 
-  const sigBlock = (label: string, name: string) => {
+  const sigBlock = (label: string, name: string, role: LeaseSignField['role']) => {
     ensureSpace(130);
     doc.font('Helvetica-Bold').fontSize(10).text(`SIGNED by the ${label}`);
     doc.moveDown(1.2);
+    const sigLineY = doc.y;
     doc.font('Helvetica').fontSize(10).text('_________________________________');
+    recordField(`${role}_SIGNATURE`, 'signature', role, 56, sigLineY, 220, 16);
     doc.text('Signature');
     doc.moveDown(0.8);
     doc.text('_________________________________');
     doc.text(`Full Name (Print): ${name}`);
     doc.moveDown(0.8);
+    const dateLineY = doc.y;
     doc.text('_________________________________');
+    recordField(`${role}_DATE`, 'date', role, 56, dateLineY, 220, 16);
     doc.text('Date');
     doc.moveDown(0.8);
     doc.text('Witness (optional):  _________________________________');
     doc.text('Witness Name & Signature');
     doc.moveDown(1.5);
   };
-  sigBlock('LANDLORD', LANDLORD_NAME);
-  sigBlock('TENANT', tName);
+  sigBlock('LANDLORD', LANDLORD_NAME, 'LANDLORD');
+  sigBlock('TENANT', tName, 'TENANT');
 
   // ── SCHEDULE A — PAYMENT DETAILS ────────────────────────────────────────────
   doc.addPage();
@@ -535,7 +568,9 @@ export function generateLeaseAgreementPdf(d: LeasePdfData): PDFDoc {
   for (const label of TENANT_INFO_FIELDS) {
     ensureSpace(26);
     doc.font('Helvetica-Bold').fontSize(9).text(`${label}:`);
+    const lineY = doc.y;
     doc.font('Helvetica').fontSize(9).text('_______________________________________________________________');
+    recordField(label, 'text', 'TENANT', 56, lineY, 483, 14);
     doc.moveDown(0.4);
   }
 

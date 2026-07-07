@@ -2101,6 +2101,7 @@ function PropertyDetail({ property, onDeleted }: { property: Property; onDeleted
   const [editingTax, setEditingTax] = useState<PropertyTaxRecord | null>(null)
   const [chargingLateFee, setChargingLateFee] = useState<RentPayment | null>(null)
   const [deletingLease, setDeletingLease] = useState<Lease | null>(null)
+  const [sendingLeaseId, setSendingLeaseId] = useState<string | null>(null)
   const qc = useQueryClient()
 
   const { data: leases = [] } = useQuery({
@@ -2310,6 +2311,35 @@ function PropertyDetail({ property, onDeleted }: { property: Property; onDeleted
                       </p>
                       <div className="flex items-center gap-2">
                         <span className={`text-xs px-2 py-0.5 rounded border ${l.status === 'ACTIVE' ? 'border-green-700 text-green-400' : 'border-slate-600 text-slate-500'}`}>{l.status}</span>
+                        {l.signature_status && l.signature_status !== 'UNSIGNED' && (
+                          <span className={`text-xs px-2 py-0.5 rounded border ${
+                            l.signature_status === 'SIGNED' ? 'border-green-700 text-green-400'
+                            : l.signature_status === 'DECLINED' || l.signature_status === 'EXPIRED' ? 'border-red-700 text-red-400'
+                            : 'border-amber-700 text-amber-400'
+                          }`}>
+                            {l.signature_status === 'SIGNED' ? '✓ Signed'
+                              : l.signature_status === 'PARTIALLY_SIGNED' ? 'Partially signed'
+                              : l.signature_status === 'SENT' ? 'Sent for signing'
+                              : l.signature_status}
+                          </span>
+                        )}
+                        <button onClick={async () => {
+                            setSendingLeaseId(l.id)
+                            try {
+                              const result = await propertiesApi.sendLeaseForSigning(property.id, l.id)
+                              void qc.invalidateQueries({ queryKey: ['properties', property.id, 'leases'] })
+                              if (result.landlordSigningUrl) window.open(result.landlordSigningUrl, '_blank')
+                            } catch {
+                              alert('Could not send the lease for signature.')
+                            } finally {
+                              setSendingLeaseId(null)
+                            }
+                          }}
+                          disabled={sendingLeaseId === l.id}
+                          className="text-xs px-2 py-0.5 bg-blue-700 hover:bg-blue-600 disabled:opacity-50 text-white rounded border border-blue-600 transition-colors"
+                          title="Send for e-signature">
+                          {sendingLeaseId === l.id ? '…' : '✍ Send for Signature'}
+                        </button>
                         <button onClick={() => void propertiesApi.downloadLeaseAgreement(property.id, l.id).catch(() => alert('Could not download the lease agreement.'))}
                           className="text-xs px-2 py-0.5 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded border border-slate-600 transition-colors"
                           title="Download lease agreement">📄 {t('propertiesPanel.downloadAgreement')}</button>

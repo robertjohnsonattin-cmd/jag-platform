@@ -11,8 +11,20 @@ import { ok, err } from '../../lib/response';
 import { logger } from '../../lib/logger';
 import { sendTemplate } from '../../lib/whatsapp';
 import { triggerAutoListing } from './listing';
+import { generateConditionReportPdf, type ConditionSignField, type ConditionItem } from '../../lib/condition-report-pdf';
+import { createSigningSubmission } from '../../lib/docuseal';
+import PDFDocument from 'pdfkit';
 
 export const handoverRouter = Router();
+
+function pdfDocToBuffer(doc: InstanceType<typeof PDFDocument>): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    doc.on('data', (chunk: Buffer) => chunks.push(chunk));
+    doc.on('end', () => resolve(Buffer.concat(chunks)));
+    doc.on('error', reject);
+  });
+}
 
 const IdParam     = z.object({ id: z.string().uuid() });
 const UnitIdParam = z.object({ unitId: z.string().uuid() });
@@ -192,6 +204,89 @@ handoverRouter.patch('/:id', async (req: Request, res: Response, next: NextFunct
     }
 
     res.json(ok(row));
+  } catch (e) { next(e); }
+});
+
+// ── POST /handover/:id/send-for-signing ───────────────────────────────────────
+// Renders the checklist's condition_items into a small signable PDF (Schedule B,
+// one event = one condition column, not move-in/move-out together) and creates
+// a DocuSeal submission with just two signature fields. Both embed_src URLs are
+// returned so the frontend can open the tenant's first, then the landlord's, in
+// the same on-site sitting — no WhatsApp round-trip needed for this one, though
+// the tenant link is also sent as a fallback in case they'd rather sign later.
+
+handoverRouter.post('/:id/send-for-signing', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const ownerId = req.rlsCtx.userId;
+    if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
+    const { id } = IdParam.parse(req.params);
+
+    const row = await withOwnerRLS(propertiesPool, ownerId, async client => {
+      const { rows: [checklist] } = await client.query(
+        `SELECT hc.id, hc.type, hc.condition_items, hc.created_at, hc.unit_id, hc.lease_id,
+                u.unit_number, p.address_line1, p.address_line2, p.city,
+                la.tenant_id, pt.first_name AS tenant_first_name, pt.last_name AS tenant_last_name,
+                pt.company_name AS tenant_company_name, pt.is_company AS tenant_is_company,
+                pt.phone AS tenant_phone, pt.email AS tenant_email
+         FROM   prop_handover_checklists hc
+         LEFT JOIN prop_units u ON u.id = hc.unit_id
+         LEFT JOIN prop_properties p ON p.id = u.property_id
+         LEFT JOIN prop_lease_agreements la ON la.id = hc.lease_id
+         LEFT JOIN prop_property_tenants pt ON pt.id = la.tenant_id
+         WHERE  hc.id = $1 AND hc.owner_id = $2`,
+        [id, ownerId],
+      );
+      return checklist ?? null;
+    });
+    if (!row) return void res.status(404).json(err('Checklist not found', 'NOT_FOUND'));
+
+    const tenantName = row.tenant_is_company && row.tenant_company_name
+      ? row.tenant_company_name
+      : `${row.tenant_first_name ?? ''} ${row.tenant_last_name ?? ''}`.trim() || 'Tenant';
+    const propertyAddress = [row.address_line1, row.address_line2, row.city].filter(Boolean).join(', ');
+
+    const fields: ConditionSignField[] = [];
+    const doc = generateConditionReportPdf({
+      type: row.type,
+      property_address: propertyAddress,
+      unit_number: row.unit_number,
+      tenant_name: tenantName,
+      event_date: row.created_at,
+      condition_items: (row.condition_items ?? []) as ConditionItem[],
+    }, fields);
+    const pdf = await pdfDocToBuffer(doc);
+
+    const { submissionId, embedUrls } = await createSigningSubmission({
+      pdf,
+      fileName: `condition-report-${id}.pdf`,
+      submitters: [
+        { role: 'LANDLORD', name: 'Robert Johnson-Attin', email: 'robertjohnsonattin@gmail.com' },
+        { role: 'TENANT', name: tenantName, email: row.tenant_email ?? undefined, phone: row.tenant_phone ?? undefined },
+      ],
+      fields: fields.map(f => ({
+        name: f.name, type: f.type, role: f.role, required: true,
+        areas: [{ page: f.page, x: f.x, y: f.y, w: f.w, h: f.h }],
+      })),
+    });
+
+    await withOwnerRLS(propertiesPool, ownerId, async client =>
+      client.query(`UPDATE prop_handover_checklists SET docuseal_submission_id = $1 WHERE id = $2`, [submissionId, id]),
+    );
+
+    if (row.tenant_phone && embedUrls['TENANT']) {
+      sendTemplate({
+        to: row.tenant_phone,
+        templateName: 'jag_condition_report_signing_request',
+        components: [{ type: 'body', parameters: [
+          { type: 'text', text: tenantName },
+          { type: 'text', text: embedUrls['TENANT'] },
+        ]}],
+      }).catch(e => logger.warn({ entity: 'PROPERTIES', action: 'HANDOVER_SIGN_WA_FAILED', error_message: (e as Error).message }));
+    }
+
+    logger.info({ entity: 'PROPERTIES', action: 'HANDOVER_SENT_FOR_SIGNING', user_id: ownerId, record_id: id, submission_id: submissionId });
+
+    res.json(ok({ submissionId, landlordSigningUrl: embedUrls['LANDLORD'], tenantSigningUrl: embedUrls['TENANT'] }));
   } catch (e) { next(e); }
 });
 

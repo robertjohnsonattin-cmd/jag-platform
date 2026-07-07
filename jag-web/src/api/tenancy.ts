@@ -151,6 +151,11 @@ export const tenancyApi = {
   compareHandover: (exitId: string) =>
     api.get<Row>(`/properties/handover/${exitId}/compare`),
 
+  sendHandoverForSigning: (id: string) =>
+    api.post<{ submissionId: string; landlordSigningUrl?: string; tenantSigningUrl?: string }>(
+      `/properties/handover/${id}/send-for-signing`, {}
+    ),
+
   // ── Renewal Notices ───────────────────────────────────────
   getRenewals: (params?: { status?: string }) =>
     api.get<Row[]>(`/properties/renewals${qs(params)}`),

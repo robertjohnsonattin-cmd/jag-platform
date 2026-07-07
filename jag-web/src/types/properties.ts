@@ -49,6 +49,7 @@ export interface Lease {
   late_fee_type?: string | null
   late_fee_value?: string | null
   grace_days?: number | null
+  signature_status?: 'UNSIGNED' | 'SENT' | 'PARTIALLY_SIGNED' | 'SIGNED' | 'DECLINED' | 'EXPIRED'
 }
 
 export interface RentPayment {

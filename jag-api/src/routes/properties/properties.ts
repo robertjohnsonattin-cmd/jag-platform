@@ -17,9 +17,21 @@ import { withOwnerRLS } from '../../middleware/rls';
 import { propertiesPool, corePool } from '../../db/index';
 import { logger } from '../../lib/logger';
 import { ok, err } from '../../lib/response';
-import { generateLeaseAgreementPdf } from '../../lib/lease-pdf';
+import { generateLeaseAgreementPdf, type LeaseSignField } from '../../lib/lease-pdf';
+import { createSigningSubmission } from '../../lib/docuseal';
+import { sendTemplate } from '../../lib/whatsapp';
+import PDFDocument from 'pdfkit';
 
 export const propertiesRouter = Router();
+
+function pdfDocToBuffer(doc: InstanceType<typeof PDFDocument>): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    doc.on('data', (chunk: Buffer) => chunks.push(chunk));
+    doc.on('end', () => resolve(Buffer.concat(chunks)));
+    doc.on('error', reject);
+  });
+}
 
 // ── Schemas ───────────────────────────────────────────────────────────────────
 
@@ -605,6 +617,86 @@ propertiesRouter.get('/:propertyId/leases/:leaseId/agreement-pdf', async (req: R
       res.setHeader('Content-Disposition', `attachment; filename="lease-agreement-${leaseId}.pdf"`);
       const doc = generateLeaseAgreementPdf(row);
       doc.pipe(res);
+    } finally { client.release(); }
+  } catch (e) { next(e); }
+});
+
+// ── POST /properties/:propertyId/leases/:leaseId/send-for-signing ────────────
+// Generates the same Agreement PDF as above, but with Schedule C fields and
+// both signature blocks turned into a DocuSeal signable submission. Returns
+// the landlord's own embed_src (Robert signs immediately in-browser) and
+// WhatsApps the tenant's embed_src as their signing link.
+
+propertiesRouter.post('/:propertyId/leases/:leaseId/send-for-signing', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const paramParsed = z.object({ propertyId: z.string().uuid(), leaseId: z.string().uuid() }).safeParse(req.params);
+    if (!paramParsed.success) { err(res, 422, 'VALIDATION_ERROR', 'Invalid path parameters.'); return; }
+    const { propertyId, leaseId } = paramParsed.data;
+
+    const client = await propertiesPool.connect();
+    try {
+      const row = await withOwnerRLS(client, req.rlsCtx, (c) =>
+        c.query(
+          `SELECT la.lease_type, la.start_date, la.end_date, la.monthly_rent, la.currency,
+                  la.security_deposit, la.payment_due_day, la.late_fee_type, la.late_fee_value, la.late_fee_grace_days,
+                  pt.first_name AS tenant_first_name, pt.last_name AS tenant_last_name,
+                  pt.company_name AS tenant_company_name, pt.is_company AS tenant_is_company,
+                  pt.identification_type AS tenant_identification_type, pt.identification_number AS tenant_identification_number,
+                  pt.phone AS tenant_phone, pt.email AS tenant_email,
+                  p.name AS property_name, p.address_line1, p.address_line2, p.city,
+                  u.unit_number, u.bedrooms, u.bathrooms, u.floor_area_sqft
+           FROM   prop_lease_agreements la
+           JOIN   prop_property_tenants pt ON pt.id = la.tenant_id
+           JOIN   prop_properties p ON p.id = la.property_id
+           LEFT JOIN prop_units u ON u.id = la.unit_id
+           WHERE  la.id = $1 AND la.property_id = $2`,
+          [leaseId, propertyId],
+        ).then(r => r.rows[0] ?? null),
+      );
+      if (!row) { err(res, 404, 'LEASE_NOT_FOUND', 'Lease not found.'); return; }
+
+      const fields: LeaseSignField[] = [];
+      const doc = generateLeaseAgreementPdf(row, fields);
+      const pdf = await pdfDocToBuffer(doc);
+
+      const tenantName = row.tenant_is_company && row.tenant_company_name
+        ? row.tenant_company_name
+        : `${row.tenant_first_name ?? ''} ${row.tenant_last_name ?? ''}`.trim();
+
+      const { submissionId, embedUrls } = await createSigningSubmission({
+        pdf,
+        fileName: `lease-agreement-${leaseId}.pdf`,
+        submitters: [
+          { role: 'LANDLORD', name: 'Robert Johnson-Attin', email: 'robertjohnsonattin@gmail.com' },
+          { role: 'TENANT', name: tenantName, email: row.tenant_email ?? undefined, phone: row.tenant_phone ?? undefined },
+        ],
+        fields: fields.map(f => ({
+          name: f.name, type: f.type, role: f.role, required: true,
+          areas: [{ page: f.page, x: f.x, y: f.y, w: f.w, h: f.h }],
+        })),
+      });
+
+      await withOwnerRLS(client, req.rlsCtx, (c) =>
+        c.query(
+          `UPDATE prop_lease_agreements SET docuseal_submission_id = $1, signature_status = 'SENT' WHERE id = $2`,
+          [submissionId, leaseId],
+        ),
+      );
+
+      if (row.tenant_phone && embedUrls['TENANT']) {
+        sendTemplate({
+          to: row.tenant_phone,
+          templateName: 'jag_lease_signing_request',
+          components: [{ type: 'body', parameters: [
+            { type: 'text', text: tenantName },
+            { type: 'text', text: embedUrls['TENANT'] },
+          ]}],
+        }).catch(e => logger.warn({ entity: 'PROPERTIES', action: 'LEASE_SIGN_WA_FAILED', error_message: (e as Error).message }));
+      }
+
+      logger.info({ entity: 'PROPERTIES', action: 'LEASE_SENT_FOR_SIGNING', user_id: req.rlsCtx.userId, record_id: leaseId, submission_id: submissionId });
+
+      ok(res, { submissionId, landlordSigningUrl: embedUrls['LANDLORD'], tenantSigningUrl: embedUrls['TENANT'] }, 200);
     } finally { client.release(); }
   } catch (e) { next(e); }
 });
