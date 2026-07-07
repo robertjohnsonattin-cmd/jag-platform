@@ -140,7 +140,15 @@ export function generateLeaseAgreementPdf(d: LeasePdfData): InstanceType<typeof 
 
   doc.moveDown(1.5);
   doc.font('Helvetica').fontSize(10).text('IN WITNESS WHEREOF, the Parties have executed this Agreement on the date first written above.', { align: 'justify' });
-  doc.moveDown(3);
+  doc.moveDown(2);
+
+  // Reserve the whole signature block as one unit — absolute-coordinate .text()
+  // calls each trigger their own page break if they don't fit individually,
+  // which scatters the block across several near-blank pages. Forcing a single
+  // page break up front (if needed) guarantees every line below lands together.
+  const blockHeight = 100;
+  const pageBottom = doc.page.height - doc.page.margins.bottom;
+  if (doc.y + blockHeight > pageBottom) doc.addPage();
 
   const sigY = doc.y;
   doc.font('Helvetica').fontSize(10);
@@ -152,9 +160,8 @@ export function generateLeaseAgreementPdf(d: LeasePdfData): InstanceType<typeof 
   doc.text('Tenant', 320, sigY + 16);
   doc.text(tName, 320, sigY + 30);
 
-  doc.moveDown(4);
-  doc.text('_______________________________');
-  doc.text('Witness');
+  doc.text('_______________________________', 56, sigY + 64);
+  doc.text('Witness', 56, sigY + 80);
 
   doc.end();
   return doc;
