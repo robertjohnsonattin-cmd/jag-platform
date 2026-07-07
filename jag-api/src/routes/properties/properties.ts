@@ -19,7 +19,7 @@ import { logger } from '../../lib/logger';
 import { ok, err } from '../../lib/response';
 import { generateLeaseAgreementPdf, type LeaseSignField } from '../../lib/lease-pdf';
 import { createSigningSubmission } from '../../lib/docuseal';
-import { sendTemplate } from '../../lib/whatsapp';
+import { sendText } from '../../lib/whatsapp';
 import PDFDocument from 'pdfkit';
 
 export const propertiesRouter = Router();
@@ -684,13 +684,12 @@ propertiesRouter.post('/:propertyId/leases/:leaseId/send-for-signing', async (re
       );
 
       if (row.tenant_phone && embedUrls['TENANT']) {
-        sendTemplate({
+        // TODO: switch to sendTemplate('jag_lease_signing_request', ...) once that
+        // template is created and approved in Meta Business Suite — plain sendText
+        // only works within a 24h customer-service session window.
+        sendText({
           to: row.tenant_phone,
-          templateName: 'jag_lease_signing_request',
-          components: [{ type: 'body', parameters: [
-            { type: 'text', text: tenantName },
-            { type: 'text', text: embedUrls['TENANT'] },
-          ]}],
+          body: `Hi ${tenantName}, please review and sign your JAG Properties tenancy agreement here: ${embedUrls['TENANT']}`,
         }).catch(e => logger.warn({ entity: 'PROPERTIES', action: 'LEASE_SIGN_WA_FAILED', error_message: (e as Error).message }));
       }
 
