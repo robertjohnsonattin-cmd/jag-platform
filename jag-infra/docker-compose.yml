@@ -138,6 +138,9 @@ services:
       GOOGLE_CALENDAR_ID:             ${GOOGLE_CALENDAR_ID}
       GOOGLE_SERVICE_ACCOUNT_EMAIL:   ${GOOGLE_SERVICE_ACCOUNT_EMAIL}
       GOOGLE_SERVICE_ACCOUNT_KEY:     ${GOOGLE_SERVICE_ACCOUNT_KEY}
+      DOCUSEAL_BASE_URL:              ${DOCUSEAL_BASE_URL}
+      DOCUSEAL_API_KEY:               ${DOCUSEAL_API_KEY}
+      DOCUSEAL_WEBHOOK_TOKEN:         ${DOCUSEAL_WEBHOOK_TOKEN}
     volumes:
       - /opt/jag/jag-api/google-calendar-key.json:/opt/jag/jag-api/google-calendar-key.json:ro
     ports:

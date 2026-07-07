@@ -6,9 +6,14 @@
 // handover condition-report checklist — both store docuseal_submission_id),
 // pull the signed PDF, store it in MinIO, and update signature status.
 //
-// NOT under /api/v1/ and NOT behind Keycloak. Protected by
-// DOCUSEAL_WEBHOOK_TOKEN (shared secret, Authorization: Bearer ...). Only
-// reachable from inside the Docker network (DocuSeal → jag-api).
+// NOT under /api/v1/ and NOT behind Keycloak. Protected by DOCUSEAL_WEBHOOK_TOKEN
+// embedded as a URL PATH SEGMENT (not an Authorization header) — DocuSeal's
+// self-hosted webhook settings UI only exposes a plain URL field, no custom
+// header option, so the shared secret has to travel in the URL itself.
+// Configure in DocuSeal: Settings → Webhooks → URL =
+// https://api.jagcorporate.com/internal/docuseal-webhook/<DOCUSEAL_WEBHOOK_TOKEN>
+// and check the "submission.completed" event (fires once BOTH parties have
+// signed — the per-submitter form.* events are ignored here).
 //
 // NOTE: event_type strings / payload shape follow DocuSeal's documented
 // webhook contract but haven't been exercised against a live instance yet —
@@ -32,11 +37,8 @@ interface DocusealWebhookPayload {
   data?: { id?: number | string; submission_id?: number | string; status?: string };
 }
 
-docusealWebhookRouter.post('/', (req: Request, res: Response): void => {
-  if (WEBHOOK_TOKEN) {
-    const auth = req.headers['authorization'] ?? '';
-    if (auth !== `Bearer ${WEBHOOK_TOKEN}`) { res.status(401).end(); return; }
-  }
+docusealWebhookRouter.post('/:token', (req: Request, res: Response): void => {
+  if (WEBHOOK_TOKEN && req.params.token !== WEBHOOK_TOKEN) { res.status(401).end(); return; }
 
   // Always ack fast; do the lookup + PDF fetch fire-and-forget so DocuSeal's
   // webhook delivery is never blocked or retried by us.
