@@ -1292,6 +1292,7 @@
     "payBtn": "付款",
     "receiptBtn": "收据",
     "refundDeposit": "退还押金",
+    "downloadAgreement": "租约",
     "depositLbl": "押金：",
     "addPolicy": "添加保单",
     "addYear": "添加年度",

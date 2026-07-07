@@ -2310,6 +2310,9 @@ function PropertyDetail({ property, onDeleted }: { property: Property; onDeleted
                       </p>
                       <div className="flex items-center gap-2">
                         <span className={`text-xs px-2 py-0.5 rounded border ${l.status === 'ACTIVE' ? 'border-green-700 text-green-400' : 'border-slate-600 text-slate-500'}`}>{l.status}</span>
+                        <button onClick={() => void propertiesApi.downloadLeaseAgreement(property.id, l.id).catch(() => alert('Could not download the lease agreement.'))}
+                          className="text-xs px-2 py-0.5 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded border border-slate-600 transition-colors"
+                          title="Download lease agreement">📄 {t('propertiesPanel.downloadAgreement')}</button>
                         <button onClick={() => setDeletingLease(l)}
                           className="text-slate-600 hover:text-red-400 transition-colors text-sm leading-none"
                           title="Delete lease">&#x1F5D1;</button>

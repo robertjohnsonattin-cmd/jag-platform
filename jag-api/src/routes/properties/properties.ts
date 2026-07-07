@@ -17,6 +17,7 @@ import { withOwnerRLS } from '../../middleware/rls';
 import { propertiesPool, corePool } from '../../db/index';
 import { logger } from '../../lib/logger';
 import { ok, err } from '../../lib/response';
+import { generateLeaseAgreementPdf } from '../../lib/lease-pdf';
 
 export const propertiesRouter = Router();
 
@@ -563,6 +564,47 @@ propertiesRouter.post('/:propertyId/leases', async (req: Request, res: Response,
       logger.info({ entity: 'PROPERTIES', action: 'LEASE_CREATED', user_id: ownerId, record_id: lease.id });
       await auditLog(ownerId, 'Lease', 'CREATE', lease.id, { property_id: propertyId, tenant_id: b.tenant_id });
       ok(res, lease, 201);
+    } finally { client.release(); }
+  } catch (e) { next(e); }
+});
+
+// ── GET /properties/:propertyId/leases/:leaseId/agreement-pdf ────────────────
+// Generates the lease agreement PDF straight from data already on file
+// (Enter Once) — landlord/tenant/unit/property details are never re-typed.
+
+propertiesRouter.get('/:propertyId/leases/:leaseId/agreement-pdf', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const paramParsed = z.object({ propertyId: z.string().uuid(), leaseId: z.string().uuid() }).safeParse(req.params);
+    if (!paramParsed.success) { err(res, 422, 'VALIDATION_ERROR', 'Invalid path parameters.'); return; }
+    const { propertyId, leaseId } = paramParsed.data;
+
+    const client = await propertiesPool.connect();
+    try {
+      const row = await withOwnerRLS(client, req.rlsCtx, (c) =>
+        c.query(
+          `SELECT la.lease_type, la.start_date, la.end_date, la.monthly_rent, la.currency,
+                  la.security_deposit, la.payment_due_day, la.late_fee_type, la.late_fee_value, la.late_fee_grace_days,
+                  pt.first_name AS tenant_first_name, pt.last_name AS tenant_last_name,
+                  pt.company_name AS tenant_company_name, pt.is_company AS tenant_is_company,
+                  pt.identification_type AS tenant_identification_type, pt.identification_number AS tenant_identification_number,
+                  p.name AS property_name, p.address_line1, p.address_line2, p.city,
+                  u.unit_number, u.bedrooms, u.bathrooms, u.floor_area_sqft
+           FROM   prop_lease_agreements la
+           JOIN   prop_property_tenants pt ON pt.id = la.tenant_id
+           JOIN   prop_properties p ON p.id = la.property_id
+           LEFT JOIN prop_units u ON u.id = la.unit_id
+           WHERE  la.id = $1 AND la.property_id = $2`,
+          [leaseId, propertyId],
+        ).then(r => r.rows[0] ?? null),
+      );
+      if (!row) { err(res, 404, 'LEASE_NOT_FOUND', 'Lease not found.'); return; }
+
+      logger.info({ entity: 'PROPERTIES', action: 'LEASE_AGREEMENT_PDF', user_id: req.rlsCtx.userId, record_id: leaseId });
+
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="lease-agreement-${leaseId}.pdf"`);
+      const doc = generateLeaseAgreementPdf({ ...row, landlord_name: 'JAG Properties' });
+      doc.pipe(res);
     } finally { client.release(); }
   } catch (e) { next(e); }
 });

@@ -28,6 +28,9 @@ export const propertiesApi = {
   getLeases: (propertyId: string) =>
     api.get<Lease[]>(`/properties/${propertyId}/leases`),
 
+  downloadLeaseAgreement: (propertyId: string, leaseId: string) =>
+    api.download(`/properties/${propertyId}/leases/${leaseId}/agreement-pdf`, `lease-agreement-${leaseId}.pdf`),
+
   getRentPayments: (propertyId: string, params?: { page?: number; limit?: number }) =>
     api.get<{ payments: RentPayment[]; pagination: { page: number; limit: number; total: number; pages: number } }>(
       `/properties/${propertyId}/rent-payments${qs(params)}`
