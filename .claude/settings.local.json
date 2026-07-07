@@ -19,7 +19,8 @@
       "Bash(pandoc \"C:\\\\Users\\\\rober\\\\Documents\\\\Claude\\\\Projects\\\\JAG Holdings\\\\JAG_Engineering_Standards_v1.1.docx\" -t plain)",
       "Read(//c/Users/rober/AppData/Roaming/Claude/local-agent-mode-sessions/skills-plugin/4ff8a72a-0c68-4c22-9811-012d07624241/800c4995-06ab-4aff-ba1d-35e82e0faa60/skills/docx/**)",
       "Bash(python scripts/office/unpack.py \"C:\\\\Users\\\\rober\\\\Documents\\\\Claude\\\\Projects\\\\JAG Holdings\\\\JAG_AI_Context_Summary_v2.1.docx\" unpacked_context/)",
-      "Bash(python scripts/office/unpack.py \"C:\\\\Users\\\\rober\\\\Documents\\\\Claude\\\\Projects\\\\JAG Holdings\\\\JAG_Engineering_Standards_v1.1.docx\" unpacked_standards/)"
+      "Bash(python scripts/office/unpack.py \"C:\\\\Users\\\\rober\\\\Documents\\\\Claude\\\\Projects\\\\JAG Holdings\\\\JAG_Engineering_Standards_v1.1.docx\" unpacked_standards/)",
+      "Bash(ssh -i ~/.ssh/jag_oracle2 ubuntu@150.136.151.64 \"PGPASSWORD=\\\\$\\(grep -oP '\\(?<=^POSTGRES_PASSWORD=\\).*' /opt/jag/jag-infra/.env\\) psql -h 127.0.0.1 -U postgres -d jag_family -c \\\\\"SELECT id, policy_number, insurer_name, expiry_date, calendar_event_id, renewal_notice_calendar_event_id FROM fin_insurance_policies WHERE policy_number = 'TIHH 53830/10';\\\\\"\")"
     ]
   }
 }

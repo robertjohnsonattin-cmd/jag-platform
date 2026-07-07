@@ -603,7 +603,7 @@ propertiesRouter.get('/:propertyId/leases/:leaseId/agreement-pdf', async (req: R
 
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `attachment; filename="lease-agreement-${leaseId}.pdf"`);
-      const doc = generateLeaseAgreementPdf({ ...row, landlord_name: 'JAG Properties' });
+      const doc = generateLeaseAgreementPdf(row);
       doc.pipe(res);
     } finally { client.release(); }
   } catch (e) { next(e); }
