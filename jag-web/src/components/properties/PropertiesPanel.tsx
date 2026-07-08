@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
+import type { TFunction } from 'i18next'
 import { propertiesApi } from '../../api/properties'
 import { financeApi } from '../../api/finance'
 import { filesApi } from '../../api/files'
@@ -18,6 +19,20 @@ import type {
 } from '../../types/properties'
 
 const cls = 'w-full bg-slate-700 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500'
+
+// occupancy_status is derived server-side from actual unit occupancy for
+// multi-unit properties (falls back to is_rented for single-unit ones) — see
+// occupancyStatus() in routes/properties/properties.ts.
+function occupancyBadge(p: Property, t: TFunction, bordered?: boolean): { label: string; className: string } {
+  const status = p.occupancy_status ?? (p.is_rented ? 'RENTED' : 'VACANT')
+  const border = (c: string) => bordered ? `border ${c}` : ''
+  if (status === 'RENTED') return { label: t('propertiesPanel.rented'), className: `text-green-400 ${border('border-green-700')}` }
+  if (status === 'PARTIALLY_RENTED') {
+    const label = `${t('propertiesPanel.partiallyRented', 'Partially Rented')} (${p.rented_units}/${p.total_units})`
+    return { label, className: `text-amber-400 ${border('border-amber-700')}` }
+  }
+  return { label: t('propertiesPanel.vacant'), className: `text-slate-500 ${border('border-slate-600')}` }
+}
 
 function InfoField({ label, value, mono }: { label: string; value: string | null | undefined; mono?: boolean }) {
   return (
@@ -2203,8 +2218,8 @@ function PropertyDetail({ property, onDeleted }: { property: Property; onDeleted
               {property.bedrooms != null && (
                 <span className="text-xs px-2 py-0.5 rounded bg-slate-700 text-slate-300">{property.bedrooms}BR / {property.bathrooms}BA</span>
               )}
-              <span className={`text-xs px-2 py-0.5 rounded border ${property.is_rented ? 'border-green-700 text-green-400' : 'border-slate-600 text-slate-400'}`}>
-                {property.is_rented ? t('propertiesPanel.rented') : t('propertiesPanel.vacant')}
+              <span className={`text-xs px-2 py-0.5 rounded ${occupancyBadge(property, t, true).className}`}>
+                {occupancyBadge(property, t, true).label}
               </span>
             </div>
           </div>
@@ -3006,8 +3021,8 @@ export default function PropertiesPanel() {
           >
             <p className="font-medium truncate">{p.name}</p>
             <p className="text-xs text-slate-500 truncate mt-0.5">{p.property_code} · {p.property_type}</p>
-            <span className={`text-xs ${p.is_rented ? 'text-green-400' : 'text-slate-500'}`}>
-              {p.is_rented ? t('propertiesPanel.rented') : t('propertiesPanel.vacant')}
+            <span className={`text-xs ${occupancyBadge(p, t).className}`}>
+              {occupancyBadge(p, t).label}
             </span>
           </button>
         ))}

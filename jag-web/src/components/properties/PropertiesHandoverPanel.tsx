@@ -204,7 +204,7 @@ export default function PropertiesHandoverPanel() {
               key={signingRole}
               src={signingRole === 'TENANT' ? signingUrls.tenant : signingUrls.landlord}
               className="flex-1 w-full"
-              title="DocuSeal signing"
+              title="Documenso signing"
             />
             <div className="flex justify-between items-center p-4 border-t border-slate-700">
               <p className="text-xs text-slate-500">{t('tenancy.signingHint', 'Hand the device to the other party once you\'re done signing.')}</p>

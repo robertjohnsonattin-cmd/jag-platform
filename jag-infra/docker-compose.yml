@@ -129,6 +129,14 @@ services:
       MINIO_ACCESS_KEY:           ${MINIO_ACCESS_KEY}
       MINIO_SECRET_KEY:           ${MINIO_SECRET_KEY}
       MINIO_BUCKET_STATEMENTS:    ${MINIO_BUCKET_STATEMENTS}
+      # Found missing 2026-07-08 — lib/minio.ts's presignClient falls back silently
+      # to the internal MINIO_ENDPOINT (minio:9000, unreachable from a browser) when
+      # these are absent, so every presigned photo/document URL handed to the
+      # frontend was broken despite .env having the correct values all along —
+      # they were just never wired into this environment block.
+      MINIO_PUBLIC_ENDPOINT:      ${MINIO_PUBLIC_ENDPOINT}
+      MINIO_PUBLIC_PORT:          ${MINIO_PUBLIC_PORT}
+      MINIO_PUBLIC_SSL:           ${MINIO_PUBLIC_SSL}
       PORT:                       "3000"
       NODE_ENV:                   "production"
       TRACCAR_URL:                ${TRACCAR_URL}
@@ -138,9 +146,17 @@ services:
       GOOGLE_CALENDAR_ID:             ${GOOGLE_CALENDAR_ID}
       GOOGLE_SERVICE_ACCOUNT_EMAIL:   ${GOOGLE_SERVICE_ACCOUNT_EMAIL}
       GOOGLE_SERVICE_ACCOUNT_KEY:     ${GOOGLE_SERVICE_ACCOUNT_KEY}
-      DOCUSEAL_BASE_URL:              ${DOCUSEAL_BASE_URL}
-      DOCUSEAL_API_KEY:               ${DOCUSEAL_API_KEY}
-      DOCUSEAL_WEBHOOK_TOKEN:         ${DOCUSEAL_WEBHOOK_TOKEN}
+      DOCUMENSO_BASE_URL:             ${DOCUMENSO_BASE_URL}
+      DOCUMENSO_API_KEY:              ${DOCUMENSO_API_KEY}
+      DOCUMENSO_WEBHOOK_SECRET:       ${DOCUMENSO_WEBHOOK_SECRET}
+      DOCUMENSO_PUBLIC_BASE_URL:      ${DOCUMENSO_PUBLIC_BASE_URL}
+      # Found missing 2026-07-07 while testing lease e-signature — none of these were
+      # ever wired into the api container, so every WhatsApp send (rent reminders,
+      # viewing reminders, renewal notices, lease signing links, etc.) has been
+      # silently no-op'ing in production (lib/whatsapp.ts SEND_SKIP guard).
+      WHATSAPP_ACCESS_TOKEN:          ${WHATSAPP_ACCESS_TOKEN}
+      WHATSAPP_PHONE_NUMBER_ID:       ${WHATSAPP_PHONE_NUMBER_ID}
+      WHATSAPP_VERIFY_TOKEN:          ${WHATSAPP_VERIFY_TOKEN}
     volumes:
       - /opt/jag/jag-api/google-calendar-key.json:/opt/jag/jag-api/google-calendar-key.json:ro
     ports:
@@ -208,18 +224,36 @@ services:
         reservations:
           memory: 256M
 
-  # ── DocuSeal — self-hosted e-signature ───────────────────────────────────────
-  # Signable-PDF submissions created via API from jag-api (createSigningSubmission,
-  # src/lib/docuseal.ts). Tenants/landlord only ever see the returned embed_src
-  # signing page — never DocuSeal's own login/dashboard.
-  # DB: native PostgreSQL, dedicated `docuseal` database (own migrations on boot).
-  docuseal:
-    image: docuseal/docuseal:latest
-    container_name: jag-docuseal
+  # ── Documenso — self-hosted e-signature ──────────────────────────────────────
+  # Replaces DocuSeal (2026-07-07): DocuSeal's free self-hosted edition 404'd
+  # "Pro Edition" on create-submission-from-PDF — verified live before switching.
+  # Documenso Community Edition (AGPL-3.0) was smoke-tested end-to-end
+  # (create-from-PDF → recipient → field → distribute) with no license gate.
+  # Documents created via API from jag-api (createSigningSubmission,
+  # src/lib/documenso.ts). Tenants/landlord only ever see the returned
+  # /sign/<token> signing page — never Documenso's own dashboard/login.
+  # DB: native PostgreSQL, dedicated `documenso` database (own migrations on boot).
+  # SMTP is intentionally left as the "json" transport (logs only, no real send) —
+  # signing links are delivered via our own WhatsApp flow, not Documenso's email.
+  documenso:
+    image: documenso/documenso:latest
+    container_name: jag-documenso
     restart: unless-stopped
     environment:
-      DATABASE_URL: ${DOCUSEAL_DB_URL}
-      HOST:         sign.jagcorporate.com
+      NEXT_PRIVATE_DATABASE_URL:           ${DOCUMENSO_DB_URL}
+      NEXT_PRIVATE_DIRECT_DATABASE_URL:    ${DOCUMENSO_DB_URL}
+      NEXTAUTH_SECRET:                     ${DOCUMENSO_NEXTAUTH_SECRET}
+      NEXT_PRIVATE_ENCRYPTION_KEY:         ${DOCUMENSO_ENCRYPTION_KEY}
+      NEXT_PRIVATE_ENCRYPTION_SECONDARY_KEY: ${DOCUMENSO_ENCRYPTION_SECONDARY_KEY}
+      NEXTAUTH_URL:                        https://sign.jagcorporate.com
+      NEXT_PUBLIC_WEBAPP_URL:              https://sign.jagcorporate.com
+      NEXT_PRIVATE_SMTP_TRANSPORT:         json
+      NEXT_PRIVATE_SMTP_FROM_NAME:         JAG Properties
+      NEXT_PRIVATE_SMTP_FROM_ADDRESS:      robertjohnsonattin@gmail.com
+      DOCUMENSO_DISABLE_TELEMETRY:         "true"
+      # Set once Robert's owner account existed — blocks new account creation
+      # (email/password, Google, Microsoft, OIDC) on this instance going forward.
+      NEXT_PUBLIC_DISABLE_SIGNUP:          "true"
     ports:
       - "127.0.0.1:3010:3000"    # fronted by Caddy at sign.jagcorporate.com
     extra_hosts:
@@ -250,6 +284,12 @@ services:
       MINIO_ROOT_PASSWORD:    ${MINIO_ROOT_PASSWORD}
       MINIO_BROWSER:          "on"
       MINIO_KMS_SECRET_KEY:   ${MINIO_KMS_SECRET_KEY}
+      # Required for browser-direct presigned PUT (unit photo upload) to pass its
+      # CORS preflight. Found missing 2026-07-08 — the whole storage.jagcorporate.com
+      # public-presign path (documented as deployed in session 36) was never actually
+      # live: no Caddy site block, no CORS var, no CSP allowance, despite the DNS
+      # record existing. Fixing all three together now.
+      MINIO_API_CORS_ALLOW_ORIGIN: "https://jagcorporate.com"
     ports:
       - "127.0.0.1:9000:9000"    # S3 API — internal only
       - "127.0.0.1:9001:9001"    # Admin console — access via SSH tunnel

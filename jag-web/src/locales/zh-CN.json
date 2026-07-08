@@ -1277,6 +1277,7 @@
     },
     "rented": "已出租",
     "vacant": "空置",
+    "partiallyRented": "部分出租",
     "paidStatus": "已付",
     "unpaidStatus": "未付",
     "paidBadge": "已付",

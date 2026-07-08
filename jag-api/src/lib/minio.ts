@@ -26,12 +26,22 @@ export const BUCKET_SIGNED_DOCUMENTS = process.env['MINIO_BUCKET_SIGNED_DOCUMENT
 export const ALL_BUCKETS = [BUCKET_STATEMENTS, BUCKET_RECEIPTS, BUCKET_DOCUMENTS, BUCKET_PHOTOS, BUCKET_SIGNED_DOCUMENTS] as const;
 export type KnownBucket = typeof ALL_BUCKETS[number];
 
+// region is pinned explicitly (MinIO's own default when unconfigured) so the
+// SDK never makes a separate network call to auto-detect the bucket's region —
+// that auto-detect request is what failed with an opaque S3Error when routed
+// through Caddy's reverse proxy on the public presignClient below (found
+// 2026-07-08: fixing the internal-vs-public endpoint bug surfaced this second,
+// previously-masked bug — presignedUrl() threw before ever reaching MinIO on
+// the internal endpoint too, it just happened not to be exercised until now).
+const REGION = process.env['MINIO_REGION'] ?? 'us-east-1';
+
 export const minioClient = new MinioClient({
   endPoint:  requireEnv('MINIO_ENDPOINT'),
   port:      parseInt(process.env['MINIO_PORT'] ?? '9000', 10),
   useSSL:    process.env['MINIO_USE_SSL'] === 'true',
   accessKey: requireEnv('MINIO_ACCESS_KEY'),
   secretKey: requireEnv('MINIO_SECRET_KEY'),
+  region:    REGION,
 });
 
 // Presigned URLs are handed to the BROWSER, which cannot resolve the internal
@@ -47,6 +57,7 @@ const presignClient = process.env['MINIO_PUBLIC_ENDPOINT']
       useSSL:    process.env['MINIO_PUBLIC_SSL'] !== 'false',
       accessKey: requireEnv('MINIO_ACCESS_KEY'),
       secretKey: requireEnv('MINIO_SECRET_KEY'),
+      region:    REGION,
     })
   : minioClient;
 

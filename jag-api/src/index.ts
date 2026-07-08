@@ -99,8 +99,8 @@ app.use('/internal/traccar-event', traccarEventRouter);
 import { batterySyncRouter } from './routes/internal/traccar-event';
 app.use('/internal/gps/battery-sync', batterySyncRouter);
 
-import { docusealWebhookRouter } from './routes/internal/docuseal-webhook';
-app.use('/internal/docuseal-webhook', docusealWebhookRouter);
+import { documensoWebhookRouter } from './routes/internal/documenso-webhook';
+app.use('/internal/documenso-webhook', documensoWebhookRouter);
 
 // ── WhatsApp webhook — raw body needed for X-Hub-Signature-256 verification ──
 // Exposed publicly via Caddy (not Docker-network-only) so Meta can reach it.

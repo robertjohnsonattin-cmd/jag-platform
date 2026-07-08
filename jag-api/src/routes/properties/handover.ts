@@ -12,7 +12,7 @@ import { logger } from '../../lib/logger';
 import { sendTemplate } from '../../lib/whatsapp';
 import { triggerAutoListing } from './listing';
 import { generateConditionReportPdf, type ConditionSignField, type ConditionItem } from '../../lib/condition-report-pdf';
-import { createSigningSubmission } from '../../lib/docuseal';
+import { createSigningSubmission } from '../../lib/documenso';
 import PDFDocument from 'pdfkit';
 
 export const handoverRouter = Router();
@@ -210,7 +210,7 @@ handoverRouter.patch('/:id', async (req: Request, res: Response, next: NextFunct
 // ── POST /handover/:id/send-for-signing ───────────────────────────────────────
 // Renders the checklist's condition_items into a small signable PDF (Schedule B,
 // one event = one condition column, not move-in/move-out together) and creates
-// a DocuSeal submission with just two signature fields. Both embed_src URLs are
+// a Documenso document with just two signature fields. Both signing links are
 // returned so the frontend can open the tenant's first, then the landlord's, in
 // the same on-site sitting — no WhatsApp round-trip needed for this one, though
 // the tenant link is also sent as a fallback in case they'd rather sign later.
@@ -270,7 +270,7 @@ handoverRouter.post('/:id/send-for-signing', async (req: Request, res: Response,
     });
 
     await withOwnerRLS(propertiesPool, ownerId, async client =>
-      client.query(`UPDATE prop_handover_checklists SET docuseal_submission_id = $1 WHERE id = $2`, [submissionId, id]),
+      client.query(`UPDATE prop_handover_checklists SET documenso_document_id = $1 WHERE id = $2`, [submissionId, id]),
     );
 
     if (row.tenant_phone && embedUrls['TENANT']) {

@@ -115,10 +115,12 @@ traccar.jagcorporate.com {
 	}
 }
 
-# ── sign.jagcorporate.com — DocuSeal e-signature (own UI, jag-api reaches it internally) ─────
-# Tenants/landlord only ever open the embed_src signing page returned by the API —
-# never DocuSeal's own login/dashboard. Embedded as an iframe from jagcorporate.com
+# ── sign.jagcorporate.com — Documenso e-signature (own UI, jag-api reaches it internally) ────
+# Tenants/landlord only ever open the /sign/<token> signing page returned by the API —
+# never Documenso's own dashboard/login. Embedded as an iframe from jagcorporate.com
 # for the on-site handover-checklist signing flow (see frame-src on the SPA block below).
+# Same subdomain as the old DocuSeal service — no DNS change needed, just the
+# reverse_proxy target below.
 
 sign.jagcorporate.com {
 	import cloudflare_tls
@@ -127,7 +129,37 @@ sign.jagcorporate.com {
 		max_size 10MB
 	}
 
-	reverse_proxy docuseal:3000 {
+	reverse_proxy documenso:3000 {
+		header_up X-Real-IP {http.request.header.CF-Connecting-IP}
+		header_up X-Forwarded-For {http.request.header.CF-Connecting-IP}
+		header_up X-Forwarded-Proto https
+	}
+
+	header {
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+		-Server
+	}
+}
+
+# ── storage.jagcorporate.com — MinIO presigned URL public endpoint ───────────────────────────
+# Presigned GET/PUT URLs handed to the browser (unit listing photos, VMS compliance
+# docs, etc.) are built against this public hostname, not the internal Docker
+# network name `minio` — the browser can't resolve that. Found missing entirely
+# 2026-07-08 (documented as deployed in session 36, but never actually was — the
+# DNS record existed with no Caddy block behind it, causing Cloudflare 525 errors).
+# request_body max_size is generous for direct-to-MinIO photo uploads (presigned
+# PUT bypasses jag-api entirely, straight browser → MinIO through this proxy).
+
+storage.jagcorporate.com {
+	import cloudflare_tls
+
+	request_body {
+		max_size 25MB
+	}
+
+	reverse_proxy minio:9000 {
 		header_up X-Real-IP {http.request.header.CF-Connecting-IP}
 		header_up X-Forwarded-For {http.request.header.CF-Connecting-IP}
 		header_up X-Forwarded-Proto https
@@ -153,7 +185,7 @@ jagcorporate.com, www.jagcorporate.com {
 		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
 		# React SPA — scripts/styles from self; API + auth calls to JAG subdomains;
 		# Keycloak iframes allowed for silent token refresh
-		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://*.tile.openstreetmap.org; connect-src 'self' https://api.jagcorporate.com https://auth.jagcorporate.com; font-src 'self'; frame-src https://auth.jagcorporate.com https://sign.jagcorporate.com; object-src 'none'; base-uri 'self'; form-action 'self' https://auth.jagcorporate.com"
+		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://*.tile.openstreetmap.org https://storage.jagcorporate.com; connect-src 'self' https://api.jagcorporate.com https://auth.jagcorporate.com https://storage.jagcorporate.com; font-src 'self'; frame-src https://auth.jagcorporate.com https://sign.jagcorporate.com; object-src 'none'; base-uri 'self'; form-action 'self' https://auth.jagcorporate.com"
 		Cross-Origin-Resource-Policy same-origin
 		-Server
 	}

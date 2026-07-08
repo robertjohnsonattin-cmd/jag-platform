@@ -20,6 +20,12 @@ export interface Property {
   bedrooms: number | null
   bathrooms: number | null
   is_rented: boolean
+  // Derived from actual unit occupancy when the property has units (a
+  // multi-unit building with 1 of 4 units rented is PARTIALLY_RENTED, not
+  // RENTED); falls back to is_rented for properties with no sub-units.
+  occupancy_status?: 'VACANT' | 'PARTIALLY_RENTED' | 'RENTED'
+  total_units?: number | string
+  rented_units?: number | string
   current_valuation: string | null
   valuation_date: string | null
   notes: string | null

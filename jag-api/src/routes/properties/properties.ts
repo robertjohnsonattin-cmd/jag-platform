@@ -18,11 +18,29 @@ import { propertiesPool, corePool } from '../../db/index';
 import { logger } from '../../lib/logger';
 import { ok, err } from '../../lib/response';
 import { generateLeaseAgreementPdf, type LeaseSignField } from '../../lib/lease-pdf';
-import { createSigningSubmission } from '../../lib/docuseal';
+import { createSigningSubmission } from '../../lib/documenso';
 import { sendText } from '../../lib/whatsapp';
 import PDFDocument from 'pdfkit';
 
 export const propertiesRouter = Router();
+
+// prop_properties.is_rented is a single flag set true the moment ANY lease
+// exists on the property (see send-for-signing / lease creation below) — for
+// a multi-unit building that's misleading (e.g. 1 of 4 units rented still
+// showed "Rented" for the whole building). Derive a 3-way status from actual
+// unit occupancy when the property has units; fall back to the plain flag for
+// properties with no sub-units at all.
+type OccupancyRow = { is_rented: boolean; total_units: number | string; rented_units: number | string };
+function occupancyStatus(row: OccupancyRow): 'VACANT' | 'PARTIALLY_RENTED' | 'RENTED' {
+  const total = Number(row.total_units);
+  const rented = Number(row.rented_units);
+  if (total > 0) {
+    if (rented === 0) return 'VACANT';
+    if (rented === total) return 'RENTED';
+    return 'PARTIALLY_RENTED';
+  }
+  return row.is_rented ? 'RENTED' : 'VACANT';
+}
 
 function pdfDocToBuffer(doc: InstanceType<typeof PDFDocument>): Promise<Buffer> {
   return new Promise((resolve, reject) => {
@@ -189,14 +207,23 @@ propertiesRouter.get('/', async (req: Request, res: Response, next: NextFunction
           `SELECT p.id, p.property_code, p.name, p.address_line1, p.city,
                   p.property_type, p.tenure_type, p.bedrooms, p.bathrooms,
                   p.is_rented, p.current_valuation, p.valuation_date,
-                  p.last_modified_at, p.created_at
+                  p.last_modified_at, p.created_at,
+                  COALESCE(u.total_units, 0) AS total_units,
+                  COALESCE(u.rented_units, 0) AS rented_units
            FROM   prop_properties p
+           LEFT JOIN (
+             SELECT property_id, COUNT(*) AS total_units,
+                    COUNT(*) FILTER (WHERE is_rented) AS rented_units
+             FROM   prop_units
+             GROUP  BY property_id
+           ) u ON u.property_id = p.id
            WHERE  ${where}
            ORDER  BY p.name ASC
            LIMIT  ${push(limit)} OFFSET ${push(offset)}`,
           params,
         );
-        return { rows: dataResult.rows, total: Number(countResult.rows[0].count) };
+        const rows = dataResult.rows.map(r => ({ ...r, occupancy_status: occupancyStatus(r) }));
+        return { rows, total: Number(countResult.rows[0].count) };
       });
 
       logger.info({ entity: 'PROPERTIES', action: 'LIST', user_id: req.rlsCtx.userId, count: rows.length });
@@ -348,7 +375,7 @@ propertiesRouter.get('/:id', async (req: Request, res: Response, next: NextFunct
     const client = await propertiesPool.connect();
     try {
       const property = await withOwnerRLS(client, req.rlsCtx, async (c) => {
-        const [propResult, leaseResult, mortgageResult] = await Promise.all([
+        const [propResult, leaseResult, mortgageResult, unitCountResult] = await Promise.all([
           c.query(`SELECT * FROM prop_properties WHERE id = $1`, [idParsed.data.id]),
           c.query(
             `SELECT la.id, la.lease_type, la.start_date, la.end_date, la.monthly_rent,
@@ -365,9 +392,21 @@ propertiesRouter.get('/:id', async (req: Request, res: Response, next: NextFunct
              FROM   prop_mortgage_register WHERE property_id = $1 AND status = 'ACTIVE'`,
             [idParsed.data.id],
           ),
+          c.query(
+            `SELECT COUNT(*) AS total_units, COUNT(*) FILTER (WHERE is_rented) AS rented_units
+             FROM   prop_units WHERE property_id = $1`,
+            [idParsed.data.id],
+          ),
         ]);
         if (propResult.rows.length === 0) return null;
-        return { ...propResult.rows[0], active_leases: leaseResult.rows, mortgages: mortgageResult.rows };
+        const occupancy = { total_units: unitCountResult.rows[0].total_units, rented_units: unitCountResult.rows[0].rented_units };
+        return {
+          ...propResult.rows[0],
+          active_leases: leaseResult.rows,
+          mortgages: mortgageResult.rows,
+          ...occupancy,
+          occupancy_status: occupancyStatus({ is_rented: propResult.rows[0].is_rented, ...occupancy }),
+        };
       });
 
       if (!property) { err(res, 404, 'PROPERTY_NOT_FOUND', 'Property not found.'); return; }
@@ -571,6 +610,12 @@ propertiesRouter.post('/:propertyId/leases', async (req: Request, res: Response,
         );
         // Update property is_rented flag
         await c.query(`UPDATE prop_properties SET is_rented = true WHERE id = $1`, [propertyId]);
+        // Also flip the specific unit's own is_rented flag — this was previously
+        // only set on the property, so a multi-unit building's occupancy_status
+        // (derived from unit-level is_rented) never reflected new leases at all.
+        if (b.unit_id) {
+          await c.query(`UPDATE prop_units SET is_rented = true WHERE id = $1`, [b.unit_id]);
+        }
         return result.rows[0];
       });
       logger.info({ entity: 'PROPERTIES', action: 'LEASE_CREATED', user_id: ownerId, record_id: lease.id });
@@ -623,9 +668,9 @@ propertiesRouter.get('/:propertyId/leases/:leaseId/agreement-pdf', async (req: R
 
 // ── POST /properties/:propertyId/leases/:leaseId/send-for-signing ────────────
 // Generates the same Agreement PDF as above, but with Schedule C fields and
-// both signature blocks turned into a DocuSeal signable submission. Returns
-// the landlord's own embed_src (Robert signs immediately in-browser) and
-// WhatsApps the tenant's embed_src as their signing link.
+// both signature blocks turned into a Documenso signable document. Returns
+// the landlord's own signing link (Robert signs immediately in-browser) and
+// WhatsApps the tenant's signing link.
 
 propertiesRouter.post('/:propertyId/leases/:leaseId/send-for-signing', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
@@ -678,7 +723,7 @@ propertiesRouter.post('/:propertyId/leases/:leaseId/send-for-signing', async (re
 
       await withOwnerRLS(client, req.rlsCtx, (c) =>
         c.query(
-          `UPDATE prop_lease_agreements SET docuseal_submission_id = $1, signature_status = 'SENT' WHERE id = $2`,
+          `UPDATE prop_lease_agreements SET documenso_document_id = $1, signature_status = 'SENT' WHERE id = $2`,
           [submissionId, leaseId],
         ),
       );
@@ -717,7 +762,7 @@ propertiesRouter.delete('/:propertyId/leases/:leaseId', async (req: Request, res
     try {
       await withOwnerRLS(client, req.rlsCtx, async (c) => {
         const lease = await c.query(
-          `SELECT id FROM prop_lease_agreements WHERE id = $1 AND property_id = $2`,
+          `SELECT id, unit_id FROM prop_lease_agreements WHERE id = $1 AND property_id = $2`,
           [leaseId, propertyId],
         ).then(r => r.rows[0] ?? null);
         if (!lease) throw Object.assign(new Error('Lease not found.'), { status: 404, code: 'LEASE_NOT_FOUND' });
@@ -726,7 +771,12 @@ propertiesRouter.delete('/:propertyId/leases/:leaseId', async (req: Request, res
         await c.query(`DELETE FROM prop_rent_payments WHERE lease_id = $1`, [leaseId]);
         await c.query(`DELETE FROM prop_lease_agreements WHERE id = $1`, [leaseId]);
 
-        // Update is_rented flag if no active leases remain
+        // This lease's own unit is now vacant regardless of other units in the property
+        if (lease.unit_id) {
+          await c.query(`UPDATE prop_units SET is_rented = false WHERE id = $1`, [lease.unit_id]);
+        }
+
+        // Update property-level is_rented flag if no active leases remain
         const remaining = await c.query(
           `SELECT count(*) FROM prop_lease_agreements WHERE property_id = $1 AND status = 'ACTIVE'`,
           [propertyId],

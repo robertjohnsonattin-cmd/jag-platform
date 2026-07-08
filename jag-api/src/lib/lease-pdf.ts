@@ -97,11 +97,11 @@ function monthsBetween(startIso: string | Date, endIso: string | Date): number {
 type PDFDoc = InstanceType<typeof PDFDocument>;
 
 // One entry per fillable/signable spot in the PDF — collected only when a
-// `fieldSink` array is passed in (used by the DocuSeal send-for-signing route;
+// `fieldSink` array is passed in (used by the Documenso send-for-signing route;
 // the plain draft-download path leaves this undefined and pays no extra cost).
 // Coordinates are fractions (0-1) of the page's own width/height, top-left
-// origin (matches PDFKit's own coordinate system) — convert to DocuSeal's
-// `areas` format at the call site.
+// origin (matches PDFKit's own coordinate system) — convert to Documenso's
+// percentage-based field format at the call site.
 export interface LeaseSignField {
   name: string;
   type: 'text' | 'date' | 'signature';

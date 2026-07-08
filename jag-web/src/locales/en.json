@@ -1278,6 +1278,7 @@
     },
     "rented": "Rented",
     "vacant": "Vacant",
+    "partiallyRented": "Partially Rented",
     "paidStatus": "Paid",
     "unpaidStatus": "UNPAID",
     "paidBadge": "PAID",

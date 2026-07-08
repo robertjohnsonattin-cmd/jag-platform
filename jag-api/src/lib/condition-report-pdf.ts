@@ -3,7 +3,7 @@
 // equivalent of the paper template's Schedule B, split into two separate
 // signable documents (one per ENTRY/EXIT event) since each handover row only
 // ever records ONE point-in-time condition per item, not move-in AND
-// move-out together. Signed via DocuSeal (see routes/properties/handover.ts
+// move-out together. Signed via Documenso (see routes/properties/handover.ts
 // send-for-signing route) — both parties sign in the same on-site sitting.
 import PDFDocument from 'pdfkit';
 
