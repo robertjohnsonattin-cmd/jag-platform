@@ -604,6 +604,39 @@ function ReceiptModal({ propertyId, paymentId, onClose }: {
     window.open(`https://wa.me/?text=${text}`, '_blank')
   }
 
+  const handlePrint = () => {
+    if (!receipt) return
+    const r = receipt
+    const amtDue = parseFloat(r.amount_due)
+    const amtPaid = parseFloat(r.amount_paid)
+    const refNo = r.receipt_number ?? `JAG-${r.id.slice(-8).toUpperCase()}`
+    const period = `${MONTH_NAMES[r.period_month - 1]} ${r.period_year}`
+    const fmt = (v: number) => `TTD $${v.toLocaleString('en-TT', { minimumFractionDigits: 2 })}`
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Rent Receipt ${refNo}</title>
+<style>body{font-family:Arial,sans-serif;max-width:700px;margin:40px auto;color:#222}
+h1{font-size:20px}table{width:100%;border-collapse:collapse}
+td{padding:8px 12px;border-bottom:1px solid #eee}td:first-child{font-weight:bold;width:40%}</style></head>
+<body><strong>JAG Properties Management Ltd</strong>
+<h1>Rent Receipt</h1>
+<p style="color:#555;margin-top:-6px">Managed on behalf of the Landlord, <strong>Robert Johnson-Attin</strong> &middot; Trinidad &amp; Tobago</p>
+<table>
+<tr><td>Landlord</td><td>Robert Johnson-Attin</td></tr>
+<tr><td>Receipt No.</td><td>${refNo}</td></tr>
+<tr><td>Date</td><td>${fmtDate(r.payment_date)}</td></tr>
+<tr><td>Tenant</td><td>${r.tenant_name}</td></tr>
+<tr><td>Property / Unit</td><td>${r.property_name}${r.unit_number ? ' &mdash; Unit ' + r.unit_number : ''}</td></tr>
+<tr><td>Period</td><td>${period}</td></tr>
+<tr><td>Amount Due</td><td>${fmt(amtDue)}</td></tr>
+<tr><td>Amount Paid</td><td>${fmt(amtPaid)}</td></tr>
+<tr><td>Balance</td><td>${fmt(amtDue - amtPaid)}</td></tr>
+<tr><td>Payment Method</td><td>${r.payment_method.replace(/_/g, ' ')}</td></tr>
+</table>
+<p style="margin-top:18px;font-size:13px;color:#555">Received with thanks by <strong>Robert Johnson-Attin</strong>, Landlord. Rent is payable to Robert Johnson-Attin.</p>
+</body></html>`
+    const w = window.open('', '_blank')
+    if (w) { w.document.write(html); w.document.close(); w.focus(); setTimeout(() => w.print(), 300) }
+  }
+
   return (
     <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
       <div className="bg-slate-800 border border-slate-700 rounded-xl w-full max-w-lg p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
@@ -635,6 +668,10 @@ function ReceiptModal({ propertyId, paymentId, onClose }: {
               <button onClick={handleWhatsApp}
                 className="flex-1 py-2 bg-green-700 hover:bg-green-600 text-white text-sm rounded-lg transition-colors">
                 💬 Open WhatsApp
+              </button>
+              <button onClick={handlePrint}
+                className="flex-1 py-2 bg-slate-700 hover:bg-slate-600 text-white text-sm rounded-lg transition-colors border border-slate-600">
+                🖨 Print / PDF
               </button>
             </div>
             <p className="text-xs text-slate-500 mt-3 text-center">
@@ -2360,6 +2397,16 @@ function PropertyDetail({ property, onDeleted }: { property: Property; onDeleted
                         <button onClick={() => void propertiesApi.downloadLeaseAgreement(property.id, l.id).catch(() => alert('Could not download the lease agreement.'))}
                           className="text-xs px-2 py-0.5 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded border border-slate-600 transition-colors"
                           title="Download lease agreement">📄 {t('propertiesPanel.downloadAgreement')}</button>
+                        <label className="text-xs px-2 py-0.5 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded border border-slate-600 transition-colors cursor-pointer"
+                          title="Upload a wet-signed scan of the agreement">⬆ {t('propertiesPanel.uploadSigned', 'Upload signed')}
+                          <input type="file" accept="application/pdf,image/*" className="hidden"
+                            onChange={e => { const f = e.target.files?.[0]; if (f) void propertiesApi.uploadSignedLease(property.id, l.id, f).then(() => { alert('Signed lease uploaded.'); void qc.invalidateQueries({ queryKey: ['properties', property.id] }) }).catch(() => alert('Upload failed.')) }} />
+                        </label>
+                        {l.signature_status === 'SIGNED' && (
+                          <button onClick={() => void propertiesApi.downloadSignedLease(property.id, l.id).catch(() => alert('No signed copy on file.'))}
+                            className="text-xs px-2 py-0.5 bg-green-800 hover:bg-green-700 text-green-200 rounded border border-green-700 transition-colors"
+                            title="Download the signed copy on file">✅ {t('propertiesPanel.signedCopy', 'Signed copy')}</button>
+                        )}
                         <button onClick={() => setDeletingLease(l)}
                           className="text-slate-600 hover:text-red-400 transition-colors text-sm leading-none"
                           title="Delete lease">&#x1F5D1;</button>

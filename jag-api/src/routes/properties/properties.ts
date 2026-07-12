@@ -20,7 +20,11 @@ import { ok, err } from '../../lib/response';
 import { generateLeaseAgreementPdf, type LeaseSignField } from '../../lib/lease-pdf';
 import { createSigningSubmission } from '../../lib/documenso';
 import { sendTemplate } from '../../lib/whatsapp';
+import multer from 'multer';
+import { minioClient, ensureBucket, getObjectStream, mediaObjectKey, BUCKET_DOCUMENTS } from '../../lib/minio';
 import PDFDocument from 'pdfkit';
+
+const leaseUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } });
 
 export const propertiesRouter = Router();
 
@@ -662,6 +666,62 @@ propertiesRouter.get('/:propertyId/leases/:leaseId/agreement-pdf', async (req: R
       res.setHeader('Content-Disposition', `attachment; filename="lease-agreement-${leaseId}.pdf"`);
       const doc = generateLeaseAgreementPdf(row);
       doc.pipe(res);
+    } finally { client.release(); }
+  } catch (e) { next(e); }
+});
+
+// ── POST /properties/:propertyId/leases/:leaseId/upload-signed ────────────────
+// Wet-signed paper workflow: owner prints the agreement PDF, both parties sign,
+// owner scans it and uploads the scan here. Stores it against the lease and marks
+// it SIGNED (parallels the Documenso webhook path, but for offline signing).
+propertiesRouter.post('/:propertyId/leases/:leaseId/upload-signed', leaseUpload.single('file'), async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const parsed = z.object({ propertyId: z.string().uuid(), leaseId: z.string().uuid() }).safeParse(req.params);
+    if (!parsed.success) { err(res, 422, 'VALIDATION_ERROR', 'Invalid path parameters.'); return; }
+    const { propertyId, leaseId } = parsed.data;
+    const file = req.file;
+    if (!file) { err(res, 422, 'VALIDATION_ERROR', 'No file provided.'); return; }
+
+    const client = await propertiesPool.connect();
+    try {
+      const lease = await withOwnerRLS(client, req.rlsCtx, (c) =>
+        c.query(`SELECT id FROM prop_lease_agreements WHERE id = $1 AND property_id = $2`, [leaseId, propertyId])
+          .then(r => r.rows[0] ?? null));
+      if (!lease) { err(res, 404, 'LEASE_NOT_FOUND', 'Lease not found.'); return; }
+
+      const key = mediaObjectKey(req.rlsCtx.userId, 'leases-signed', leaseId, file.originalname || `signed-lease-${leaseId}.pdf`);
+      await ensureBucket(BUCKET_DOCUMENTS);
+      await minioClient.putObject(BUCKET_DOCUMENTS, key, file.buffer, file.size, { 'Content-Type': file.mimetype || 'application/pdf' });
+
+      await withOwnerRLS(client, req.rlsCtx, (c) =>
+        c.query(
+          `UPDATE prop_lease_agreements
+           SET signed_pdf_object_key = $1, signature_status = 'SIGNED', agreement_signed_at = NOW()
+           WHERE id = $2`,
+          [key, leaseId]));
+      logger.info({ entity: 'PROPERTIES', action: 'LEASE_SIGNED_UPLOADED', user_id: req.rlsCtx.userId, record_id: leaseId });
+      ok(res, { signed_pdf_object_key: key, signature_status: 'SIGNED' }, 200);
+    } finally { client.release(); }
+  } catch (e) { next(e); }
+});
+
+// ── GET /properties/:propertyId/leases/:leaseId/signed-pdf ────────────────────
+// Download the stored signed copy (from either Documenso or the wet-sign upload).
+propertiesRouter.get('/:propertyId/leases/:leaseId/signed-pdf', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const parsed = z.object({ propertyId: z.string().uuid(), leaseId: z.string().uuid() }).safeParse(req.params);
+    if (!parsed.success) { err(res, 422, 'VALIDATION_ERROR', 'Invalid path parameters.'); return; }
+    const { propertyId, leaseId } = parsed.data;
+    const client = await propertiesPool.connect();
+    try {
+      const row = await withOwnerRLS(client, req.rlsCtx, (c) =>
+        c.query(`SELECT signed_pdf_object_key FROM prop_lease_agreements WHERE id = $1 AND property_id = $2`, [leaseId, propertyId])
+          .then(r => r.rows[0] ?? null));
+      if (!row || !row.signed_pdf_object_key) { err(res, 404, 'NOT_FOUND', 'No signed copy on file.'); return; }
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="lease-signed-${leaseId}.pdf"`);
+      const stream = await getObjectStream(BUCKET_DOCUMENTS, row.signed_pdf_object_key as string);
+      stream.pipe(res);
     } finally { client.release(); }
   } catch (e) { next(e); }
 });

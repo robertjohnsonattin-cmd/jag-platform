@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { tenancyApi } from '../../api/tenancy'
+import { api } from '../../api/client'
 
 const STATUS_COLORS: Record<string, string> = {
   HELD:              'bg-blue-900/50 text-blue-300 border-blue-700',
@@ -56,7 +57,10 @@ export default function PropertiesDepositsPanel() {
                   {Boolean(d['months_equivalent']) && <span className="text-xs text-slate-500 ml-1">({String(d['months_equivalent'])} months)</span>}
                 </p>
                 <p className="text-xs text-slate-500">{String(d['payment_method'] ?? '')} · {String(d['reference_number'] ?? '')}</p>
-                <p className="text-xs text-slate-500">{t('tenancy.receiptNo', 'Receipt')}: {String(d['receipt_number'] ?? '—')}</p>
+                <p className="text-xs text-slate-500">{t('tenancy.receiptNo', 'Receipt')}: {String(d['receipt_number'] ?? '—')}
+                  <button onClick={() => void api.openHtml(`/properties/deposits/${String(d['id'])}/receipt`).catch(() => alert('Could not open the receipt.'))}
+                    className="text-blue-400 hover:text-blue-300 ml-2">{t('tenancy.printReceipt', 'Print receipt')}</button>
+                </p>
               </div>
               <span className={`text-xs px-2 py-0.5 rounded border ${STATUS_COLORS[String(d['status'])] ?? ''}`}>{String(d['status'])}</span>
             </div>

@@ -65,6 +65,24 @@ export const api = {
     if (!res.ok) throw new Error(`Fetch failed: HTTP ${res.status}`)
     return URL.createObjectURL(await res.blob())
   },
+
+  // Open an auth-gated HTML/PDF endpoint in a new tab for viewing/printing.
+  // Bare <a href> can't carry the Bearer token (requireAuth is header-only), so we
+  // fetch with the token then hand the blob URL to a tab opened up-front (opening
+  // synchronously on the click avoids the popup blocker).
+  openHtml: async (path: string): Promise<void> => {
+    const w = window.open('', '_blank')
+    try {
+      await keycloak.updateToken(30).catch(() => {})
+      const res = await fetch(`${BASE}${path}`, { headers: { Authorization: `Bearer ${keycloak.token ?? ''}` } })
+      if (!res.ok) throw new Error(`Fetch failed: HTTP ${res.status}`)
+      const url = URL.createObjectURL(await res.blob())
+      if (w) w.location.href = url; else window.open(url, '_blank')
+    } catch (e) {
+      if (w) w.close()
+      throw e
+    }
+  },
 }
 
 export function tenantApi(tenantId: string) {

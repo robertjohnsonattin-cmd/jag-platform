@@ -31,6 +31,15 @@ export const propertiesApi = {
   downloadLeaseAgreement: (propertyId: string, leaseId: string) =>
     api.download(`/properties/${propertyId}/leases/${leaseId}/agreement-pdf`, `lease-agreement-${leaseId}.pdf`),
 
+  uploadSignedLease: (propertyId: string, leaseId: string, file: File) => {
+    const fd = new FormData(); fd.append('file', file)
+    return api.postForm<{ signed_pdf_object_key: string; signature_status: string }>(
+      `/properties/${propertyId}/leases/${leaseId}/upload-signed`, fd)
+  },
+
+  downloadSignedLease: (propertyId: string, leaseId: string) =>
+    api.download(`/properties/${propertyId}/leases/${leaseId}/signed-pdf`, `lease-signed-${leaseId}.pdf`),
+
   sendLeaseForSigning: (propertyId: string, leaseId: string) =>
     api.post<{ submissionId: string; landlordSigningUrl?: string; tenantSigningUrl?: string }>(
       `/properties/${propertyId}/leases/${leaseId}/send-for-signing`, {}

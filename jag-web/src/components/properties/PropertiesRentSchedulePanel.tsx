@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { tenancyApi } from '../../api/tenancy'
+import { api } from '../../api/client'
 
 const STATUS_COLORS: Record<string, string> = {
   UPCOMING:     'bg-slate-700 text-slate-300 border-slate-600',
@@ -84,10 +85,10 @@ export default function PropertiesRentSchedulePanel() {
                   </button>
                 )}
                 {['PAID','PARTIAL'].includes(String(rs['status'])) && (
-                  <a href={`/api/v1/properties/rent-schedule/${rs['id']}/receipt`} target="_blank" rel="noreferrer"
+                  <button onClick={() => void api.openHtml(`/properties/rent-schedule/${rs['id']}/receipt`).catch(() => alert('Could not open the receipt.'))}
                     className="text-xs text-blue-400 hover:text-blue-300 ml-1">
                     {t('tenancy.receipt', 'Receipt')}
-                  </a>
+                  </button>
                 )}
               </td>
             </tr>
