@@ -49,7 +49,7 @@ export async function sendText({ to, body }: WaTextMessage): Promise<unknown> {
   });
 }
 
-export async function sendTemplate({ to, templateName, languageCode = 'en', components = [] }: WaTemplateMessage): Promise<unknown> {
+export async function sendTemplate({ to, templateName, languageCode = 'en_US', components = [] }: WaTemplateMessage): Promise<unknown> {
   return callMeta('messages', {
     messaging_product: 'whatsapp',
     to,

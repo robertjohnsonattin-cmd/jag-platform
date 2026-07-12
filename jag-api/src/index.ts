@@ -112,8 +112,10 @@ app.use('/internal/whatsapp/webhook', express.raw({ type: 'application/json', li
 
 // ── Public routes (no Keycloak auth) — property booking page API ──────────────
 import { publicBookingRouter, publicScheduleRouter } from './routes/properties/viewings';
+import { publicApplyRouter } from './routes/properties/public-apply';
 app.use('/api/v1/public/book', express.json(), publicBookingRouter);
 app.use('/api/v1/public/schedule', express.json(), publicScheduleRouter);
+app.use('/api/v1/public/apply', express.json(), publicApplyRouter);
 
 // ── Phase 1B routes (STD-05: all API routes prefixed /api/v1/) ─────────────────
 import { authRouter }          from './routes/auth';

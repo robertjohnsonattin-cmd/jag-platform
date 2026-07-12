@@ -116,7 +116,7 @@ enquiriesRouter.post('/', async (req: Request, res: Response, next: NextFunction
     if (body.channel === 'WHATSAPP' && body.prospect_phone && (body.unit_id || body.property_id)) {
       const ctx = await withOwnerRLS(propertiesPool, ownerId, async client => {
         const { rows: [r] } = await client.query(
-          `SELECT u.unit_number, p.name AS property_name, u.booking_slug
+          `SELECT u.unit_number, p.name AS property_name, p.city, u.booking_slug
            FROM prop_units u
            LEFT JOIN prop_properties p ON p.id = u.property_id
            WHERE u.id = $1`,
@@ -125,19 +125,16 @@ enquiriesRouter.post('/', async (req: Request, res: Response, next: NextFunction
         return r ?? null;
       });
       if (ctx) {
-        const bookingBase = process.env.PUBLIC_BOOKING_BASE_URL ?? 'https://jagcorporate.com/book';
+        // Pre-screening acknowledgement: town/area only, no full address, no viewing link
+        // (booking is only offered after the prospect passes pre-screening).
         sendTemplate({
           to: body.prospect_phone,
           templateName: 'jag_enq_auto_reply',
           components: [
             { type: 'body', parameters: [
               { type: 'text', text: body.prospect_name ?? 'there' },
-              { type: 'text', text: ctx.property_name ?? '' },
-              { type: 'text', text: ctx.unit_number ?? '' },
+              { type: 'text', text: (ctx.city as string) || 'Trinidad' },
             ]},
-            ...(ctx.booking_slug ? [{ type: 'button' as const, sub_type: 'url', index: '0', parameters: [
-              { type: 'text', text: `${bookingBase}/${ctx.booking_slug}` },
-            ]}] : []),
           ],
         }).catch(e => logger.warn({ entity: 'PROPERTIES', action: 'WA_AUTO_REPLY_FAILED', error_message: (e as Error).message }));
       }
@@ -314,13 +311,13 @@ enquiriesRouter.post('/:id/screening-decision', async (req: Request, res: Respon
       // Until that template is approved, this call fails silently (logged as a
       // warning) — approve manually via WhatsApp using the schedule_token URL below.
       if (enquiry.prospect_phone) {
-        const scheduleBase = process.env.PUBLIC_SCHEDULE_BASE_URL ?? 'https://jagcorporate.com/schedule';
+        // URL button is https://jagcorporate.com/schedule/{{1}} — send the token only.
         sendTemplate({
           to: enquiry.prospect_phone,
           templateName: 'jag_enq_screening_approved',
           components: [
             { type: 'body', parameters: [{ type: 'text', text: enquiry.prospect_name ?? 'there' }] },
-            { type: 'button', sub_type: 'url', index: '0', parameters: [{ type: 'text', text: `${scheduleBase}/${token}` }] },
+            { type: 'button', sub_type: 'url', index: '0', parameters: [{ type: 'text', text: token }] },
           ],
         }).catch(e => logger.warn({ entity: 'PROPERTIES', action: 'WA_SCREENING_APPROVED_FAILED', error_message: (e as Error).message }));
       }

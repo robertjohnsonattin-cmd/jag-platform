@@ -145,7 +145,7 @@ listingRouter.post('/list', async (req: Request, res: Response, next: NextFuncti
 });
 
 async function broadcastNewListing(ownerId: string, unit: Record<string, unknown>, slug: string): Promise<void> {
-  const enquirers = await withOwnerRLS(propertiesPool, ownerId, async client => {
+  const { enquirers, area } = await withOwnerRLS(propertiesPool, ownerId, async client => {
     const { rows } = await client.query<Record<string, unknown>>(
       `SELECT DISTINCT ON (e.prospect_phone) e.prospect_phone, e.prospect_name
        FROM prop_enquiries e
@@ -157,27 +157,33 @@ async function broadcastNewListing(ownerId: string, unit: Record<string, unknown
        LIMIT 500`,
       [ownerId, unit['property_id']],
     );
-    return rows;
+    // Advertisement shows the town/area only (no full street address) for security.
+    const { rows: prop } = await client.query<{ city: string | null }>(
+      `SELECT city FROM prop_properties WHERE id = $1`, [unit['property_id']],
+    );
+    return { enquirers: rows, area: prop[0]?.city ?? '' };
   });
 
-  const bookingBase = process.env.PUBLIC_BOOKING_BASE_URL ?? 'https://jagcorporate.com/book';
   const rent  = String(unit['suggested_rent_recommended_ttd'] ?? unit['rent_amount'] ?? '');
   const avail = new Date().toLocaleDateString('en-TT', { day: 'numeric', month: 'long', year: 'numeric' });
+  const areaLabel = area || 'Trinidad';
 
   for (const contact of enquirers) {
     if (!contact['prospect_phone']) continue;
     await sendTemplate({
       to: String(contact['prospect_phone']),
-      templateName: 'jag_adv_new_listing',
+      // jag_adv_new_listing's Meta name+language stayed delete-locked after an early
+      // resubmit; recreated under jag_adv_new_listing_v2 (same content).
+      templateName: 'jag_adv_new_listing_v2',
       components: [
         { type: 'body', parameters: [
-          { type: 'text', text: String(unit['property_name'] ?? '') },
-          { type: 'text', text: String(unit['unit_number'] ?? '') },
+          { type: 'text', text: areaLabel },
           { type: 'text', text: rent },
           { type: 'text', text: avail },
         ]},
+        // URL button is https://jagcorporate.com/book/{{1}} — send the slug only.
         { type: 'button', sub_type: 'url', index: '0', parameters: [
-          { type: 'text', text: `${bookingBase}/${slug}` },
+          { type: 'text', text: slug },
         ]},
       ],
     }).catch(() => { /* per-contact failure is non-fatal */ });

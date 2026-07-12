@@ -13,6 +13,7 @@ import { sendTemplate } from '../../lib/whatsapp';
 import { triggerAutoListing } from './listing';
 import { generateConditionReportPdf, type ConditionSignField, type ConditionItem } from '../../lib/condition-report-pdf';
 import { createSigningSubmission } from '../../lib/documenso';
+import { getPaymentDetails } from '../../lib/payment-config';
 import PDFDocument from 'pdfkit';
 
 export const handoverRouter = Router();
@@ -183,8 +184,7 @@ handoverRouter.patch('/:id', async (req: Request, res: Response, next: NextFunct
       if (lease?.tenant_phone) {
         const mgr   = process.env.JAG_MANAGER_NAME ?? 'Robert';
         const phone = process.env.JAG_MANAGER_PHONE ?? process.env.JAG_OWNER_PHONE ?? '';
-        const bank  = process.env.JAG_BANK_NAME ?? 'First Citizens Bank';
-        const acct  = process.env.JAG_BANK_ACCOUNT_NO ?? '';
+        const pay   = getPaymentDetails();
         sendTemplate({
           to: lease.tenant_phone,
           templateName: 'jag_onb_welcome_pack',
@@ -193,9 +193,10 @@ handoverRouter.patch('/:id', async (req: Request, res: Response, next: NextFunct
             { type: 'text', text: lease.property_name ?? '' },
             { type: 'text', text: lease.unit_number ?? '' },
             { type: 'text', text: `TTD $${parseFloat(String(lease.rent_amount_ttd ?? 0)).toFixed(2)}` },
-            { type: 'text', text: bank },
-            { type: 'text', text: acct },
-            { type: 'text', text: lease.unit_number ?? '' },
+            { type: 'text', text: pay.payee },
+            { type: 'text', text: pay.bank },
+            { type: 'text', text: pay.acctType },
+            { type: 'text', text: pay.acctNo },
             { type: 'text', text: mgr },
             { type: 'text', text: phone },
           ]}],
@@ -274,13 +275,16 @@ handoverRouter.post('/:id/send-for-signing', async (req: Request, res: Response,
     );
 
     if (row.tenant_phone && embedUrls['TENANT']) {
+      // jag_condition_report_signing_request: 1 body param + "Review & Sign" URL button
+      // (https://sign.jagcorporate.com/{{1}}). Pass the path only.
+      const signPath = embedUrls['TENANT'].replace(/^https?:\/\/[^/]+\//, '');
       sendTemplate({
         to: row.tenant_phone,
         templateName: 'jag_condition_report_signing_request',
-        components: [{ type: 'body', parameters: [
-          { type: 'text', text: tenantName },
-          { type: 'text', text: embedUrls['TENANT'] },
-        ]}],
+        components: [
+          { type: 'body', parameters: [{ type: 'text', text: tenantName }] },
+          { type: 'button', sub_type: 'url', index: '0', parameters: [{ type: 'text', text: signPath }] },
+        ],
       }).catch(e => logger.warn({ entity: 'PROPERTIES', action: 'HANDOVER_SIGN_WA_FAILED', error_message: (e as Error).message }));
     }
 

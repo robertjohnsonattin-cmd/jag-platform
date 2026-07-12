@@ -4,6 +4,7 @@
 // GET    /api/v1/public/book/:slug
 // POST   /api/v1/public/book/:slug
 
+import { randomBytes } from 'crypto';
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import { z } from 'zod';
 import { withOwnerRLS } from '../../middleware/rls';
@@ -143,7 +144,7 @@ viewingsRouter.post('/send-reminders', async (req: Request, res: Response, next:
         await sendTemplate({
           to: String(row['prospect_phone']),
           templateName: 'jag_enq_viewing_reminder_24h',
-          languageCode: 'en',
+          languageCode: 'en_US',
           components: [{ type: 'body', parameters: [
             { type: 'text', text: String(row['prospect_name'] ?? '') },
             { type: 'text', text: String(row['property_name'] ?? '') },
@@ -193,7 +194,7 @@ viewingsRouter.post('/send-reminders-1h', async (req: Request, res: Response, ne
         await sendTemplate({
           to: String(row['prospect_phone']),
           templateName: 'jag_enq_viewing_reminder_1h',
-          languageCode: 'en',
+          languageCode: 'en_US',
           components: [{ type: 'body', parameters: [
             { type: 'text', text: String(row['prospect_name'] ?? '') },
             { type: 'text', text: String(row['unit_number'] ?? '') },
@@ -232,20 +233,29 @@ viewingsRouter.post('/send-post-viewing-links', async (req: Request, res: Respon
       return rows;
     });
 
+    const applyBase = process.env.PUBLIC_APPLY_BASE_URL ?? 'https://jagcorporate.com/apply';
     const sent: string[] = [];
     for (const row of rows) {
       if (!row['prospect_phone']) continue;
+      // One-time application token → public /apply/<token> form (30-day validity).
+      const token = randomBytes(24).toString('hex');
       try {
         await sendTemplate({
           to: String(row['prospect_phone']),
           templateName: 'jag_enq_post_viewing',
-          languageCode: 'en',
-          components: [{ type: 'body', parameters: [{ type: 'text', text: String(row['prospect_name'] ?? '') }] }],
+          languageCode: 'en_US',
+          components: [{ type: 'body', parameters: [
+            { type: 'text', text: String(row['prospect_name'] ?? '') },
+            { type: 'text', text: `${applyBase}/${token}` },
+          ] }],
         });
         await withOwnerRLS(propertiesPool, ownerId, async client => {
           await client.query(
-            `UPDATE prop_enquiries SET stage = 'APPLICATION_SENT' WHERE id = $1`,
-            [row['id']],
+            `UPDATE prop_enquiries
+             SET stage = 'APPLICATION_SENT', application_token = $2,
+                 application_token_expires_at = NOW() + INTERVAL '30 days'
+             WHERE id = $1`,
+            [row['id'], token],
           );
         });
         sent.push(String(row['id']));
@@ -463,15 +473,21 @@ publicScheduleRouter.post('/:token', async (req: Request, res: Response, next: N
       await sendTemplate({
         to: enquiry.prospect_phone,
         templateName: 'jag_enq_viewing_confirm',
-        components: [{
-          type: 'body',
-          parameters: [
-            { type: 'text', text: enquiry.prospect_name },
-            { type: 'text', text: address },
-            { type: 'text', text: slotStart.toLocaleDateString('en-TT') },
-            { type: 'text', text: slotStart.toLocaleTimeString('en-TT', { hour: '2-digit', minute: '2-digit' }) },
-          ],
-        }],
+        components: [
+          { type: 'body',
+            parameters: [
+              { type: 'text', text: enquiry.prospect_name },
+              { type: 'text', text: address },
+              { type: 'text', text: slotStart.toLocaleDateString('en-TT') },
+              { type: 'text', text: slotStart.toLocaleTimeString('en-TT', { hour: '2-digit', minute: '2-digit' }) },
+            ],
+          },
+          // URL button is https://maps.google.com/?q={{1}} — no GPS coords stored,
+          // so pass the address as the map query (URL-encoded).
+          { type: 'button', sub_type: 'url', index: '0', parameters: [
+            { type: 'text', text: encodeURIComponent(String(address)) },
+          ]},
+        ],
       });
     } catch (e) {
       logger.warn({ entity: 'PUBLIC_SCHEDULE', action: 'WA_CONFIRM_FAILED', error_message: (e as Error).message });

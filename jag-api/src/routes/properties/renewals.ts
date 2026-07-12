@@ -96,7 +96,7 @@ renewalsRouter.post('/send-notices', async (req: Request, res: Response, next: N
           await sendTemplate({
             to: String(row['tenant_phone']),
             templateName: 'jag_ren_renewal_enquiry',
-            languageCode: 'en',
+            languageCode: 'en_US',
             components: [{ type: 'body', parameters: [
               { type: 'text', text: String(row['tenant_name'] ?? '') },
               { type: 'text', text: String(days) },

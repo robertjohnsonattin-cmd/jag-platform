@@ -12,6 +12,7 @@ import { propertiesPool } from '../../db/index';
 import { logger } from '../../lib/logger';
 import { ok, err } from '../../lib/response';
 import { sendTemplate } from '../../lib/whatsapp';
+import { getPaymentDetails } from '../../lib/payment-config';
 
 export const rentScheduleRouter = Router();
 
@@ -150,7 +151,7 @@ rentScheduleRouter.post('/send-reminders', async (req: Request, res: Response, n
         await sendTemplate({
           to: String(row['tenant_phone']),
           templateName: 'jag_rent_reminder_d5',
-          languageCode: 'en',
+          languageCode: 'en_US',
           components: [{ type: 'body', parameters: [
             { type: 'text', text: String(row['tenant_name'] ?? '') },
             { type: 'text', text: `${row['period_year']}/${String(row['period_month']).padStart(2,'0')}` },
@@ -178,8 +179,7 @@ rentScheduleRouter.post('/send-reminders-d1', async (req: Request, res: Response
     const ownerId = req.rlsCtx.userId;
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
 
-    const bank = process.env.JAG_BANK_NAME ?? 'First Citizens Bank';
-    const acct = process.env.JAG_BANK_ACCOUNT_NO ?? '';
+    const pay = getPaymentDetails();
     const sent: string[] = [];
 
     const rows = await withOwnerRLS(propertiesPool, ownerId, async client => {
@@ -210,8 +210,10 @@ rentScheduleRouter.post('/send-reminders-d1', async (req: Request, res: Response
             { type: 'text', text: String(row['unit_number'] ?? '') },
             { type: 'text', text: `TTD $${parseFloat(String(row['amount_due_ttd'] ?? 0)).toFixed(2)}` },
             { type: 'text', text: String(row['due_date'] ?? '') },
-            { type: 'text', text: bank },
-            { type: 'text', text: acct },
+            { type: 'text', text: pay.payee },
+            { type: 'text', text: pay.bank },
+            { type: 'text', text: pay.acctType },
+            { type: 'text', text: pay.acctNo },
             { type: 'text', text: String(row['tenant_name'] ?? '') },
             { type: 'text', text: String(row['unit_number'] ?? '') },
           ]}],
@@ -250,6 +252,7 @@ rentScheduleRouter.post('/send-missed-d1', async (req: Request, res: Response, n
       return r;
     });
 
+    const pay = getPaymentDetails();
     for (const row of rows) {
       if (!row['tenant_phone']) continue;
       const penalty = parseFloat(String(row['amount_due_ttd'] ?? 0)) * 0.05;
@@ -263,6 +266,10 @@ rentScheduleRouter.post('/send-missed-d1', async (req: Request, res: Response, n
             { type: 'text', text: `TTD $${parseFloat(String(row['amount_due_ttd'] ?? 0)).toFixed(2)}` },
             { type: 'text', text: String(row['due_date'] ?? '') },
             { type: 'text', text: `TTD $${penalty.toFixed(2)}` },
+            { type: 'text', text: pay.payee },
+            { type: 'text', text: pay.bank },
+            { type: 'text', text: pay.acctType },
+            { type: 'text', text: pay.acctNo },
             { type: 'text', text: process.env.JAG_MANAGER_PHONE ?? '' },
           ]}],
         });
@@ -285,6 +292,7 @@ rentScheduleRouter.post('/queue-arrears-escalation', async (req: Request, res: R
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
 
     const queued: string[] = [];
+    const pay = getPaymentDetails();
 
     for (const [days, approvalType, templateName] of [
       [7,  'RENT_FORMAL_DEMAND', 'jag_rent_formal_demand'],
@@ -332,6 +340,10 @@ rentScheduleRouter.post('/queue-arrears-escalation', async (req: Request, res: R
                { type: 'text', text: `TTD $${balance.toFixed(2)}` },
                { type: 'text', text: `TTD $${penalty.toFixed(2)}` },
                { type: 'text', text: `TTD $${total.toFixed(2)}` },
+               { type: 'text', text: pay.payee },
+               { type: 'text', text: pay.bank },
+               { type: 'text', text: pay.acctType },
+               { type: 'text', text: pay.acctNo },
                { type: 'text', text: process.env.JAG_MANAGER_PHONE ?? '' },
              ]}]),
              label, row['id']],

@@ -157,6 +157,18 @@ services:
       WHATSAPP_ACCESS_TOKEN:          ${WHATSAPP_ACCESS_TOKEN}
       WHATSAPP_PHONE_NUMBER_ID:       ${WHATSAPP_PHONE_NUMBER_ID}
       WHATSAPP_VERIFY_TOKEN:          ${WHATSAPP_VERIFY_TOKEN}
+      # Rent-collection bank details + manager contact used to fill WhatsApp templates
+      # (welcome pack, rent reminders, missed-rent, formal demand, legal notice).
+      # lib/payment-config.ts reads these — must be listed here or they fall back to
+      # code defaults (docker-compose env pass-through gap, see WHATSAPP note above).
+      JAG_BANK_ACCOUNT_NAME:          ${JAG_BANK_ACCOUNT_NAME}
+      JAG_BANK_NAME:                  ${JAG_BANK_NAME}
+      JAG_BANK_ACCOUNT_TYPE:          ${JAG_BANK_ACCOUNT_TYPE}
+      JAG_BANK_ACCOUNT_NO:            ${JAG_BANK_ACCOUNT_NO}
+      JAG_MANAGER_NAME:               ${JAG_MANAGER_NAME}
+      JAG_MANAGER_PHONE:              ${JAG_MANAGER_PHONE}
+      JAG_OWNER_PHONE:                ${JAG_OWNER_PHONE}
+      PUBLIC_APPLY_BASE_URL:          ${PUBLIC_APPLY_BASE_URL}
     volumes:
       - /opt/jag/jag-api/google-calendar-key.json:/opt/jag/jag-api/google-calendar-key.json:ro
     ports:

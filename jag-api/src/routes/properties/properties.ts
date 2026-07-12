@@ -19,7 +19,7 @@ import { logger } from '../../lib/logger';
 import { ok, err } from '../../lib/response';
 import { generateLeaseAgreementPdf, type LeaseSignField } from '../../lib/lease-pdf';
 import { createSigningSubmission } from '../../lib/documenso';
-import { sendText } from '../../lib/whatsapp';
+import { sendTemplate } from '../../lib/whatsapp';
 import PDFDocument from 'pdfkit';
 
 export const propertiesRouter = Router();
@@ -729,12 +729,24 @@ propertiesRouter.post('/:propertyId/leases/:leaseId/send-for-signing', async (re
       );
 
       if (row.tenant_phone && embedUrls['TENANT']) {
-        // TODO: switch to sendTemplate('jag_lease_signing_request', ...) once that
-        // template is created and approved in Meta Business Suite — plain sendText
-        // only works within a 24h customer-service session window.
-        sendText({
+        // jag_onb_lease_ready: 4 body params + "Review & Sign" URL button.
+        // Button url is https://sign.jagcorporate.com/{{1}} — pass the path only
+        // (embedUrls['TENANT'] is https://sign.jagcorporate.com/sign/<token>).
+        const signPath = embedUrls['TENANT'].replace(/^https?:\/\/[^/]+\//, '');
+        sendTemplate({
           to: row.tenant_phone,
-          body: `Hi ${tenantName}, please review and sign your JAG Properties tenancy agreement here: ${embedUrls['TENANT']}`,
+          templateName: 'jag_onb_lease_ready',
+          components: [
+            { type: 'body', parameters: [
+              { type: 'text', text: tenantName || 'Tenant' },
+              { type: 'text', text: String(row.property_name ?? '') },
+              { type: 'text', text: String(row.unit_number ?? '') },
+              { type: 'text', text: process.env.JAG_MANAGER_PHONE ?? '' },
+            ]},
+            { type: 'button', sub_type: 'url', index: '0', parameters: [
+              { type: 'text', text: signPath },
+            ]},
+          ],
         }).catch(e => logger.warn({ entity: 'PROPERTIES', action: 'LEASE_SIGN_WA_FAILED', error_message: (e as Error).message }));
       }
 

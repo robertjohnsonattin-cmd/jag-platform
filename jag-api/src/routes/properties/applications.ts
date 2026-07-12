@@ -229,18 +229,15 @@ applicationsRouter.post('/:id/send-lease-signed', async (req: Request, res: Resp
     if (!row) return void res.status(404).json(err('Approved application not found', 'NOT_FOUND'));
     if (!row.phone) return void res.status(400).json(err('No phone number on application', 'VALIDATION_ERROR'));
 
-    await sendTemplate({
-      to: row.phone,
-      templateName: 'jag_onb_lease_ready',
-      components: [{ type: 'body', parameters: [
-        { type: 'text', text: row.full_name ?? 'Tenant' },
-        { type: 'text', text: row.property_name ?? '' },
-        { type: 'text', text: row.unit_number ?? '' },
-        { type: 'text', text: process.env.JAG_MANAGER_PHONE ?? '' },
-      ]}],
-    });
-    logger.info({ entity: 'PROPERTIES', action: 'WA_LEASE_SIGNED_SENT', application_id: id, user_id: ownerId });
-    res.json(ok({ sent: true }));
+    // NOTE: the jag_onb_lease_ready template now carries a "Review & Sign" URL button
+    // whose link comes from the Documenso signing submission. That submission is
+    // created by the canonical lease send-for-signing flow
+    // (properties.ts → POST /:propertyId/leases/:leaseId/send-for-signing), which
+    // also sends this template WITH the signing link. This endpoint has no signing
+    // submission, so it no longer sends the template (doing so would emit a broken
+    // button). Create + send the lease for signing from the Properties → Lease screen.
+    logger.info({ entity: 'PROPERTIES', action: 'WA_LEASE_SIGNED_NOOP', application_id: id, user_id: ownerId });
+    res.json(ok({ sent: false, reason: 'Use lease send-for-signing (creates the signing link + sends jag_onb_lease_ready).' }));
   } catch (e) { next(e); }
 });
 
