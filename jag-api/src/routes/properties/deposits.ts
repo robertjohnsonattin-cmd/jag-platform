@@ -107,7 +107,7 @@ depositsRouter.post('/', async (req: Request, res: Response, next: NextFunction)
       if (phone?.tenant_phone) {
         sendTemplate({
           to: phone.tenant_phone,
-          templateName: 'jag_onb_deposit_receipt',
+          templateName: 'jag_onb_deposit_receipt_v2',
           components: [{ type: 'body', parameters: [
             { type: 'text', text: phone.tenant_name ?? body.tenant_name },
             { type: 'text', text: `TTD $${body.amount_ttd.toFixed(2)}` },
@@ -250,8 +250,9 @@ td{padding:8px 12px;border-bottom:1px solid #eee}td:first-child{font-weight:bold
 <body>
 <div class="brand"><img src="https://jagcorporate.com/jag-logo.png" alt="JAG Properties"><strong>JAG Properties Management Ltd</strong></div>
 <h1>Security Deposit Receipt</h1>
-<p>Trinidad & Tobago</p>
+<p style="color:#555;margin-top:-6px">Managed on behalf of the Landlord, <strong>Robert Johnson-Attin</strong> · Trinidad &amp; Tobago</p>
 <table>
+<tr><td>Landlord</td><td>Robert Johnson-Attin</td></tr>
 <tr><td>Receipt No.</td><td>${d['receipt_number']}</td></tr>
 <tr><td>Date</td><td>${d['received_date']}</td></tr>
 <tr><td>Tenant</td><td>${d['tenant_name']}</td></tr>
@@ -263,5 +264,6 @@ td{padding:8px 12px;border-bottom:1px solid #eee}td:first-child{font-weight:bold
 <tr><td>Held In Account</td><td>${d['held_in_account'] ?? '—'}</td></tr>
 </table>
 <div class="notice">This deposit is held as security and will be returned within 30 days of tenancy end, less any deductions for damage or outstanding rent.</div>
+<p style="margin-top:16px;font-size:13px;color:#555">Received with thanks by <strong>Robert Johnson-Attin</strong>, Landlord.</p>
 </body></html>`;
 }

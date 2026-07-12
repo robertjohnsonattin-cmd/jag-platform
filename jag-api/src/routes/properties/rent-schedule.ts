@@ -437,7 +437,7 @@ rentScheduleRouter.post('/:id/record-payment', async (req: Request, res: Respons
         // JAG_RENT_003 — full receipt
         sendTemplate({
           to: row.tenant_phone,
-          templateName: 'jag_rent_receipt_full',
+          templateName: 'jag_rent_receipt_full_v2',
           components: [{ type: 'body', parameters: [
             { type: 'text', text: row.tenant_name ?? '' },
             { type: 'text', text: row.receipt_number },
@@ -517,8 +517,9 @@ td{padding:8px 12px;border-bottom:1px solid #eee}td:first-child{font-weight:bold
 <body>
 <div class="brand"><img src="https://jagcorporate.com/jag-logo.png" alt="JAG Properties"><strong>JAG Properties Management Ltd</strong></div>
 <h1>Rent Receipt</h1>
-<p>Trinidad & Tobago</p>
+<p style="color:#555;margin-top:-6px">Managed on behalf of the Landlord, <strong>Robert Johnson-Attin</strong> · Trinidad &amp; Tobago</p>
 <table>
+<tr><td>Landlord</td><td>Robert Johnson-Attin</td></tr>
 <tr><td>Receipt No.</td><td>${r['receipt_number']}</td></tr>
 <tr><td>Date</td><td>${r['paid_date']}</td></tr>
 <tr><td>Tenant</td><td>${r['tenant_name']}</td></tr>
@@ -530,5 +531,6 @@ td{padding:8px 12px;border-bottom:1px solid #eee}td:first-child{font-weight:bold
 <tr><td>Payment Method</td><td>${r['payment_method']}</td></tr>
 <tr><td>Reference</td><td>${r['payment_reference'] ?? '—'}</td></tr>
 </table>
+<p style="margin-top:18px;font-size:13px;color:#555">Received with thanks by <strong>Robert Johnson-Attin</strong>, Landlord. Rent is payable to Robert Johnson-Attin.</p>
 </body></html>`;
 }

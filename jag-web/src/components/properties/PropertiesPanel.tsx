@@ -567,6 +567,7 @@ function ReceiptModal({ propertyId, paymentId, onClose }: {
     let text = `🏠 *JAG Properties*\n`
     text += `━━━━━━━━━━━━━━━━━━\n`
     text += `📋 *RENT RECEIPT*\n\n`
+    text += `Landlord: Robert Johnson-Attin\n`
     text += `Property: ${r.property_name}\n`
     if (r.unit_number) text += `Unit: ${r.unit_number}\n`
     text += `Tenant: ${r.tenant_name}\n`
@@ -584,6 +585,7 @@ function ReceiptModal({ propertyId, paymentId, onClose }: {
     } else {
       text += `✅ Payment received in full. Thank you!\n`
     }
+    text += `\nReceived by Robert Johnson-Attin, Landlord`
     text += `\nJAG Properties`
     return text
   }
