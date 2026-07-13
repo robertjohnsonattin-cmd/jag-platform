@@ -459,7 +459,10 @@ export function generateLeaseAgreementPdf(d: LeasePdfData, fieldSink?: LeaseSign
     doc.moveDown(1.2);
     const sigLineY = doc.y;
     doc.font('Helvetica').fontSize(10).text('_________________________________');
-    recordField(`${role}_SIGNATURE`, 'signature', role, 56, sigLineY, 220, 16);
+    // Box sits above the underline (not on top of it) and is tall enough that
+    // a signature image doesn't render squashed — was 16pt tall anchored right
+    // on the line, which drew signatures tiny and dates struck through the rule.
+    recordField(`${role}_SIGNATURE`, 'signature', role, 56, sigLineY - 26, 220, 28);
     doc.text('Signature');
     doc.moveDown(0.8);
     doc.text('_________________________________');
@@ -467,7 +470,7 @@ export function generateLeaseAgreementPdf(d: LeasePdfData, fieldSink?: LeaseSign
     doc.moveDown(0.8);
     const dateLineY = doc.y;
     doc.text('_________________________________');
-    recordField(`${role}_DATE`, 'date', role, 56, dateLineY, 220, 16);
+    recordField(`${role}_DATE`, 'date', role, 56, dateLineY - 16, 160, 14);
     doc.text('Date');
     doc.moveDown(0.8);
     doc.text('Witness (optional):  _________________________________');
