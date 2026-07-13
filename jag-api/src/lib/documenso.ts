@@ -157,6 +157,24 @@ export async function createSigningSubmission(params: CreateSubmissionParams): P
   const { id: documentIdNum } = (await createRes.json()) as { id: number };
   const documentId = String(documentIdNum);
 
+  // Documenso auto-fills DATE fields at signing time using the document's own
+  // meta.timezone/dateFormat — left unset this defaulted to server time (UTC,
+  // since the container runs UTC) in whatever format Documenso picked, which
+  // showed as a 4-hour-ahead timestamp for Trinidad (UTC-4) signers. Set both
+  // explicitly; "yyyy-MM-dd hh:mm a" is Documenso's 12-hour (AM/PM) format.
+  const metaRes = await fetch(`${BASE_URL}/api/v2-beta/document/update`, {
+    method: 'POST',
+    headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      documentId: documentIdNum,
+      meta: { timezone: 'America/Port_of_Spain', dateFormat: 'yyyy-MM-dd hh:mm a' },
+    }),
+  });
+  if (!metaRes.ok) {
+    const body = await metaRes.text();
+    logger.warn({ entity: 'DOCUMENSO', action: 'SET_META_FAILED', status: metaRes.status, body, document_id: documentId });
+  }
+
   // Resolve each logical role to the recipientId Documenso assigned, matching by
   // the email we just sent (order is preserved but email match is normally more
   // robust) — EXCEPT when two submitters share the same email (e.g. a test

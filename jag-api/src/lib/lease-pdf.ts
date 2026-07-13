@@ -130,7 +130,10 @@ export interface LeaseSignField {
 }
 
 export function generateLeaseAgreementPdf(d: LeasePdfData, fieldSink?: LeaseSignField[]): PDFDoc {
-  const doc = new PDFDocument({ size: 'A4', margin: 56 });
+  // bufferPages lets us go back and stamp "Page X of Y" footers once the
+  // total page count is known (varies with lease data — longer names/
+  // addresses can push a clause across a page boundary).
+  const doc = new PDFDocument({ size: 'A4', margin: 56, bufferPages: true });
 
   // PDFKit fires 'pageAdded' for every new page — manual (doc.addPage()) or
   // automatic (text overflow) — so this stays accurate even though the exact
@@ -684,6 +687,19 @@ export function generateLeaseAgreementPdf(d: LeasePdfData, fieldSink?: LeaseSign
   doc.font('Helvetica-Bold').fontSize(10).text('TENANT');
   doc.font('Helvetica').fontSize(10).text('_________________________________');
   doc.text('Signature & Date');
+
+  // Stamp "Page X of Y" centered in the bottom margin of every page. Must run
+  // after all content is drawn (total page count isn't known until now) and
+  // before doc.end(), which flushes the buffered pages.
+  const range = doc.bufferedPageRange();
+  for (let i = range.start; i < range.start + range.count; i++) {
+    doc.switchToPage(i);
+    doc.font('Helvetica').fontSize(8).fillColor('#666666').text(
+      `Page ${i - range.start + 1} of ${range.count}`,
+      0, doc.page.height - 36,
+      { align: 'center', width: doc.page.width },
+    );
+  }
 
   doc.end();
   return doc;
