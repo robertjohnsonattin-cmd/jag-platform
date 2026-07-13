@@ -9,7 +9,8 @@ import { Router, type Request, type Response, type NextFunction } from 'express'
 import { propertiesPool } from '../../db/index';
 import { logger } from '../../lib/logger';
 import { withOwnerRLS } from '../../middleware/rls';
-import { sendTemplate, sendInteractive, verifyWebhookSignature } from '../../lib/whatsapp';
+import { sendTemplate, sendInteractive, sendText, verifyWebhookSignature } from '../../lib/whatsapp';
+import { enqueueNotification } from '../../lib/notifications';
 
 export const whatsappWebhookRouter = Router();
 
@@ -122,15 +123,63 @@ function dbMessageType(metaType: string): string {
   return WA_DB_MESSAGE_TYPES.has(up) ? up : 'TEXT';
 }
 
+function extractButtonReply(msg: Record<string, unknown>): { id: string; title: string } | null {
+  const interactive = msg['interactive'] as Record<string, unknown> | undefined;
+  const buttonReply = interactive?.['button_reply'] as Record<string, unknown> | undefined;
+  if (buttonReply?.['id']) {
+    return { id: String(buttonReply['id']), title: String(buttonReply['title'] ?? '') };
+  }
+  // Older "quick reply" template buttons arrive as a `button` object instead
+  // of `interactive.button_reply`.
+  const legacyButton = msg['button'] as Record<string, unknown> | undefined;
+  if (legacyButton?.['payload']) {
+    return { id: String(legacyButton['payload']), title: String(legacyButton['text'] ?? '') };
+  }
+  return null;
+}
+
+// Bot auto-replies sent from this handler never went through the normal
+// whatsapp-send.ts route, so they were never logged as OUTBOUND rows in
+// prop_whatsapp_messages — invisible in the WA inbox timeline, and unable to
+// be detected by the "already greeted this enquiry" check below.
+async function logOutbound(
+  client: { query: (q: string, v: unknown[]) => Promise<{ rows: unknown[] }> },
+  opts: { to: string; messageType: string; body: string; enquiryId: string | null; ticketId: string | null; result: unknown },
+): Promise<void> {
+  const waMessageId = (result => {
+    const r = result as { messages?: Array<{ id?: string }> } | null;
+    return r?.messages?.[0]?.id ?? null;
+  })(opts.result);
+  if (!waMessageId) return; // send was skipped (env not configured) or failed
+  await client.query(
+    `INSERT INTO prop_whatsapp_messages
+       (owner_id, wa_message_id, direction, from_number, to_number, message_type, body,
+        enquiry_id, ticket_id, delivery_status, sent_at)
+     VALUES ($1,$2,'OUTBOUND',$3,$4,$5,$6,$7,$8,'SENT',NOW())
+     ON CONFLICT (wa_message_id) DO NOTHING`,
+    [JAG_OWNER_ID, waMessageId, process.env.WHATSAPP_PHONE_NUMBER_ID ?? 'JAG', opts.to,
+     opts.messageType, opts.body, opts.enquiryId, opts.ticketId],
+  );
+}
+
 async function processInboundMessage(msg: Record<string, unknown>): Promise<void> {
   const waMessageId = String(msg['id'] ?? '');
   const from        = String(msg['from'] ?? '');
   const type        = String(msg['type'] ?? 'text');
-  const body        = type === 'text' ? String((msg['text'] as Record<string, unknown>)?.['body'] ?? '') : null;
+  // A tap on one of our own quick-reply buttons arrives as type 'interactive'
+  // (or, for template quick-replies, type 'button') with the click payload
+  // under interactive.button_reply / button — NOT under msg.text.body. Treating
+  // the button title as free text lets it flow through the same reply logic
+  // as a typed message would, while buttonReply.id lets us branch on intent
+  // precisely instead of relying on keyword matching against the title.
+  const buttonReply = extractButtonReply(msg);
+  const body        = buttonReply
+    ? buttonReply.title
+    : (type === 'text' ? String((msg['text'] as Record<string, unknown>)?.['body'] ?? '') : null);
 
   if (!from) return;
 
-  logger.info({ entity: 'WHATSAPP_WEBHOOK', action: 'INBOUND', from, type });
+  logger.info({ entity: 'WHATSAPP_WEBHOOK', action: 'INBOUND', from, type, button_id: buttonReply?.id ?? null });
 
   await withOwnerRLS(propertiesPool, JAG_OWNER_ID, async client => {
     // Step 1 — identify sender, get or create enquiry
@@ -189,7 +238,40 @@ async function processInboundMessage(msg: Record<string, unknown>): Promise<void
 
     if (!body) return;
 
-    // Step 3 — intent classification (keyword-based; Ollama optional for future)
+    // Step 3 — button-reply intents (handled before keyword classification —
+    // a button title like "Book a Viewing" wouldn't match any P1/P2/payment/
+    // renewal keyword, so without this branch a tap just fell through to the
+    // generic reply below and re-sent the same greeting menu instead of
+    // actually doing anything).
+    if (buttonReply?.id === 'book_viewing') {
+      const { rows: [unit] } = await client.query(
+        `SELECT u.booking_slug FROM prop_enquiries e
+         JOIN prop_units u ON u.id = e.unit_id
+         WHERE e.id = $1 AND u.booking_slug IS NOT NULL`,
+        [enquiryId],
+      );
+      const bookingBase = process.env.PUBLIC_BOOKING_BASE_URL ?? 'https://jagcorporate.com/book';
+      const replyBody = unit
+        ? `Great! You can view details and pick a viewing time here: ${bookingBase}/${unit.booking_slug}`
+        : `Sure — which property or area are you interested in? Reply with the address/area and we'll send you available viewing times.`;
+      const result = await sendText({ to: from, body: replyBody }).catch(() => null);
+      await logOutbound(client, { to: from, messageType: 'TEXT', body: replyBody, enquiryId, ticketId, result });
+      return;
+    }
+    if (buttonReply?.id === 'ask_question') {
+      const replyBody = `Sure, go ahead and type your question — we'll get back to you shortly.`;
+      const result = await sendText({ to: from, body: replyBody }).catch(() => null);
+      await logOutbound(client, { to: from, messageType: 'TEXT', body: replyBody, enquiryId, ticketId, result });
+      void enqueueNotification({
+        tier: 2,
+        title: 'WhatsApp: prospect wants to ask a question',
+        body: `${from} tapped "Ask a Question" — check the WhatsApp inbox to follow up.`,
+        payload: { module: 'PROPERTIES', kind: 'ENQUIRY', enquiry_id: enquiryId },
+      });
+      return;
+    }
+
+    // Step 4 — intent classification (keyword-based; Ollama optional for future)
     const lower = body.toLowerCase();
     const isMaintenanceKw = [...P1_KEYWORDS, ...P2_KEYWORDS].some(k => lower.includes(k));
     const isPaymentKw     = ['paid','payment','transferred','sent'].some(k => lower.includes(k));
@@ -247,17 +329,39 @@ async function processInboundMessage(msg: Record<string, unknown>): Promise<void
     } else if (isRenewalKw) {
       logger.info({ entity: 'WHATSAPP_WEBHOOK', action: 'RENEWAL_RESPONSE_FLAG', from });
     } else if (enquiryId) {
-      // New enquiry — send ack with booking options
-      try {
-        await sendInteractive({
-          to: from,
-          body: `Hi! Thank you for your interest. How can we help?`,
-          buttons: [
-            { id: 'book_viewing', title: 'Book a Viewing' },
-            { id: 'ask_question', title: 'Ask a Question' },
-          ],
+      // Send the greeting menu only once per enquiry — without this guard,
+      // every subsequent message that doesn't match a keyword (e.g. a plain
+      // "hi", or anything sent before the tenant reads the first reply)
+      // re-sent the identical menu, which looked like the bot was stuck in a
+      // loop and ignoring whatever the prospect actually said/tapped.
+      const { rows: [priorOutbound] } = await client.query(
+        `SELECT 1 FROM prop_whatsapp_messages WHERE enquiry_id = $1 AND direction = 'OUTBOUND' LIMIT 1`,
+        [enquiryId],
+      );
+      const greetingBody = `Hi! Thank you for your interest. How can we help?`;
+      if (!priorOutbound) {
+        try {
+          const result = await sendInteractive({
+            to: from,
+            body: greetingBody,
+            buttons: [
+              { id: 'book_viewing', title: 'Book a Viewing' },
+              { id: 'ask_question', title: 'Ask a Question' },
+            ],
+          });
+          await logOutbound(client, { to: from, messageType: 'INTERACTIVE', body: greetingBody, enquiryId, ticketId, result });
+        } catch { /* best effort */ }
+      } else {
+        const replyBody = `Got it — we'll get back to you shortly.`;
+        const result = await sendText({ to: from, body: replyBody }).catch(() => null);
+        await logOutbound(client, { to: from, messageType: 'TEXT', body: replyBody, enquiryId, ticketId, result });
+        void enqueueNotification({
+          tier: 2,
+          title: 'WhatsApp: new message from prospect',
+          body: `${from}: ${body.slice(0, 200)}`,
+          payload: { module: 'PROPERTIES', kind: 'ENQUIRY', enquiry_id: enquiryId },
         });
-      } catch { /* best effort */ }
+      }
     }
   });
 }
