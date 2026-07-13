@@ -12,6 +12,7 @@
 // GET    /api/v1/properties/:id/rent-payments/:paymentId/receipt
 
 import { Router, type Request, type Response, type NextFunction } from 'express';
+import type { Readable } from 'stream';
 import { z } from 'zod';
 import { withOwnerRLS } from '../../middleware/rls';
 import { propertiesPool, corePool } from '../../db/index';
@@ -21,7 +22,7 @@ import { generateLeaseAgreementPdf, type LeaseSignField } from '../../lib/lease-
 import { createSigningSubmission } from '../../lib/documenso';
 import { sendTemplate } from '../../lib/whatsapp';
 import multer from 'multer';
-import { minioClient, ensureBucket, getObjectStream, mediaObjectKey, BUCKET_DOCUMENTS } from '../../lib/minio';
+import { minioClient, ensureBucket, getObjectStream, mediaObjectKey, BUCKET_DOCUMENTS, BUCKET_SIGNED_DOCUMENTS } from '../../lib/minio';
 import PDFDocument from 'pdfkit';
 
 const leaseUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } });
@@ -730,9 +731,18 @@ propertiesRouter.get('/:propertyId/leases/:leaseId/signed-pdf', async (req: Requ
         c.query(`SELECT signed_pdf_object_key FROM prop_lease_agreements WHERE id = $1 AND property_id = $2`, [leaseId, propertyId])
           .then(r => r.rows[0] ?? null));
       if (!row || !row.signed_pdf_object_key) { err(res, 404, 'NOT_FOUND', 'No signed copy on file.'); return; }
+      const key = row.signed_pdf_object_key as string;
+      // Documenso webhook stores into BUCKET_SIGNED_DOCUMENTS; the wet-sign
+      // upload path (above) stores into BUCKET_DOCUMENTS. Try the Documenso
+      // bucket first, fall back to the wet-sign bucket for older uploads.
+      let stream: Readable;
+      try {
+        stream = await getObjectStream(BUCKET_SIGNED_DOCUMENTS, key);
+      } catch {
+        stream = await getObjectStream(BUCKET_DOCUMENTS, key);
+      }
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `attachment; filename="lease-signed-${leaseId}.pdf"`);
-      const stream = await getObjectStream(BUCKET_DOCUMENTS, row.signed_pdf_object_key as string);
       stream.pipe(res);
     } finally { client.release(); }
   } catch (e) { next(e); }
