@@ -1,7 +1,7 @@
 # JAG Integrated Business Platform — Claude Session Context
 
 **Owner:** Robert Johnson-Attin | Barataria, Trinidad & Tobago
-**Architecture:** v1.9 | **Current Phase:** ALL PHASES COMPLETE — in production | **Updated:** 2026-07-13 (session 41)
+**Architecture:** v1.9 | **Current Phase:** ALL PHASES COMPLETE — in production | **Updated:** 2026-07-13 (session 43)
 
 ---
 
@@ -784,6 +784,15 @@ adb install -r app/build/outputs/apk/release/app-release.apk
 ---
 
 ## OPEN ITEMS
+
+- **Lease agreement PDF/Documenso rendering — FIXED + DEPLOYED 2026-07-13 (session 43)**: Robert noticed the already-signed Hugh Smith test lease (Apt C1) displayed wrong when downloaded, which turned into a live end-to-end re-signing walkthrough that surfaced 5 real bugs, all fixed and deployed same session (builds on the session-42 Documenso completion-pipeline fixes):
+  1. **Signed-copy download read the wrong MinIO bucket.** `GET /properties/:id/leases/:id/signed-pdf` (`properties.ts`) was hardcoded to `BUCKET_DOCUMENTS`, but the Documenso webhook stores into `BUCKET_SIGNED_DOCUMENTS`. Fix: try `BUCKET_SIGNED_DOCUMENTS` first, fall back to `BUCKET_DOCUMENTS` (covers the older wet-sign-upload path too, no migration needed).
+  2. **Signature/date field boxes overlapped the underline they sat on** — `lease-pdf.ts` `recordField` calls for `SIGNATURE`/`DATE` were only 16pt tall, anchored exactly on the underline's y, so Documenso rendered the signature squashed and the date text struck through the rule. First fix attempt overcorrected and started overlapping the "SIGNED by the LANDLORD" heading instead — needed a second pass adding real headroom (`moveDown(2.4)`, was 1.2) between heading and line, with the field now 34pt tall floating cleanly between the two.
+  3. **Documenso DATE field had no timezone/format set**, defaulting to UTC in some auto-picked format — showed 4 hours ahead for Trinidad (UTC-4) signers. Fix: `documenso.ts` `createSigningSubmission` now calls `POST /document/update` with `meta: { timezone: 'America/Port_of_Spain', dateFormat: 'yyyy-MM-dd hh:mm a' }` right after document creation.
+  4. **No page-numbering footer existed at all** (checked full git history — never implemented). Added: `bufferPages: true` on the PDFKit constructor, then after all content is drawn, loop `doc.bufferedPageRange()` + `switchToPage(i)` + stamp "Page X of Y" before `doc.end()`.
+  5. **The page-numbering footer doubled the page count (12 → 22).** The footer y sits below the page's usable content area (bottom margin 56pt) — PDFKit's `.text()` auto-triggers `addPage()` when writing past that boundary even via `switchToPage` on an already-rendered page, silently inserting a blank page after every real one. Fix: zero `doc.page.margins.bottom` for just that write, restore after. Verified locally (counted `/Type /Page` objects in a generated test PDF: back to 11, matching the original) before deploying.
+
+  **Also surfaced (not a code bug, pre-existing test data):** Hugh Smith's test tenant record shares Robert's own email. Documenso can't distinguish two recipients with the same email — completing the landlord signature silently auto-completed the tenant recipient too (no actual signature captured), so all further tenant-signing attempts 500'd with "Document must be pending for signing." Left as-is since it's test data only; a real lease will never have landlord==tenant email. See [[project-lease-pdf-rendering-fixes]] in Claude's memory for full detail. Commits `a9d5e75`, `91e4bce`, `633004f`, `82ca0a2`.
 
 - **WhatsApp inbound webhook — FIXED + LIVE 2026-07-13 (session 41)**: Inbound WhatsApp had never processed a single message since the feature was built — Meta was never even reaching the endpoint. Root cause was a chain of 5 separate, independent bugs, all now fixed and verified end-to-end with a real message from Robert's phone (created a real enquiry + sent an auto-reply):
   1. **Meta app was unpublished** — "Apps will only be able to receive test webhooks... while the app is unpublished" banner in the App Dashboard. Fixed by completing Privacy Policy URL (new `jag-web/public/privacy.html`, static file, no React routing) + Category, then clicking Publish.
