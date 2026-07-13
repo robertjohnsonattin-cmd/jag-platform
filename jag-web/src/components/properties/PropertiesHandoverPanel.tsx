@@ -2,6 +2,8 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { tenancyApi } from '../../api/tenancy'
+import { propertiesApi } from '../../api/properties'
+import type { Property, Unit } from '../../types/properties'
 
 const cls = 'w-full bg-slate-700 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500'
 
@@ -47,6 +49,7 @@ function blankConditionItems(): ConditionItemForm[] {
 export default function PropertiesHandoverPanel() {
   const { t } = useTranslation()
   const qc = useQueryClient()
+  const [propertyId, setPropertyId] = useState('')
   const [unitId, setUnitId] = useState('')
   const [showCreate, setShowCreate] = useState(false)
   const [compareId, setCompareId] = useState<string | null>(null)
@@ -58,6 +61,29 @@ export default function PropertiesHandoverPanel() {
     keys_issued: '0', gate_remotes_issued: '0', notes: '',
   })
   const [conditionItems, setConditionItems] = useState<ConditionItemForm[]>(blankConditionItems())
+
+  const { data: properties = [] } = useQuery({
+    queryKey: ['properties-picker'],
+    queryFn: () => propertiesApi.getProperties({ limit: 500 }),
+    staleTime: 60_000,
+  })
+
+  const { data: units = [] } = useQuery({
+    queryKey: ['properties', propertyId, 'units-picker'],
+    queryFn: () => propertiesApi.getUnits(propertyId),
+    enabled: !!propertyId,
+    staleTime: 60_000,
+  })
+
+  const { data: propertyLeases = [] } = useQuery({
+    queryKey: ['properties', propertyId, 'leases-picker'],
+    queryFn: () => propertiesApi.getLeases(propertyId),
+    enabled: showCreate && !!propertyId,
+    staleTime: 60_000,
+  })
+  // Lease type doesn't declare unit_id in its TS interface, but the backend
+  // SELECTs la.* so it's present on every row — filter client-side by unit.
+  const unitLeases = propertyLeases.filter((l) => (l as unknown as { unit_id?: string }).unit_id === unitId)
 
   const { data: checklists = [] } = useQuery({
     queryKey: ['handover', unitId],
@@ -131,16 +157,26 @@ export default function PropertiesHandoverPanel() {
 
   return (
     <div>
-      <div className="flex items-center gap-2 mb-4">
-        <input className={cls} style={{ maxWidth: 300 }} placeholder={t('tenancy.enterUnitId', 'Enter Unit ID to load checklists...')}
-          value={unitId} onChange={e => setUnitId(e.target.value)} />
-        <button onClick={() => { setForm(f => ({ ...f, unit_id: unitId })); setShowCreate(true) }}
-          className="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded">
+      <div className="flex items-center gap-2 mb-4 flex-wrap">
+        <select className={cls} style={{ maxWidth: 260 }}
+          value={propertyId}
+          onChange={e => { setPropertyId(e.target.value); setUnitId('') }}>
+          <option value="">{t('tenancy.selectProperty', '— Select property —')}</option>
+          {properties.map((p: Property) => <option key={p.id} value={p.id}>{p.name}</option>)}
+        </select>
+        <select className={cls} style={{ maxWidth: 200 }}
+          value={unitId} onChange={e => setUnitId(e.target.value)} disabled={!propertyId}>
+          <option value="">{t('tenancy.selectUnit', '— Select unit —')}</option>
+          {units.map((u: Unit) => <option key={u.id} value={u.id}>{u.unit_number}</option>)}
+        </select>
+        <button onClick={() => { setForm(f => ({ ...f, unit_id: unitId, lease_id: '' })); setShowCreate(true) }}
+          disabled={!unitId}
+          className="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white rounded">
           + {t('tenancy.newChecklist', 'New Checklist')}
         </button>
       </div>
 
-      {!unitId && <p className="text-sm text-slate-500 py-6 text-center">{t('tenancy.enterUnitIdPrompt', 'Enter a Unit ID above to view handover checklists.')}</p>}
+      {!unitId && <p className="text-sm text-slate-500 py-6 text-center">{t('tenancy.enterUnitIdPrompt', 'Select a property and unit above to view handover checklists.')}</p>}
       {unitId && checklists.length === 0 && <p className="text-sm text-slate-500 py-6 text-center">{t('tenancy.noChecklists', 'No checklists for this unit yet.')}</p>}
 
       <div className="space-y-3">
@@ -244,7 +280,17 @@ export default function PropertiesHandoverPanel() {
               <div><label className="block text-xs text-slate-400 mb-1">{t('tenancy.type','Type')}</label>
                 <select className={cls} value={form.type} onChange={set('type') as React.ChangeEventHandler<HTMLSelectElement>}><option value="ENTRY">ENTRY</option><option value="EXIT">EXIT</option></select>
               </div>
-              <div><label className="block text-xs text-slate-400 mb-1">{t('tenancy.leaseId','Lease ID (optional)')}</label><input className={cls} value={form.lease_id} onChange={set('lease_id')} /></div>
+              <div><label className="block text-xs text-slate-400 mb-1">{t('tenancy.lease','Lease (optional)')}</label>
+                <select className={cls} value={form.lease_id} onChange={set('lease_id')}>
+                  <option value="">{t('tenancy.noLeaseLinked', '— Not linked to a lease —')}</option>
+                  {unitLeases.map((lease) => {
+                    const name = lease.is_company && lease.company_name
+                      ? lease.company_name
+                      : `${lease.first_name ?? ''} ${lease.last_name ?? ''}`.trim()
+                    return <option key={lease.id} value={lease.id}>{name || 'Tenant'} · {lease.status}</option>
+                  })}
+                </select>
+              </div>
               <div className="grid grid-cols-2 gap-2">
                 <div><label className="block text-xs text-slate-400 mb-1">TEC Reading</label><input className={cls} value={form.tec_meter_reading} onChange={set('tec_meter_reading')} /></div>
                 <div><label className="block text-xs text-slate-400 mb-1">TEC Account</label><input className={cls} value={form.tec_account_number} onChange={set('tec_account_number')} /></div>
