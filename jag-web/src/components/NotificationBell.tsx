@@ -25,6 +25,11 @@ function notificationTarget(payload: unknown): string | null {
   if (module === 'FINANCE' && kind === 'EXPENSE_APPROVAL') {
     return '/expenses'
   }
+  if ((kind === 'GPS_EVENT' || kind === 'GPS_BATTERY_LOW') && typeof p['vehicle_id'] === 'string') {
+    return `/inventory?tab=vehicles&focus=${p['vehicle_id']}&subtab=gps`
+  }
+  // GPS_BATTERY_SYNC_FAILED carries no vehicle_id (it's a whole-sync failure,
+  // not tied to one tracker) — correctly falls through to mark-read only.
   return null
 }
 

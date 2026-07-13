@@ -1,4 +1,5 @@
-import { useState, useCallback, useRef } from 'react'
+import { useState, useCallback, useRef, useEffect } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { imsApi } from '../api/ims'
@@ -1681,7 +1682,7 @@ function ItemsTab() {
 
 // ── Vehicles Tab ──────────────────────────────────────────────────────────────
 
-function VehiclesTab() {
+function VehiclesTab({ focusVehicleId, focusTab }: { focusVehicleId?: string | null; focusTab?: VmsTab } = {}) {
   const { t } = useTranslation()
   const [ownerFilter, setOwnerFilter] = useState('ALL')
   const [showDisposed, setShowDisposed] = useState(false)
@@ -1690,6 +1691,7 @@ function VehiclesTab() {
   const [editVehicle, setEditVehicle] = useState<Vehicle | null>(null)
   const [deletingVehicle, setDeletingVehicle] = useState<Vehicle | null>(null)
   const [manageVehicle, setManageVehicle] = useState<Vehicle | null>(null)
+  const [manageVehicleTab, setManageVehicleTab] = useState<VmsTab | undefined>(undefined)
   const [showFleetMap, setShowFleetMap] = useState(false)
   const [showTrackers, setShowTrackers] = useState(false)
   const [syncing, setSyncing] = useState(false)
@@ -1726,6 +1728,17 @@ function VehiclesTab() {
 
   const vehicles = data?.vehicles ?? []
   const pagination = data?.pagination
+
+  // Deep-link from a notification (e.g. a GPS alert) straight to this vehicle's
+  // manage modal, on the requested subtab.
+  useEffect(() => {
+    if (!focusVehicleId || manageVehicle) return
+    const match = vehicles.find(v => v.id === focusVehicleId)
+    if (match) {
+      setManageVehicle(match)
+      setManageVehicleTab(focusTab)
+    }
+  }, [focusVehicleId, focusTab, vehicles, manageVehicle])
 
   const nowMs = Date.now()
   const SOON_MS  = 30 * 24 * 60 * 60 * 1000 // 30 days
@@ -1915,7 +1928,13 @@ function VehiclesTab() {
         </div>
       )}
 
-      {manageVehicle && <VehicleManageModal vehicle={manageVehicle} onClose={() => setManageVehicle(null)} />}
+      {manageVehicle && (
+        <VehicleManageModal
+          vehicle={manageVehicle}
+          initialTab={manageVehicleTab}
+          onClose={() => { setManageVehicle(null); setManageVehicleTab(undefined) }}
+        />
+      )}
       {showFleetMap && <FleetMapModal onClose={() => setShowFleetMap(false)} />}
       {showTrackers && <TrackersModal onClose={() => setShowTrackers(false)} />}
       {showAdd && <AddVehicleModal locations={locData ?? []} onClose={() => { setShowAdd(false); qc.invalidateQueries({ queryKey: ['ims-vehicles'] }) }} />}
@@ -3256,8 +3275,8 @@ function VehiclePhotosTab({ itemId }: { itemId: string }) {
   )
 }
 
-function VehicleManageModal({ vehicle, onClose }: { vehicle: Vehicle; onClose: () => void }) {
-  const [tab, setTab] = useState<VmsTab>('photos')
+function VehicleManageModal({ vehicle, onClose, initialTab }: { vehicle: Vehicle; onClose: () => void; initialTab?: VmsTab }) {
+  const [tab, setTab] = useState<VmsTab>(initialTab ?? 'photos')
   const isDisposed = vehicle.status === 'DISPOSED'
 
   const tabs: { key: VmsTab; label: string }[] = [
@@ -4156,7 +4175,11 @@ type Tab = 'items' | 'vehicles' | 'movements' | 'low-stock' | 'valuation' | 'sto
 
 export default function Inventory() {
   const { t } = useTranslation()
-  const [tab, setTab] = useState<Tab>('items')
+  const [searchParams] = useSearchParams()
+  const initialTab = (searchParams.get('tab') as Tab | null) ?? 'items'
+  const focusVehicleId = searchParams.get('focus')
+  const focusTab = searchParams.get('subtab') as VmsTab | null
+  const [tab, setTab] = useState<Tab>(initialTab)
 
   return (
     <div className="flex flex-col h-full bg-slate-900">
@@ -4192,7 +4215,7 @@ export default function Inventory() {
       {/* Content */}
       <div className="flex-1 overflow-hidden">
         {tab === 'items'      && <ItemsTab />}
-        {tab === 'vehicles'   && <VehiclesTab />}
+        {tab === 'vehicles'   && <VehiclesTab focusVehicleId={focusVehicleId} focusTab={focusTab ?? undefined} />}
         {tab === 'movements'  && <MovementsTab />}
         {tab === 'low-stock'  && <LowStockTab />}
         {tab === 'valuation'    && <ValuationTab />}
