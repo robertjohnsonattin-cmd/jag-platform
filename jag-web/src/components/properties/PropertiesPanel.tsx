@@ -204,11 +204,42 @@ function AddLeaseModal({ propertyId, onClose, onCreated }: { propertyId: string;
     start_date: '', end_date: '',
     monthly_rent: '', security_deposit: '0',
     payment_due_day: '1', currency: 'TTD',
-    late_fee_type: 'NONE', late_fee_value: '0', late_fee_grace_days: '0',
+    // Standing company late-fee policy default — 5% after a 4-day grace
+    // period — still editable per-lease.
+    late_fee_type: 'PERCENT', late_fee_value: '5', late_fee_grace_days: '4',
     notes: '',
   })
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
     setForm(f => ({ ...f, [k]: e.target.value }))
+
+  // Default to the most recently created tenant — Add Lease is typically
+  // opened right after Create Tenant from an approved application, so this
+  // saves re-picking the same person from the dropdown. Still fully
+  // changeable; only sets once, when the tenant list first loads.
+  const tenantDefaultedRef = useRef(false)
+  useEffect(() => {
+    if (tenantDefaultedRef.current || tenants.length === 0 || form.tenant_id) return
+    const newest = [...tenants].sort((a, b) => b.created_at.localeCompare(a.created_at))[0]
+    if (newest) {
+      tenantDefaultedRef.current = true
+      setForm(f => ({ ...f, tenant_id: newest.id }))
+    }
+  }, [tenants, form.tenant_id])
+
+  // Prefill the asking rent (and, from it, a 1-month security deposit — the
+  // standard convention) from the selected unit's advertised rent_amount —
+  // still editable afterward, just saves re-typing figures already on file.
+  const onUnitChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const unitId = e.target.value
+    const unit = units.find((u: Unit) => u.id === unitId)
+    const rent = unit?.rent_amount ? parseFloat(String(unit.rent_amount)).toFixed(2) : null
+    setForm(f => ({
+      ...f,
+      unit_id: unitId,
+      monthly_rent: rent ?? f.monthly_rent,
+      security_deposit: rent ?? f.security_deposit,
+    }))
+  }
 
   const { mutate, isPending, error } = useMutation({
     mutationFn: () => propertiesApi.createLease(propertyId, {
@@ -248,7 +279,7 @@ function AddLeaseModal({ propertyId, onClose, onCreated }: { propertyId: string;
           {units.length > 0 && (
             <div>
               <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.unitOptional')}</label>
-              <select value={form.unit_id} onChange={set('unit_id')} className={cls}>
+              <select value={form.unit_id} onChange={onUnitChange} className={cls}>
                 <option value="">— whole property / no unit —</option>
                 {units.map((u: Unit) => (
                   <option key={u.id} value={u.id}>
