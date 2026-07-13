@@ -144,6 +144,23 @@ async function processInboundMessage(msg: Record<string, unknown>): Promise<void
     let ticketId:  string | null = existing?.ticket_id  ?? null;
 
     if (!enquiryId) {
+      // Fallback — the prior message-linkage lookup only finds enquiries that
+      // already have an inbound WhatsApp message attached. Most enquiries are
+      // created by other flows (viewing booked, application submitted) with
+      // no linked WA message row, so that lookup missed them and every reply
+      // spawned a brand-new duplicate enquiry for the same prospect. Reuse
+      // the most recent still-open enquiry for this phone instead of creating
+      // a new one, unless it's already closed out.
+      const { rows: [openEnquiry] } = await client.query(
+        `SELECT id FROM prop_enquiries
+         WHERE prospect_phone = $1 AND stage NOT IN ('REJECTED','WITHDRAWN','CONVERTED')
+         ORDER BY created_at DESC LIMIT 1`,
+        [from],
+      );
+      enquiryId = openEnquiry?.id ?? null;
+    }
+
+    if (!enquiryId) {
       const { rows: [eq] } = await client.query(
         `INSERT INTO prop_enquiries (owner_id, prospect_phone, channel, stage, initial_message)
          VALUES ($1,$2,'WHATSAPP','NEW_LEAD',$3) RETURNING id`,
