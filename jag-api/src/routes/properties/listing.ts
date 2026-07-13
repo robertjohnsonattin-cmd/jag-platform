@@ -34,7 +34,9 @@ async function postToFacebook(unit: Record<string, unknown>, photos: string[]): 
   }
   const beds = unit['bedrooms'] ?? '?';
   const baths = unit['bathrooms'] ?? '?';
-  const rent = unit['suggested_rent_recommended_ttd'] ?? unit['rent_amount'] ?? '—';
+  // rent_amount is the actual asking rent Robert set; suggested_rent_recommended_ttd
+  // is only Gemini's AI estimate — it must never outrank a real figure that's on file.
+  const rent = unit['rent_amount'] ?? unit['suggested_rent_recommended_ttd'] ?? '—';
   const payload = {
     name: `${beds}-Bedroom ${unit['unit_type'] ?? 'Unit'} — ${unit['city'] ?? 'Trinidad'}`,
     description: `${beds} bed / ${baths} bath. Rent: TTD $${rent}/month. ${unit['wasa_included'] ? 'WASA included.' : ''} Available now.`,
@@ -164,7 +166,9 @@ async function broadcastNewListing(ownerId: string, unit: Record<string, unknown
     return { enquirers: rows, area: prop[0]?.city ?? '' };
   });
 
-  const rent  = String(unit['suggested_rent_recommended_ttd'] ?? unit['rent_amount'] ?? '');
+  // rent_amount is the actual asking rent Robert set; suggested_rent_recommended_ttd
+  // is only Gemini's AI estimate — it must never outrank a real figure that's on file.
+  const rent  = String(unit['rent_amount'] ?? unit['suggested_rent_recommended_ttd'] ?? '');
   const avail = new Date().toLocaleDateString('en-TT', { day: 'numeric', month: 'long', year: 'numeric' });
   const areaLabel = area || 'Trinidad';
 
@@ -363,7 +367,9 @@ listingRouter.post('/sms-broadcast', async (req: Request, res: Response, next: N
     if (!unit) return void res.status(404).json(err('Unit not found', 'NOT_FOUND'));
 
     const bookingBase = process.env.PUBLIC_BOOKING_BASE_URL ?? 'https://jagcorporate.com/book';
-    const rent = unit.suggested_rent_recommended_ttd ?? '—';
+    // rent_amount is the actual asking rent Robert set; suggested_rent_recommended_ttd
+    // is only Gemini's AI estimate — it must never outrank a real figure that's on file.
+    const rent = unit.rent_amount ?? unit.suggested_rent_recommended_ttd ?? '—';
     const beds = unit.bedrooms ?? '?';
     const area = `${unit.city ?? 'Trin'}`;
     const unitType = unit.unit_type ?? 'Apt';
