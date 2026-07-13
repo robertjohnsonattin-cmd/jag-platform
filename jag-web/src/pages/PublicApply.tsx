@@ -129,7 +129,9 @@ export default function PublicApply() {
   }
 
   function idSlotKeys(slotIdx: number) { return [`id${slotIdx}front`, `id${slotIdx}back`] }
-  const requiredDocKeys = [...idSlotKeys(0), ...idSlotKeys(1), ...OTHER_DOC_SLOTS.map(s => s.key)]
+  // "Other relevant document" is a free-form catch-all, not a specific
+  // mandated document like the ID photos or income proof — it must stay optional.
+  const requiredDocKeys = [...idSlotKeys(0), ...idSlotKeys(1), ...OTHER_DOC_SLOTS.filter(s => s.key !== 'other').map(s => s.key)]
 
   const textFieldsFilled = [
     fullName, dob, nationalId, email, phone, employer, employmentType, income,
@@ -260,7 +262,7 @@ export default function PublicApply() {
         </Section>
 
         <Section title="Emergency contacts">
-          <p className="text-xs text-slate-500 -mt-1">Two emergency contacts, not living with you.</p>
+          <p className="text-xs text-slate-500 -mt-1">Two emergency contacts, not living with you.<span className="text-rose-400"> * All fields required</span></p>
           <div className="grid grid-cols-3 gap-2">
             <input className={cls} placeholder="Name" value={emergencyName} onChange={e => setEmergencyName(e.target.value)} />
             <input className={cls} placeholder="Phone" value={emergencyPhone} onChange={e => setEmergencyPhone(e.target.value)} />
@@ -274,7 +276,7 @@ export default function PublicApply() {
         </Section>
 
         <Section title="References">
-          <p className="text-xs text-slate-500 -mt-1">Two personal/professional references.</p>
+          <p className="text-xs text-slate-500 -mt-1">Two personal/professional references.<span className="text-rose-400"> * All fields required</span></p>
           <div className="grid grid-cols-3 gap-2">
             <input className={cls} placeholder="Name" value={ref1Name} onChange={e => setRef1Name(e.target.value)} />
             <input className={cls} placeholder="Phone" value={ref1Phone} onChange={e => setRef1Phone(e.target.value)} />
@@ -292,7 +294,7 @@ export default function PublicApply() {
         </Section>
 
         <Section title="Identification">
-          <p className="text-xs text-slate-500 -mt-1">Two forms of ID are required, front and back of each — the landlord will verify your ID number against the photo. Photos or PDFs accepted.</p>
+          <p className="text-xs text-slate-500 -mt-1">Two forms of ID are required, front and back of each — the landlord will verify your ID number against the photo. Photos or PDFs accepted.<span className="text-rose-400"> * Required</span></p>
           {[0, 1].map(slotIdx => {
             const idType = idTypes[slotIdx]
             const idLabel = ID_TYPES.find(([v]) => v === idType)?.[1] ?? idType
@@ -341,7 +343,12 @@ export default function PublicApply() {
         <Section title="Documents">
           {OTHER_DOC_SLOTS.map(slot => (
             <div key={slot.key} className="flex items-center gap-3">
-              <div className="flex-1 text-sm text-slate-300">{slot.label}</div>
+              <div className="flex-1 text-sm text-slate-300">
+                {slot.label}
+                {slot.key === 'other'
+                  ? <span className="text-slate-500"> (optional)</span>
+                  : <span className="text-rose-400"> *</span>}
+              </div>
               {docs[slot.key] ? (
                 <span className="text-xs text-emerald-400">✓ {docs[slot.key].file_name}</span>
               ) : uploading[slot.key] ? (

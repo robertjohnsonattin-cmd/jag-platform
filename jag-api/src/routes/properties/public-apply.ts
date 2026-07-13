@@ -66,9 +66,10 @@ const SubmitSchema = z.object({
   emergency_contact_2_name:     z.string().min(1).max(200),
   emergency_contact_2_phone:    z.string().min(1).max(30),
   emergency_contact_2_relation: z.string().min(1).max(100),
-  // 2 ID documents × front+back, employment letter, payslip, one other
-  // relevant document — 7 uploads minimum.
-  documents: z.array(DocSchema).min(7).max(12),
+  // 2 ID documents × front+back, employment letter, payslip — 6 uploads
+  // minimum. "Other relevant document" is a free-form optional extra, not
+  // counted toward the minimum.
+  documents: z.array(DocSchema).min(6).max(12),
 }).strict();
 
 // Resolve a live token → the enquiry row (unexpired, not yet submitted).
