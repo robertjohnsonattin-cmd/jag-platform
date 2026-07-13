@@ -10,8 +10,8 @@
 // Docker network (Traccar → jag-api).
 
 import { Router, type Request, type Response } from 'express';
-import { commercialPool } from '../../db/index';
-import { withTenantRLS, type RLSContext } from '../../middleware/rls';
+import { commercialPool, corePool } from '../../db/index';
+import { withTenantRLS, withOwnerRLS, type RLSContext } from '../../middleware/rls';
 import { enqueueNotification } from '../../lib/notifications';
 import { logger } from '../../lib/logger';
 import { getLatestPositions } from '../../lib/traccar';
@@ -151,7 +151,42 @@ batterySyncRouter.post('/', (req: Request, res: Response): void => {
 
       logger.info({ entity: 'GPS_BATTERY', action: 'SYNC_COMPLETE', trackers_checked: batteryMap.size });
     } catch (e) {
-      logger.warn({ entity: 'GPS_BATTERY', action: 'SYNC_FAILED', error: e instanceof Error ? e.message : String(e) });
+      const errMsg = e instanceof Error ? e.message : String(e);
+      logger.warn({ entity: 'GPS_BATTERY', action: 'SYNC_FAILED', error: errMsg });
+
+      // This route responds 200 before any DB work runs (fire-and-forget for
+      // the cron, above), so a failure here was previously invisible outside
+      // this WARN log line — 4 straight hourly failures went unnoticed during
+      // a transient jag_app credential mismatch on 2026-07-13 until found by
+      // chance while investigating an unrelated issue. Surface it to the
+      // owner; dedup to one alert per 3h so a sustained outage doesn't spam.
+      try {
+        const recentAlert = await withOwnerRLS(corePool, SYSTEM_USER, (c) =>
+          c.query(
+            `SELECT id FROM notification_queue
+             WHERE payload->>'kind' = 'GPS_BATTERY_SYNC_FAILED'
+               AND created_at > NOW() - INTERVAL '3 hours'
+             LIMIT 1`,
+          ),
+        );
+        if (recentAlert.rows.length === 0) {
+          void enqueueNotification({
+            tier: 1,
+            title: 'GPS battery sync failing',
+            body: `Hourly GPS battery sync has been failing: ${errMsg}`,
+            payload: { kind: 'GPS_BATTERY_SYNC_FAILED', error: errMsg },
+          });
+        }
+      } catch {
+        // Dedup check itself failed (e.g. corePool also unreachable) — fire
+        // anyway; a duplicate alert beats total silence on a real outage.
+        void enqueueNotification({
+          tier: 1,
+          title: 'GPS battery sync failing',
+          body: `Hourly GPS battery sync has been failing: ${errMsg}`,
+          payload: { kind: 'GPS_BATTERY_SYNC_FAILED', error: errMsg },
+        });
+      }
     }
   })();
 });
