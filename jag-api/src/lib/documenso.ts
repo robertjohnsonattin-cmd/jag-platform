@@ -158,12 +158,24 @@ export async function createSigningSubmission(params: CreateSubmissionParams): P
   const documentId = String(documentIdNum);
 
   // Resolve each logical role to the recipientId Documenso assigned, matching by
-  // the email we just sent (order is preserved but email match is more robust).
+  // the email we just sent (order is preserved but email match is normally more
+  // robust) — EXCEPT when two submitters share the same email (e.g. a test
+  // tenant using the landlord's own address, or any real household reusing one
+  // inbox): matching by email then collapses both roles onto whichever
+  // recipient the .find() happens to return first, leaving the other with zero
+  // fields attached and Documenso's distribute step rejecting the whole
+  // submission ("recipient X missing required fields"). Only trust the email
+  // match when that email is unique among this submission's recipients;
+  // otherwise fall back to positional order, which Documenso preserves from
+  // the request payload.
   const doc = await getDocument(documentId);
+  const emailCounts = new Map<string, number>();
+  for (const r of recipientPayload) emailCounts.set(r.email, (emailCounts.get(r.email) ?? 0) + 1);
   const roleToRecipientId = new Map<string, number>();
   params.submitters.forEach((s, i) => {
     const email = recipientPayload[i].email;
-    const match = doc.recipients.find(r => r.email === email) ?? doc.recipients[i];
+    const emailIsUnique = (emailCounts.get(email) ?? 0) === 1;
+    const match = (emailIsUnique ? doc.recipients.find(r => r.email === email) : undefined) ?? doc.recipients[i];
     if (match) roleToRecipientId.set(s.role, match.id);
   });
 
