@@ -157,6 +157,10 @@ services:
       WHATSAPP_ACCESS_TOKEN:          ${WHATSAPP_ACCESS_TOKEN}
       WHATSAPP_PHONE_NUMBER_ID:       ${WHATSAPP_PHONE_NUMBER_ID}
       WHATSAPP_VERIFY_TOKEN:          ${WHATSAPP_VERIFY_TOKEN}
+      # App Secret (App Dashboard → Settings → Basic → "App secret"). Meta signs
+      # inbound-webhook X-Hub-Signature-256 with THIS, not the access token —
+      # verifyWebhookSignature() needs it or every inbound webhook 403s.
+      WHATSAPP_APP_SECRET:            ${WHATSAPP_APP_SECRET}
       # Rent-collection bank details + manager contact used to fill WhatsApp templates
       # (welcome pack, rent reminders, missed-rent, formal demand, legal notice).
       # lib/payment-config.ts reads these — must be listed here or they fall back to

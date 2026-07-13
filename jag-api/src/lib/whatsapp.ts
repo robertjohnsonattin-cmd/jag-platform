@@ -37,7 +37,13 @@ async function callMeta(endpoint: string, payload: unknown): Promise<unknown> {
     logger.error({ entity: 'WHATSAPP', action: 'SEND_ERROR', status: res.status, body });
     throw new Error(`WhatsApp API error ${res.status}: ${body}`);
   }
-  return res.json();
+  const json = await res.json();
+  // Meta accepting the request only confirms it queued the message — not that
+  // WhatsApp delivered it to the device. Logged so a "message didn't arrive"
+  // report can be checked against whether we even got this far, since prior to
+  // this there was no success log at all for WhatsApp sends.
+  logger.info({ entity: 'WHATSAPP', action: 'SEND_ACCEPTED', message_id: (json as { messages?: Array<{ id?: string }> })?.messages?.[0]?.id });
+  return json;
 }
 
 export async function sendText({ to, body }: WaTextMessage): Promise<unknown> {
@@ -74,7 +80,11 @@ export async function sendInteractive({ to, body, buttons }: WaInteractiveMessag
 }
 
 export function verifyWebhookSignature(rawBody: Buffer, signatureHeader: string): boolean {
-  const secret = process.env.WHATSAPP_ACCESS_TOKEN;
+  // Meta signs the X-Hub-Signature-256 header with the app's App Secret
+  // (App Dashboard → Settings → Basic → "App secret"), NOT the access token.
+  // Using WHATSAPP_ACCESS_TOKEN here made every inbound webhook fail signature
+  // verification (SIG_INVALID → 403), so no inbound message was ever processed.
+  const secret = process.env.WHATSAPP_APP_SECRET;
   if (!secret) return false;
   const crypto = require('crypto') as typeof import('crypto');
   const expected = 'sha256=' + crypto.createHmac('sha256', secret).update(rawBody).digest('hex');

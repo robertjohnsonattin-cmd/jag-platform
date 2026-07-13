@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { tenancyApi } from '../../api/tenancy'
@@ -30,10 +30,13 @@ const STATUS_COLORS: Record<string, string> = {
 
 const cls = 'w-full bg-slate-700 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500'
 
-export default function PropertiesMaintenancePanel() {
+export default function PropertiesMaintenancePanel({ focusId }: { focusId?: string | null } = {}) {
   const { t } = useTranslation()
   const qc = useQueryClient()
-  const [selected, setSelected] = useState<string | null>(null)
+  const [selected, setSelected] = useState<string | null>(focusId ?? null)
+
+  // Deep-link from a notification click (?tab=maintenance&focus=<id>).
+  useEffect(() => { if (focusId) setSelected(focusId) }, [focusId])
   const [statusFilter, setStatusFilter] = useState('')
   const [priorityFilter, setPriorityFilter] = useState('')
   const [showCreate, setShowCreate] = useState(false)
@@ -95,7 +98,7 @@ export default function PropertiesMaintenancePanel() {
 
   return (
     <div className="flex gap-4 h-[700px]">
-      <div className="flex-1 overflow-y-auto">
+      <div className={`${selected ? 'hidden md:block' : 'block'} flex-1 overflow-y-auto`}>
         <div className="flex items-center gap-2 mb-3 flex-wrap">
           <select className="bg-slate-700 border border-slate-600 rounded px-2 py-1.5 text-sm text-slate-100" value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
             <option value="">{t('tenancy.allStatuses','All statuses')}</option>
@@ -130,10 +133,13 @@ export default function PropertiesMaintenancePanel() {
         ))}
       </div>
 
-      <div className="w-96 border-l border-slate-700 pl-4 overflow-y-auto">
-        {!selected && <p className="text-sm text-slate-500 mt-8 text-center">{t('tenancy.selectTicket','Select a ticket.')}</p>}
+      <div className={`${!selected ? 'hidden md:block' : 'block'} w-full md:w-96 border-l-0 md:border-l border-slate-700 md:pl-4 overflow-y-auto`}>
+        {!selected && <p className="hidden md:block text-sm text-slate-500 mt-8 text-center">{t('tenancy.selectTicket','Select a ticket.')}</p>}
         {detail && (
           <div className="space-y-3">
+            <button onClick={() => setSelected(null)} className="md:hidden text-sm text-blue-400 hover:text-blue-300">
+              {t('common.back', '← Back')}
+            </button>
             <div>
               <div className="flex items-center gap-2">
                 <span className={`text-xs px-2 py-0.5 rounded border font-bold ${PRIORITY_COLORS[String(detail['priority'])] ?? ''}`}>{String(detail['priority'])}</span>

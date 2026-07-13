@@ -91,6 +91,17 @@ const FIELD_TYPE_MAP: Record<DocumensoField['type'], string> = {
   select: 'DROPDOWN',
 };
 
+// fieldMeta.type must match Documenso's lowercase per-type enum (confirmed against
+// this instance's live /api/v2-beta/openapi.json) — same names as our own
+// DocumensoField['type'] except 'select' -> 'dropdown'.
+const FIELD_META_TYPE_MAP: Record<DocumensoField['type'], string> = {
+  text: 'text',
+  date: 'date',
+  signature: 'signature',
+  checkbox: 'checkbox',
+  select: 'dropdown',
+};
+
 interface DocumensoRecipient {
   id: number;
   email: string;
@@ -177,6 +188,15 @@ export async function createSigningSubmission(params: CreateSubmissionParams): P
           pageY: area.y * 100,
           width: area.w * 100,
           height: area.h * 100,
+          // required/label were computed on our side (see f.required) but never
+          // actually reached Documenso — its API nests both under fieldMeta, not
+          // top-level. Without this, no field is enforced before a recipient can
+          // mark themselves complete, so entire schedules could be skipped silently.
+          fieldMeta: {
+            type: FIELD_META_TYPE_MAP[f.type],
+            required: f.required ?? false,
+            label: f.name,
+          },
         },
       }),
     });

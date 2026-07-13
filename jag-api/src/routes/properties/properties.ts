@@ -648,6 +648,18 @@ propertiesRouter.get('/:propertyId/leases/:leaseId/agreement-pdf', async (req: R
                   pt.first_name AS tenant_first_name, pt.last_name AS tenant_last_name,
                   pt.company_name AS tenant_company_name, pt.is_company AS tenant_is_company,
                   pt.identification_type AS tenant_identification_type, pt.identification_number AS tenant_identification_number,
+                  pt.date_of_birth AS tenant_date_of_birth, pt.employer_name AS tenant_employer_name,
+                  pt.employment_type AS tenant_employment_type, pt.phone AS tenant_phone, pt.email AS tenant_email,
+                  pt.nationality AS tenant_nationality, pt.permanent_address AS tenant_permanent_address,
+                  pt.occupation AS tenant_occupation, pt.work_address AS tenant_work_address,
+                  pt.work_telephone AS tenant_work_telephone, pt.whatsapp_alt AS tenant_whatsapp_alt,
+                  pt.occupants_count AS tenant_occupants_count, pt.occupants_detail AS tenant_occupants_detail,
+                  pt.emergency_contact_name AS tenant_emergency_contact_name,
+                  pt.emergency_contact_phone AS tenant_emergency_contact_phone,
+                  pt.emergency_contact_relation AS tenant_emergency_contact_relation,
+                  pt.emergency_contact_2_name AS tenant_emergency_contact_2_name,
+                  pt.emergency_contact_2_phone AS tenant_emergency_contact_2_phone,
+                  pt.emergency_contact_2_relation AS tenant_emergency_contact_2_relation,
                   p.name AS property_name, p.address_line1, p.address_line2, p.city,
                   u.unit_number, u.bedrooms, u.bathrooms, u.floor_area_sqft
            FROM   prop_lease_agreements la
@@ -727,7 +739,7 @@ propertiesRouter.get('/:propertyId/leases/:leaseId/signed-pdf', async (req: Requ
 });
 
 // ── POST /properties/:propertyId/leases/:leaseId/send-for-signing ────────────
-// Generates the same Agreement PDF as above, but with Schedule C fields and
+// Generates the same Agreement PDF as above, but with Schedule B fields and
 // both signature blocks turned into a Documenso signable document. Returns
 // the landlord's own signing link (Robert signs immediately in-browser) and
 // WhatsApps the tenant's signing link.
@@ -748,6 +760,18 @@ propertiesRouter.post('/:propertyId/leases/:leaseId/send-for-signing', async (re
                   pt.company_name AS tenant_company_name, pt.is_company AS tenant_is_company,
                   pt.identification_type AS tenant_identification_type, pt.identification_number AS tenant_identification_number,
                   pt.phone AS tenant_phone, pt.email AS tenant_email,
+                  pt.date_of_birth AS tenant_date_of_birth, pt.employer_name AS tenant_employer_name,
+                  pt.employment_type AS tenant_employment_type,
+                  pt.nationality AS tenant_nationality, pt.permanent_address AS tenant_permanent_address,
+                  pt.occupation AS tenant_occupation, pt.work_address AS tenant_work_address,
+                  pt.work_telephone AS tenant_work_telephone, pt.whatsapp_alt AS tenant_whatsapp_alt,
+                  pt.occupants_count AS tenant_occupants_count, pt.occupants_detail AS tenant_occupants_detail,
+                  pt.emergency_contact_name AS tenant_emergency_contact_name,
+                  pt.emergency_contact_phone AS tenant_emergency_contact_phone,
+                  pt.emergency_contact_relation AS tenant_emergency_contact_relation,
+                  pt.emergency_contact_2_name AS tenant_emergency_contact_2_name,
+                  pt.emergency_contact_2_phone AS tenant_emergency_contact_2_phone,
+                  pt.emergency_contact_2_relation AS tenant_emergency_contact_2_relation,
                   p.name AS property_name, p.address_line1, p.address_line2, p.city,
                   u.unit_number, u.bedrooms, u.bathrooms, u.floor_area_sqft
            FROM   prop_lease_agreements la

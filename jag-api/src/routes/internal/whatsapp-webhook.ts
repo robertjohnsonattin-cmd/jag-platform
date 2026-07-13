@@ -111,6 +111,17 @@ whatsappWebhookRouter.post('/', async (req: Request, res: Response, next: NextFu
   } catch (e) { next(e); }
 });
 
+// prop_whatsapp_messages.message_type CHECK allows only these (uppercase).
+// Meta sends the type lowercase (e.g. 'text') and includes kinds not in this
+// set (video, sticker, location, button, contacts…); map to the allowed set,
+// falling back to TEXT, or the INSERT violates the check constraint and rolls
+// back the whole inbound transaction (enquiry included).
+const WA_DB_MESSAGE_TYPES = new Set(['TEXT', 'TEMPLATE', 'INTERACTIVE', 'IMAGE', 'DOCUMENT', 'AUDIO']);
+function dbMessageType(metaType: string): string {
+  const up = metaType.toUpperCase();
+  return WA_DB_MESSAGE_TYPES.has(up) ? up : 'TEXT';
+}
+
 async function processInboundMessage(msg: Record<string, unknown>): Promise<void> {
   const waMessageId = String(msg['id'] ?? '');
   const from        = String(msg['from'] ?? '');
@@ -150,7 +161,7 @@ async function processInboundMessage(msg: Record<string, unknown>): Promise<void
        ON CONFLICT (wa_message_id) DO NOTHING`,
       [JAG_OWNER_ID, waMessageId, from,
        process.env.WHATSAPP_PHONE_NUMBER_ID ?? 'JAG',
-       type, body, enquiryId, ticketId],
+       dbMessageType(type), body, enquiryId, ticketId],
     );
 
     if (enquiryId) {

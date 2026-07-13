@@ -20,20 +20,27 @@ const EMPLOYMENT_TYPES: [string, string][] = [
   ['RETIRED', 'Retired'], ['UNEMPLOYED', 'Unemployed'], ['OTHER', 'Other'],
 ]
 
-const DOC_SLOTS: { doc_type: string; label: string }[] = [
-  { doc_type: 'NATIONAL_ID', label: 'National ID / Driver’s Permit' },
-  { doc_type: 'EMPLOYMENT_LETTER', label: 'Job letter' },
-  { doc_type: 'PAYSLIP', label: 'Payslip' },
-  { doc_type: 'PAYSLIP', label: 'Payslip (2nd)' },
-  { doc_type: 'PAYSLIP', label: 'Payslip (3rd)' },
+// Two forms of ID are required, each as front + back photos. Priority order
+// when picking a type: National ID card first, then Driver's Permit, then
+// Passport — tenants without an ID card (or a second one) can switch either
+// slot to whichever they actually have.
+const ID_TYPES: [string, string][] = [
+  ['NATIONAL_ID', 'National ID Card'], ['DRIVERS_PERMIT', 'Driver’s Permit'], ['PASSPORT', 'Passport'],
+]
+const ID_SLOT_DEFAULTS = ['NATIONAL_ID', 'DRIVERS_PERMIT']
+
+const OTHER_DOC_SLOTS: { key: string; doc_type: string; label: string }[] = [
+  { key: 'employment_letter', doc_type: 'EMPLOYMENT_LETTER', label: 'Job letter' },
+  { key: 'payslip', doc_type: 'PAYSLIP', label: 'Payslip' },
+  { key: 'other', doc_type: 'OTHER', label: 'Other relevant document' },
 ]
 
 const cls = 'w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:border-emerald-500 outline-none'
 
-function Field({ label, children, required }: { label: string; children: React.ReactNode; required?: boolean }) {
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
-      <label className="block text-xs font-semibold text-slate-400 mb-1">{label}{required && <span className="text-rose-400"> *</span>}</label>
+      <label className="block text-xs font-semibold text-slate-400 mb-1">{label}<span className="text-rose-400"> *</span></label>
       {children}
     </div>
   )
@@ -61,9 +68,24 @@ export default function PublicApply() {
   const [ref2Rel, setRef2Rel] = useState('')
   const [landlordName, setLandlordName] = useState('')
   const [landlordPhone, setLandlordPhone] = useState('')
+  const [nationality, setNationality] = useState('')
+  const [permanentAddress, setPermanentAddress] = useState('')
+  const [occupation, setOccupation] = useState('')
+  const [workAddress, setWorkAddress] = useState('')
+  const [workTelephone, setWorkTelephone] = useState('')
+  const [whatsappAlt, setWhatsappAlt] = useState('')
+  const [occupantsCount, setOccupantsCount] = useState('')
+  const [occupantsDetail, setOccupantsDetail] = useState('')
+  const [emergencyName, setEmergencyName] = useState('')
+  const [emergencyPhone, setEmergencyPhone] = useState('')
+  const [emergencyRelation, setEmergencyRelation] = useState('')
+  const [emergency2Name, setEmergency2Name] = useState('')
+  const [emergency2Phone, setEmergency2Phone] = useState('')
+  const [emergency2Relation, setEmergency2Relation] = useState('')
 
-  const [docs, setDocs] = useState<Record<number, UploadedDoc>>({})
-  const [uploading, setUploading] = useState<Record<number, boolean>>({})
+  const [idTypes, setIdTypes] = useState<[string, string]>([ID_SLOT_DEFAULTS[0], ID_SLOT_DEFAULTS[1]])
+  const [docs, setDocs] = useState<Record<string, UploadedDoc>>({})
+  const [uploading, setUploading] = useState<Record<string, boolean>>({})
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [confirmed, setConfirmed] = useState(false)
@@ -85,8 +107,8 @@ export default function PublicApply() {
       .finally(() => setLoading(false))
   }, [token])
 
-  async function uploadFile(slotIndex: number, slot: { doc_type: string; label: string }, file: File) {
-    setUploading(u => ({ ...u, [slotIndex]: true }))
+  async function uploadFile(slotKey: string, slot: { doc_type: string; label: string }, file: File) {
+    setUploading(u => ({ ...u, [slotKey]: true }))
     try {
       const r1 = await fetch(`${API_BASE}/${token}/upload-url`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -98,16 +120,29 @@ export default function PublicApply() {
         method: 'PUT', headers: { 'Content-Type': file.type || 'application/octet-stream' }, body: file,
       })
       if (!put.ok) throw new Error('Upload failed')
-      setDocs(d => ({ ...d, [slotIndex]: { doc_type: slot.doc_type, label: slot.label, object_key: b1.data.object_key, file_name: file.name } }))
+      setDocs(d => ({ ...d, [slotKey]: { doc_type: slot.doc_type, label: slot.label, object_key: b1.data.object_key, file_name: file.name } }))
     } catch {
       setSubmitError('A file failed to upload. Please try again.')
     } finally {
-      setUploading(u => ({ ...u, [slotIndex]: false }))
+      setUploading(u => ({ ...u, [slotKey]: false }))
     }
   }
 
+  function idSlotKeys(slotIdx: number) { return [`id${slotIdx}front`, `id${slotIdx}back`] }
+  const requiredDocKeys = [...idSlotKeys(0), ...idSlotKeys(1), ...OTHER_DOC_SLOTS.map(s => s.key)]
+
+  const textFieldsFilled = [
+    fullName, dob, nationalId, email, phone, employer, employmentType, income,
+    ref1Name, ref1Phone, ref1Rel, ref2Name, ref2Phone, ref2Rel, landlordName, landlordPhone,
+    nationality, permanentAddress, occupation, workAddress, workTelephone, whatsappAlt,
+    occupantsCount, occupantsDetail,
+    emergencyName, emergencyPhone, emergencyRelation, emergency2Name, emergency2Phone, emergency2Relation,
+  ].every(v => v.trim() !== '')
+  const docsFilled = requiredDocKeys.every(k => Boolean(docs[k]))
+  const canSubmit = textFieldsFilled && docsFilled && !submitting
+
   async function submit() {
-    if (!token || !fullName.trim() || !phone.trim()) return
+    if (!token || !canSubmit) return
     setSubmitting(true)
     setSubmitError(null)
     try {
@@ -115,21 +150,35 @@ export default function PublicApply() {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           full_name: fullName.trim(),
-          date_of_birth: dob || undefined,
-          national_id: nationalId.trim() || undefined,
-          email: email.trim() || undefined,
+          date_of_birth: dob,
+          national_id: nationalId.trim(),
+          email: email.trim(),
           phone: phone.trim(),
-          employer_name: employer.trim() || undefined,
-          employment_type: employmentType || undefined,
-          monthly_income_ttd: income.trim() ? Number(income) : undefined,
-          reference_1_name: ref1Name.trim() || undefined,
-          reference_1_phone: ref1Phone.trim() || undefined,
-          reference_1_relation: ref1Rel.trim() || undefined,
-          reference_2_name: ref2Name.trim() || undefined,
-          reference_2_phone: ref2Phone.trim() || undefined,
-          reference_2_relation: ref2Rel.trim() || undefined,
-          prior_landlord_name: landlordName.trim() || undefined,
-          prior_landlord_phone: landlordPhone.trim() || undefined,
+          employer_name: employer.trim(),
+          employment_type: employmentType,
+          monthly_income_ttd: Number(income),
+          reference_1_name: ref1Name.trim(),
+          reference_1_phone: ref1Phone.trim(),
+          reference_1_relation: ref1Rel.trim(),
+          reference_2_name: ref2Name.trim(),
+          reference_2_phone: ref2Phone.trim(),
+          reference_2_relation: ref2Rel.trim(),
+          prior_landlord_name: landlordName.trim(),
+          prior_landlord_phone: landlordPhone.trim(),
+          nationality: nationality.trim(),
+          permanent_address: permanentAddress.trim(),
+          occupation: occupation.trim(),
+          work_address: workAddress.trim(),
+          work_telephone: workTelephone.trim(),
+          whatsapp_alt: whatsappAlt.trim(),
+          occupants_count: Number(occupantsCount),
+          occupants_detail: occupantsDetail.trim(),
+          emergency_contact_name: emergencyName.trim(),
+          emergency_contact_phone: emergencyPhone.trim(),
+          emergency_contact_relation: emergencyRelation.trim(),
+          emergency_contact_2_name: emergency2Name.trim(),
+          emergency_contact_2_phone: emergency2Phone.trim(),
+          emergency_contact_2_relation: emergency2Relation.trim(),
           documents: Object.values(docs),
         }),
       })
@@ -156,8 +205,6 @@ export default function PublicApply() {
     </Shell>
   )
 
-  const canSubmit = fullName.trim() !== '' && phone.trim() !== '' && !submitting
-
   return (
     <Shell>
       <div className="mb-5">
@@ -168,24 +215,32 @@ export default function PublicApply() {
             {data.area ? ` · ${data.area}` : ''}
           </p>
         )}
-        <p className="text-xs text-slate-500 mt-1">Fields marked <span className="text-rose-400">*</span> are required. Everything else helps us process your application faster.</p>
+        <p className="text-xs text-slate-500 mt-1">All fields <span className="text-rose-400">*</span> are required. If something doesn't apply to you, write "N/A".</p>
       </div>
 
       <div className="space-y-5">
         <Section title="About you">
-          <Field label="Full name" required><input className={cls} value={fullName} onChange={e => setFullName(e.target.value)} /></Field>
+          <Field label="Full name"><input className={cls} value={fullName} onChange={e => setFullName(e.target.value)} /></Field>
           <div className="grid grid-cols-2 gap-3">
             <Field label="Date of birth"><input type="date" className={cls} value={dob} onChange={e => setDob(e.target.value)} /></Field>
-            <Field label="National ID"><input className={cls} value={nationalId} onChange={e => setNationalId(e.target.value)} /></Field>
+            <Field label="National ID number"><input className={cls} value={nationalId} onChange={e => setNationalId(e.target.value)} /></Field>
           </div>
           <div className="grid grid-cols-2 gap-3">
-            <Field label="Phone" required><input className={cls} value={phone} onChange={e => setPhone(e.target.value)} /></Field>
+            <Field label="Phone"><input className={cls} value={phone} onChange={e => setPhone(e.target.value)} /></Field>
             <Field label="Email"><input type="email" className={cls} value={email} onChange={e => setEmail(e.target.value)} /></Field>
           </div>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Nationality"><input className={cls} value={nationality} onChange={e => setNationality(e.target.value)} /></Field>
+            <Field label="WhatsApp No. (if different)"><input className={cls} value={whatsappAlt} onChange={e => setWhatsappAlt(e.target.value)} /></Field>
+          </div>
+          <Field label="Permanent / family address"><textarea className={cls} rows={2} value={permanentAddress} onChange={e => setPermanentAddress(e.target.value)} /></Field>
         </Section>
 
         <Section title="Employment & income">
-          <Field label="Employer"><input className={cls} value={employer} onChange={e => setEmployer(e.target.value)} /></Field>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Occupation"><input className={cls} value={occupation} onChange={e => setOccupation(e.target.value)} /></Field>
+            <Field label="Employer"><input className={cls} value={employer} onChange={e => setEmployer(e.target.value)} /></Field>
+          </div>
           <div className="grid grid-cols-2 gap-3">
             <Field label="Employment type">
               <select className={cls} value={employmentType} onChange={e => setEmploymentType(e.target.value)}>
@@ -194,6 +249,27 @@ export default function PublicApply() {
               </select>
             </Field>
             <Field label="Monthly income (TTD)"><input type="number" min={0} className={cls} value={income} onChange={e => setIncome(e.target.value)} /></Field>
+          </div>
+          <Field label="Work telephone"><input className={cls} value={workTelephone} onChange={e => setWorkTelephone(e.target.value)} /></Field>
+          <Field label="Work address"><textarea className={cls} rows={2} value={workAddress} onChange={e => setWorkAddress(e.target.value)} /></Field>
+        </Section>
+
+        <Section title="Household">
+          <Field label="No. of authorised occupants"><input type="number" min={0} className={cls} value={occupantsCount} onChange={e => setOccupantsCount(e.target.value)} /></Field>
+          <Field label="Occupants' full names & relation to you"><textarea className={cls} rows={2} value={occupantsDetail} onChange={e => setOccupantsDetail(e.target.value)} /></Field>
+        </Section>
+
+        <Section title="Emergency contacts">
+          <p className="text-xs text-slate-500 -mt-1">Two emergency contacts, not living with you.</p>
+          <div className="grid grid-cols-3 gap-2">
+            <input className={cls} placeholder="Name" value={emergencyName} onChange={e => setEmergencyName(e.target.value)} />
+            <input className={cls} placeholder="Phone" value={emergencyPhone} onChange={e => setEmergencyPhone(e.target.value)} />
+            <input className={cls} placeholder="Relationship" value={emergencyRelation} onChange={e => setEmergencyRelation(e.target.value)} />
+          </div>
+          <div className="grid grid-cols-3 gap-2">
+            <input className={cls} placeholder="Name" value={emergency2Name} onChange={e => setEmergency2Name(e.target.value)} />
+            <input className={cls} placeholder="Phone" value={emergency2Phone} onChange={e => setEmergency2Phone(e.target.value)} />
+            <input className={cls} placeholder="Relationship" value={emergency2Relation} onChange={e => setEmergency2Relation(e.target.value)} />
           </div>
         </Section>
 
@@ -215,20 +291,66 @@ export default function PublicApply() {
           </div>
         </Section>
 
+        <Section title="Identification">
+          <p className="text-xs text-slate-500 -mt-1">Two forms of ID are required, front and back of each — the landlord will verify your ID number against the photo. Photos or PDFs accepted.</p>
+          {[0, 1].map(slotIdx => {
+            const idType = idTypes[slotIdx]
+            const idLabel = ID_TYPES.find(([v]) => v === idType)?.[1] ?? idType
+            const [frontKey, backKey] = idSlotKeys(slotIdx)
+            return (
+              <div key={slotIdx} className="space-y-2">
+                <select
+                  className={cls}
+                  value={idType}
+                  onChange={e => {
+                    const next: [string, string] = [...idTypes] as [string, string]
+                    next[slotIdx] = e.target.value
+                    setIdTypes(next)
+                    const relabel = ID_TYPES.find(([v]) => v === e.target.value)?.[1] ?? e.target.value
+                    setDocs(d => {
+                      const upd = { ...d }
+                      if (upd[frontKey]) upd[frontKey] = { ...upd[frontKey], doc_type: e.target.value, label: `${relabel} — Front` }
+                      if (upd[backKey]) upd[backKey] = { ...upd[backKey], doc_type: e.target.value, label: `${relabel} — Back` }
+                      return upd
+                    })
+                  }}
+                >
+                  {ID_TYPES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                </select>
+                {([[frontKey, 'Front'], [backKey, 'Back']] as const).map(([slotKey, side]) => (
+                  <div key={slotKey} className="flex items-center gap-3">
+                    <div className="w-16 flex-shrink-0 text-xs text-slate-400">{side}</div>
+                    {docs[slotKey] ? (
+                      <span className="text-xs text-emerald-400 flex-1 truncate">✓ {docs[slotKey].file_name}</span>
+                    ) : uploading[slotKey] ? (
+                      <span className="text-xs text-slate-500 flex-1">Uploading…</span>
+                    ) : (
+                      <label className="text-xs text-emerald-400 cursor-pointer hover:underline flex-1">
+                        Choose file
+                        <input type="file" accept="image/*,application/pdf" className="hidden"
+                          onChange={e => { const f = e.target.files?.[0]; if (f) void uploadFile(slotKey, { doc_type: idType, label: `${idLabel} — ${side}` }, f) }} />
+                      </label>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )
+          })}
+        </Section>
+
         <Section title="Documents">
-          <p className="text-xs text-slate-500 -mt-1">Optional now — you can also provide these later. Photos or PDFs accepted.</p>
-          {DOC_SLOTS.map((slot, i) => (
-            <div key={i} className="flex items-center gap-3">
+          {OTHER_DOC_SLOTS.map(slot => (
+            <div key={slot.key} className="flex items-center gap-3">
               <div className="flex-1 text-sm text-slate-300">{slot.label}</div>
-              {docs[i] ? (
-                <span className="text-xs text-emerald-400">✓ {docs[i].file_name}</span>
-              ) : uploading[i] ? (
+              {docs[slot.key] ? (
+                <span className="text-xs text-emerald-400">✓ {docs[slot.key].file_name}</span>
+              ) : uploading[slot.key] ? (
                 <span className="text-xs text-slate-500">Uploading…</span>
               ) : (
                 <label className="text-xs text-emerald-400 cursor-pointer hover:underline">
                   Choose file
                   <input type="file" accept="image/*,application/pdf" className="hidden"
-                    onChange={e => { const f = e.target.files?.[0]; if (f) void uploadFile(i, slot, f) }} />
+                    onChange={e => { const f = e.target.files?.[0]; if (f) void uploadFile(slot.key, slot, f) }} />
                 </label>
               )}
             </div>

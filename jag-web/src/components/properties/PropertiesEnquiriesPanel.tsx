@@ -1,7 +1,9 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { tenancyApi } from '../../api/tenancy'
+import { propertiesApi } from '../../api/properties'
+import type { Property, Unit } from '../../types/properties'
 
 const STAGE_ORDER = ['NEW_LEAD','VIEWING_SCHEDULED','VIEWED','APPLICATION_SENT','APPLICATION_RECEIVED','SCREENING','APPROVED','REJECTED','WITHDRAWN','CONVERTED'] as const
 const STAGE_COLORS: Record<string, string> = {
@@ -19,14 +21,31 @@ const STAGE_COLORS: Record<string, string> = {
 
 const cls = 'w-full bg-slate-700 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500'
 
-export default function PropertiesEnquiriesPanel() {
+export default function PropertiesEnquiriesPanel({ focusId }: { focusId?: string | null } = {}) {
   const { t } = useTranslation()
   const qc = useQueryClient()
-  const [selected, setSelected] = useState<string | null>(null)
+  const [selected, setSelected] = useState<string | null>(focusId ?? null)
   const [stageFilter, setStageFilter] = useState('')
+
+  // Deep-link from a notification click (?tab=enquiries&focus=<id>).
+  useEffect(() => { if (focusId) setSelected(focusId) }, [focusId])
   const [replyBody, setReplyBody] = useState('')
   const [showAdd, setShowAdd] = useState(false)
-  const [form, setForm] = useState({ prospect_name: '', prospect_phone: '', prospect_email: '', channel: 'WHATSAPP', initial_message: '' })
+  const [form, setForm] = useState({ prospect_name: '', prospect_phone: '', prospect_email: '', channel: 'WHATSAPP', initial_message: '', property_id: '', unit_id: '' })
+
+  const { data: properties = [] } = useQuery({
+    queryKey: ['properties', 'enquiry-picker'],
+    queryFn: () => propertiesApi.getProperties({ limit: 500 }),
+    enabled: showAdd,
+    staleTime: 60_000,
+  })
+
+  const { data: propertyUnits = [] } = useQuery({
+    queryKey: ['properties', form.property_id, 'units-picker'],
+    queryFn: () => propertiesApi.getUnits(form.property_id),
+    enabled: showAdd && !!form.property_id,
+    staleTime: 60_000,
+  })
 
   const { data: enquiries = [] } = useQuery({
     queryKey: ['enquiries', stageFilter],
@@ -49,10 +68,26 @@ export default function PropertiesEnquiriesPanel() {
     onSuccess: () => { setReplyBody(''); qc.invalidateQueries({ queryKey: ['enquiry', selected] }) },
   })
 
-  const createMut = useMutation({
-    mutationFn: () => tenancyApi.createEnquiry(form),
-    onSuccess: () => { setShowAdd(false); qc.invalidateQueries({ queryKey: ['enquiries'] }) },
-  })
+  const [createPending, setCreatePending] = useState(false)
+  const [createError, setCreateError] = useState('')
+  const saveEnquiry = async () => {
+    setCreatePending(true)
+    setCreateError('')
+    try {
+      await tenancyApi.createEnquiry({
+        ...form,
+        property_id: form.property_id || undefined,
+        unit_id: form.unit_id || undefined,
+      })
+      setShowAdd(false)
+      setForm({ prospect_name: '', prospect_phone: '', prospect_email: '', channel: 'WHATSAPP', initial_message: '', property_id: '', unit_id: '' })
+      qc.invalidateQueries({ queryKey: ['enquiries'] })
+    } catch (e) {
+      setCreateError(e instanceof Error ? e.message : 'Failed to save enquiry')
+    } finally {
+      setCreatePending(false)
+    }
+  }
 
   const screeningMut = useMutation({
     mutationFn: (decision: 'APPROVE' | 'REJECT') => tenancyApi.screeningDecision(selected!, decision),
@@ -65,7 +100,7 @@ export default function PropertiesEnquiriesPanel() {
   return (
     <div className="flex gap-4 h-[700px]">
       {/* List */}
-      <div className="flex-1 overflow-y-auto">
+      <div className={`${selected ? 'hidden md:block' : 'block'} flex-1 overflow-y-auto`}>
         <div className="flex items-center gap-2 mb-3">
           <select className={cls} value={stageFilter} onChange={e => setStageFilter(e.target.value)} style={{ maxWidth: 220 }}>
             <option value="">{t('tenancy.allStages', 'All stages')}</option>
@@ -95,10 +130,13 @@ export default function PropertiesEnquiriesPanel() {
       </div>
 
       {/* Detail */}
-      <div className="w-96 border-l border-slate-700 pl-4 flex flex-col gap-3 overflow-y-auto">
-        {!selected && <p className="text-sm text-slate-500 mt-8 text-center">{t('tenancy.selectEnquiry', 'Select an enquiry to view details.')}</p>}
+      <div className={`${!selected ? 'hidden md:flex' : 'flex'} w-full md:w-96 border-l-0 md:border-l border-slate-700 md:pl-4 flex-col gap-3 overflow-y-auto`}>
+        {!selected && <p className="hidden md:block text-sm text-slate-500 mt-8 text-center">{t('tenancy.selectEnquiry', 'Select an enquiry to view details.')}</p>}
         {detail && (
           <>
+            <button onClick={() => setSelected(null)} className="md:hidden text-sm text-blue-400 hover:text-blue-300 text-left">
+              {t('common.back', '← Back')}
+            </button>
             <div>
               <p className="text-lg font-semibold text-slate-200">{String(detail['prospect_name'] ?? '—')}</p>
               <p className="text-sm text-slate-400">{String(detail['prospect_phone'] ?? '')} · {String(detail['prospect_email'] ?? '')}</p>
@@ -208,6 +246,25 @@ export default function PropertiesEnquiriesPanel() {
               </div>
             ))}
             <div className="mb-3">
+              <label className="block text-xs text-slate-400 mb-1">{t('tenancy.property', 'Property')}</label>
+              <select className={cls} value={form.property_id}
+                onChange={e => setForm(f => ({ ...f, property_id: e.target.value, unit_id: '' }))}>
+                <option value="">{t('tenancy.selectProperty', '— Select property (optional) —')}</option>
+                {properties.map((p: Property) => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </select>
+            </div>
+            <div className="mb-3">
+              <label className="block text-xs text-slate-400 mb-1">{t('tenancy.unit', 'Unit')}</label>
+              <select className={cls} value={form.unit_id} onChange={set('unit_id')} disabled={!form.property_id}>
+                <option value="">{t('tenancy.noUnit', '— Whole property / no specific unit —')}</option>
+                {propertyUnits.map((u: Unit) => (
+                  <option key={u.id} value={u.id}>{u.unit_number}</option>
+                ))}
+              </select>
+            </div>
+            <div className="mb-3">
               <label className="block text-xs text-slate-400 mb-1">{t('tenancy.channel', 'Channel')}</label>
               <select className={cls} value={form.channel} onChange={set('channel')}>
                 {['WHATSAPP','SMS','EMAIL','PHONE','WALK_IN','FACEBOOK'].map(c => <option key={c} value={c}>{c}</option>)}
@@ -217,11 +274,12 @@ export default function PropertiesEnquiriesPanel() {
               <label className="block text-xs text-slate-400 mb-1">{t('tenancy.initialMessage', 'Initial message')}</label>
               <textarea className={cls} rows={3} value={form.initial_message} onChange={set('initial_message')} />
             </div>
+            {createError && <p className="text-xs text-red-400 mb-3">{createError}</p>}
             <div className="flex gap-2 justify-end">
               <button onClick={() => setShowAdd(false)} className="px-4 py-2 text-sm text-slate-400 hover:text-slate-200">{t('common.cancel', 'Cancel')}</button>
-              <button onClick={() => createMut.mutate()} disabled={createMut.isPending}
+              <button onClick={saveEnquiry} disabled={createPending}
                 className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded disabled:opacity-40">
-                {createMut.isPending ? t('common.saving', 'Saving...') : t('common.save', 'Save')}
+                {createPending ? t('common.saving', 'Saving...') : t('common.save', 'Save')}
               </button>
             </div>
           </div>

@@ -1,7 +1,32 @@
 import { useState, useRef, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { notificationsApi, type AppNotification } from '../api/notifications'
+
+// Maps a notification's payload (set by enqueueNotification() call sites in
+// jag-api) to a destination route. Falls back to no navigation (mark-read only)
+// for payload shapes not covered here — see enqueueNotification usages for the
+// full set of { module, kind } combinations in use.
+function notificationTarget(payload: unknown): string | null {
+  if (!payload || typeof payload !== 'object') return null
+  const p = payload as Record<string, unknown>
+  const module = p['module']
+  const kind = p['kind']
+  if (module === 'PROPERTIES' && kind === 'ENQUIRY' && typeof p['enquiry_id'] === 'string') {
+    return `/properties?tab=enquiries&focus=${p['enquiry_id']}`
+  }
+  if (module === 'PROPERTIES' && kind === 'APPLICATION' && typeof p['application_id'] === 'string') {
+    return `/properties?tab=applications&focus=${p['application_id']}`
+  }
+  if (module === 'PROPERTIES' && (kind === 'MAINTENANCE' || kind === 'MAINTENANCE_SLA') && typeof p['ticket_id'] === 'string') {
+    return `/properties?tab=maintenance&focus=${p['ticket_id']}`
+  }
+  if (module === 'FINANCE' && kind === 'EXPENSE_APPROVAL') {
+    return '/expenses'
+  }
+  return null
+}
 
 function useRelativeTime() {
   const { t } = useTranslation()
@@ -26,6 +51,7 @@ const TIER_DOT: Record<number, string> = {
 export default function NotificationBell() {
   const { t } = useTranslation()
   const qc = useQueryClient()
+  const navigate = useNavigate()
   const rel = useRelativeTime()
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
@@ -56,6 +82,10 @@ export default function NotificationBell() {
   })
   const markAll = useMutation({
     mutationFn: () => notificationsApi.markAllRead(),
+    onSuccess: invalidate,
+  })
+  const deleteOne = useMutation({
+    mutationFn: (id: string) => notificationsApi.delete(id),
     onSuccess: invalidate,
   })
 
@@ -116,22 +146,48 @@ export default function NotificationBell() {
               </div>
             )}
             {rows.map(n => (
-              <button
+              <div
                 key={n.id}
-                onClick={() => { if (!n.is_read) markRead.mutate(n.id) }}
-                className={`w-full text-left px-4 py-3 border-b border-slate-700/60 last:border-0 transition-colors ${
+                className={`flex items-start gap-2 px-4 py-3 border-b border-slate-700/60 last:border-0 transition-colors ${
                   n.is_read ? 'hover:bg-slate-700/40' : 'bg-slate-700/30 hover:bg-slate-700/50'
                 }`}
               >
-                <div className="flex items-start gap-2.5">
+                <button
+                  onClick={() => {
+                    if (!n.is_read) markRead.mutate(n.id)
+                    const target = notificationTarget(n.payload)
+                    if (target) { setOpen(false); navigate(target) }
+                  }}
+                  className="flex-1 min-w-0 text-left flex items-start gap-2.5"
+                >
                   <span className={`mt-1.5 w-2 h-2 rounded-full shrink-0 ${TIER_DOT[n.tier] ?? 'bg-slate-400'} ${n.is_read ? 'opacity-30' : ''}`} />
                   <div className="min-w-0 flex-1">
                     <p className={`text-sm leading-tight ${n.is_read ? 'text-slate-300' : 'text-white font-medium'}`}>{n.title}</p>
                     <p className="text-xs text-slate-400 mt-0.5 line-clamp-2">{n.body}</p>
                     <p className="text-[11px] text-slate-500 mt-1">{rel(n.created_at)}</p>
                   </div>
+                </button>
+                <div className="flex flex-col items-center gap-1.5 shrink-0 pt-0.5">
+                  {!n.is_read && (
+                    <button
+                      onClick={() => markRead.mutate(n.id)}
+                      disabled={markRead.isPending}
+                      title={t('notifications.markRead', 'Mark as read')}
+                      className="text-slate-500 hover:text-emerald-400 disabled:opacity-50 text-xs leading-none p-0.5"
+                    >
+                      ✓
+                    </button>
+                  )}
+                  <button
+                    onClick={() => deleteOne.mutate(n.id)}
+                    disabled={deleteOne.isPending}
+                    title={t('notifications.delete', 'Delete')}
+                    className="text-slate-500 hover:text-red-400 disabled:opacity-50 text-xs leading-none p-0.5"
+                  >
+                    ✕
+                  </button>
                 </div>
-              </button>
+              </div>
             ))}
           </div>
         </div>

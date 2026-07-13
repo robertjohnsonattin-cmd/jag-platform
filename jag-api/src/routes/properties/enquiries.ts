@@ -29,7 +29,7 @@ const CreateEnquirySchema = z.object({
   property_id:      z.string().uuid().optional(),
   prospect_name:    z.string().max(200).optional(),
   prospect_phone:   z.string().max(30).optional(),
-  prospect_email:   z.string().email().max(200).optional(),
+  prospect_email:   z.string().email().max(200).optional().or(z.literal('')),
   channel:          ChannelEnum,
   initial_message:  z.string().optional(),
   notes:            z.string().optional(),
@@ -97,7 +97,7 @@ enquiriesRouter.post('/', async (req: Request, res: Response, next: NextFunction
            prospect_email, channel, initial_message, notes)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
         [ownerId, body.unit_id ?? null, body.property_id ?? null, body.prospect_name ?? null,
-         body.prospect_phone ?? null, body.prospect_email ?? null, body.channel,
+         body.prospect_phone ?? null, body.prospect_email || null, body.channel,
          body.initial_message ?? null, body.notes ?? null],
       );
       return rows[0];

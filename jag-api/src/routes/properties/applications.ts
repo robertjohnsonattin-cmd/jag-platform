@@ -23,7 +23,7 @@ const IdParam = z.object({ id: z.string().uuid() });
 
 const EmploymentTypeEnum = z.enum(['EMPLOYED','SELF_EMPLOYED','CONTRACT','RETIRED','UNEMPLOYED','OTHER']);
 const AppStatusEnum      = z.enum(['PENDING','UNDER_REVIEW','APPROVED','REJECTED','WITHDRAWN']);
-const DocTypeEnum        = z.enum(['national_id','payslip_1','payslip_2','payslip_3','employment_letter']);
+const DocTypeEnum        = z.enum(['national_id','drivers_permit','passport','payslip_1','payslip_2','payslip_3','employment_letter']);
 
 const CreateApplicationSchema = z.object({
   unit_id:              z.string().uuid(),
@@ -363,10 +363,22 @@ applicationsRouter.post('/:id/create-tenant', async (req: Request, res: Response
 
       const { rows: tenantRows } = await client.query(
         `INSERT INTO prop_property_tenants
-           (owner_id, first_name, last_name, phone, email, identification_number, last_modified_at)
-         VALUES ($1,$2,$3,$4,$5,$6,NOW())
+           (owner_id, first_name, last_name, phone, email, identification_number,
+            date_of_birth, employer_name, employment_type,
+            nationality, permanent_address, occupation, work_address, work_telephone, whatsapp_alt,
+            occupants_count, occupants_detail,
+            emergency_contact_name, emergency_contact_phone, emergency_contact_relation,
+            emergency_contact_2_name, emergency_contact_2_phone, emergency_contact_2_relation,
+            last_modified_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,NOW())
          RETURNING *`,
-        [ownerId, firstName, lastName, app.phone ?? null, app.email ?? null, app.national_id ?? null],
+        [ownerId, firstName, lastName, app.phone ?? null, app.email ?? null, app.national_id ?? null,
+         app.date_of_birth ?? null, app.employer_name ?? null, app.employment_type ?? null,
+         app.nationality ?? null, app.permanent_address ?? null, app.occupation ?? null,
+         app.work_address ?? null, app.work_telephone ?? null, app.whatsapp_alt ?? null,
+         app.occupants_count ?? null, app.occupants_detail ?? null,
+         app.emergency_contact_name ?? null, app.emergency_contact_phone ?? null, app.emergency_contact_relation ?? null,
+         app.emergency_contact_2_name ?? null, app.emergency_contact_2_phone ?? null, app.emergency_contact_2_relation ?? null],
       );
       const tenant = tenantRows[0];
 

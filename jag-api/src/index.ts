@@ -56,6 +56,31 @@ process.on('uncaughtException', (error) => {
 import { wipayRouter } from './routes/webhooks/wipay';
 app.use('/api/v1/webhooks/wipay', express.raw({ type: 'application/json', limit: '64kb' }), wipayRouter);
 
+// ── WhatsApp webhook — same reason, must also mount BEFORE express.json() ─────
+// Previously mounted after the global json() below, so the body arrived
+// already parsed into an Object — Hmac.update() threw on every inbound
+// webhook (TypeError: "data" argument must be ... Buffer ... Received an
+// instance of Object), meaning no WhatsApp webhook had ever succeeded.
+import { whatsappWebhookRouter } from './routes/internal/whatsapp-webhook';
+app.use('/internal/whatsapp/webhook', express.raw({ type: 'application/json', limit: '1mb' }),
+  (req, _res, next) => {
+    // express.raw() consumed the stream into req.body (a Buffer) for HMAC.
+    // Chaining express.json() here would find the stream already consumed and
+    // leave req.body = {} — so the handler saw zero entries and processed
+    // nothing (200 OK but no message ingested). Parse the Buffer manually
+    // instead, same pattern as the WiPay webhook. Keep the Buffer on rawBody
+    // for X-Hub-Signature-256 verification.
+    const buf = req.body as Buffer;
+    (req as typeof req & { rawBody?: Buffer }).rawBody = Buffer.isBuffer(buf) ? buf : Buffer.alloc(0);
+    try {
+      req.body = Buffer.isBuffer(buf) && buf.length ? JSON.parse(buf.toString('utf8')) : {};
+    } catch {
+      req.body = {};
+    }
+    next();
+  },
+  whatsappWebhookRouter);
+
 // ── JSON body parser (all other routes) ───────────────────────────────────────
 app.use(express.json());
 
@@ -101,14 +126,6 @@ app.use('/internal/gps/battery-sync', batterySyncRouter);
 
 import { documensoWebhookRouter } from './routes/internal/documenso-webhook';
 app.use('/internal/documenso-webhook', documensoWebhookRouter);
-
-// ── WhatsApp webhook — raw body needed for X-Hub-Signature-256 verification ──
-// Exposed publicly via Caddy (not Docker-network-only) so Meta can reach it.
-// Security is enforced by HMAC signature check inside the route handler.
-import { whatsappWebhookRouter } from './routes/internal/whatsapp-webhook';
-app.use('/internal/whatsapp/webhook', express.raw({ type: 'application/json', limit: '1mb' }),
-  (req, _res, next) => { (req as typeof req & { rawBody?: Buffer }).rawBody = req.body as Buffer; next(); },
-  express.json(), whatsappWebhookRouter);
 
 // ── Public routes (no Keycloak auth) — property booking page API ──────────────
 import { publicBookingRouter, publicScheduleRouter } from './routes/properties/viewings';

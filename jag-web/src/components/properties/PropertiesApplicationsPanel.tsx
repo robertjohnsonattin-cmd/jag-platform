@@ -1,7 +1,8 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { tenancyApi } from '../../api/tenancy'
+import AuthedImg from '../AuthedImg'
 
 const STATUS_COLORS: Record<string, string> = {
   PENDING:      'bg-yellow-900/50 text-yellow-300 border-yellow-700',
@@ -12,12 +13,18 @@ const STATUS_COLORS: Record<string, string> = {
 }
 
 const APPLICATION_DOC_TYPES = [
-  'national_id', 'employment_letter', 'payslip_1', 'payslip_2', 'payslip_3',
+  'national_id', 'drivers_permit', 'passport', 'employment_letter', 'payslip_1', 'payslip_2', 'payslip_3',
 ] as const
 
+// Two vocabularies land here: lowercase (Robert's own manual upload, below) and
+// uppercase (the public /apply form's identification + document sections) —
+// both need a friendly label.
 const DOC_TYPE_LABELS: Record<string, string> = {
-  national_id: 'National ID / ID Card', employment_letter: 'Employment Letter / Job Letter',
-  payslip_1: 'Payslip (1st)', payslip_2: 'Payslip (2nd)', payslip_3: 'Payslip (3rd)',
+  national_id: 'National ID / ID Card', drivers_permit: 'Driver’s Permit', passport: 'Passport',
+  employment_letter: 'Employment Letter / Job Letter',
+  payslip_1: 'Payslip (1st)', payslip_2: 'Payslip (2nd)', payslip_3: 'Payslip (3rd)', payslip: 'Payslip',
+  NATIONAL_ID: 'National ID / ID Card', DRIVERS_PERMIT: 'Driver’s Permit', PASSPORT: 'Passport',
+  EMPLOYMENT_LETTER: 'Employment Letter / Job Letter', PAYSLIP: 'Payslip', OTHER: 'Other relevant document',
 }
 
 const cls = 'w-full bg-slate-700 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500'
@@ -111,13 +118,42 @@ function CreateTenantModal({
   )
 }
 
+// ── ID verification thumbnails ──────────────────────────────────────────────
+// No OCR — Robert just eyeballs the typed ID number against the uploaded
+// photo(s). Shown inline (not a download link) so that comparison doesn't
+// require leaving the page.
+
+const ID_DOC_TYPES = new Set(['national_id', 'drivers_permit', 'passport', 'NATIONAL_ID', 'DRIVERS_PERMIT', 'PASSPORT'])
+
+function IdVerificationThumbs({ applicationId, docs }: { applicationId: string; docs: { id: string; doc_type: string; label: string; file_name: string }[] }) {
+  const idDocs = docs.filter(d => ID_DOC_TYPES.has(d.doc_type))
+  if (idDocs.length === 0) return null
+  return (
+    <div className="flex gap-3 pt-1">
+      {idDocs.map(d => (
+        <div key={d.id} className="text-center">
+          <AuthedImg
+            path={`/properties/applications/${applicationId}/documents/${d.id}/download`}
+            alt={d.label}
+            className="w-28 h-20 object-cover rounded border border-slate-600"
+          />
+          <p className="text-[10px] text-slate-500 mt-0.5">{DOC_TYPE_LABELS[d.doc_type] ?? d.doc_type}</p>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 // ── Main Panel ────────────────────────────────────────────────────────────────
 
-export default function PropertiesApplicationsPanel() {
+export default function PropertiesApplicationsPanel({ focusId }: { focusId?: string | null } = {}) {
   const { t } = useTranslation()
   const qc = useQueryClient()
   const fileRef = useRef<HTMLInputElement>(null)
-  const [selected, setSelected] = useState<string | null>(null)
+  const [selected, setSelected] = useState<string | null>(focusId ?? null)
+
+  // Deep-link from a notification click (?tab=applications&focus=<id>).
+  useEffect(() => { if (focusId) setSelected(focusId) }, [focusId])
   const [decisionModal, setDecisionModal] = useState<'APPROVED' | 'REJECTED' | null>(null)
   const [rejectionReason, setRejectionReason] = useState('')
   const [showCreateTenant, setShowCreateTenant] = useState(false)
@@ -152,6 +188,7 @@ export default function PropertiesApplicationsPanel() {
     },
   })
 
+
   const [downloadingDocId, setDownloadingDocId] = useState<string | null>(null)
 
   async function handleDocUpload(file: File) {
@@ -183,7 +220,7 @@ export default function PropertiesApplicationsPanel() {
   return (
     <div className="flex gap-4 h-[700px]">
       {/* Application list */}
-      <div className="w-80 overflow-y-auto">
+      <div className={`${selected ? 'hidden md:block' : 'block'} w-full md:w-80 overflow-y-auto`}>
         {applications.length === 0 && (
           <p className="text-sm text-slate-500 py-6 text-center">{t('tenancy.noApplications', 'No applications yet.')}</p>
         )}
@@ -202,13 +239,16 @@ export default function PropertiesApplicationsPanel() {
       </div>
 
       {/* Detail panel */}
-      <div className="flex-1 border-l border-slate-700 pl-4 overflow-y-auto space-y-5">
+      <div className={`${!selected ? 'hidden md:block' : 'block'} flex-1 border-l-0 md:border-l border-slate-700 md:pl-4 overflow-y-auto space-y-5`}>
         {!selected && (
-          <p className="text-sm text-slate-500 mt-8 text-center">{t('tenancy.selectApplication', 'Select an application.')}</p>
+          <p className="hidden md:block text-sm text-slate-500 mt-8 text-center">{t('tenancy.selectApplication', 'Select an application.')}</p>
         )}
 
         {detail && (
           <>
+            <button onClick={() => setSelected(null)} className="md:hidden text-sm text-blue-400 hover:text-blue-300">
+              {t('common.back', '← Back')}
+            </button>
             {/* Header + status actions */}
             <div className="space-y-4">
               <div className="flex items-center justify-between">
@@ -219,6 +259,7 @@ export default function PropertiesApplicationsPanel() {
                 <InfoRow label={t('tenancy.phone', 'Phone')} value={String(detail['phone'] ?? '')} />
                 <InfoRow label={t('tenancy.email', 'Email')} value={String(detail['email'] ?? '')} />
                 <InfoRow label={t('tenancy.nationalId', 'National ID')} value={String(detail['national_id'] ?? '')} />
+                <IdVerificationThumbs applicationId={selected!} docs={appDocs} />
                 <InfoRow label={t('tenancy.employer', 'Employer')} value={String(detail['employer_name'] ?? '')} />
                 <InfoRow label={t('tenancy.employmentType', 'Employment')} value={String(detail['employment_type'] ?? '')} />
                 <InfoRow
@@ -228,6 +269,8 @@ export default function PropertiesApplicationsPanel() {
                 <InfoRow label={t('tenancy.ref1', 'Reference 1')} value={detail['reference_1_name'] ? `${detail['reference_1_name']} (${detail['reference_1_relation']}) ${detail['reference_1_phone']}` : null} />
                 <InfoRow label={t('tenancy.ref2', 'Reference 2')} value={detail['reference_2_name'] ? `${detail['reference_2_name']} (${detail['reference_2_relation']}) ${detail['reference_2_phone']}` : null} />
                 <InfoRow label={t('tenancy.priorLandlord', 'Prior Landlord')} value={detail['prior_landlord_name'] ? `${detail['prior_landlord_name']} ${detail['prior_landlord_phone']}` : null} />
+                <InfoRow label="Emergency Contact 1" value={detail['emergency_contact_name'] ? `${detail['emergency_contact_name']} (${detail['emergency_contact_relation']}) ${detail['emergency_contact_phone']}` : null} />
+                <InfoRow label="Emergency Contact 2" value={detail['emergency_contact_2_name'] ? `${detail['emergency_contact_2_name']} (${detail['emergency_contact_2_relation']}) ${detail['emergency_contact_2_phone']}` : null} />
               </div>
 
               {/* Approve / Reject */}

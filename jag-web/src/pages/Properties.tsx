@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import PropertiesPanel from '../components/properties/PropertiesPanel'
 import TenantsPanel from '../components/properties/TenantsPanel'
@@ -34,9 +35,16 @@ const TABS = [
 
 type TabId = (typeof TABS)[number]['id']
 
+const VALID_TAB_IDS = new Set(TABS.map(tb => tb.id))
+
 export default function Properties() {
   const { t } = useTranslation()
-  const [tab, setTab] = useState<TabId>('properties')
+  const [searchParams] = useSearchParams()
+  const initialTab = searchParams.get('tab')
+  const focusId = searchParams.get('focus')
+  const [tab, setTab] = useState<TabId>(
+    initialTab && VALID_TAB_IDS.has(initialTab as TabId) ? (initialTab as TabId) : 'properties',
+  )
 
   return (
     <div>
@@ -61,12 +69,12 @@ export default function Properties() {
       {tab === 'properties'   && <PropertiesPanel />}
       {tab === 'tenants'      && <TenantsPanel />}
       {tab === 'pipeline'     && <PipelinePanel />}
-      {tab === 'enquiries'    && <PropertiesEnquiriesPanel />}
+      {tab === 'enquiries'    && <PropertiesEnquiriesPanel focusId={focusId} />}
       {tab === 'viewings'     && <PropertiesViewingsPanel />}
-      {tab === 'applications' && <PropertiesApplicationsPanel />}
+      {tab === 'applications' && <PropertiesApplicationsPanel focusId={focusId} />}
       {tab === 'deposits'     && <PropertiesDepositsPanel />}
       {tab === 'rent'         && <PropertiesRentSchedulePanel />}
-      {tab === 'maintenance'  && <PropertiesMaintenancePanel />}
+      {tab === 'maintenance'  && <PropertiesMaintenancePanel focusId={focusId} />}
       {tab === 'contractors'  && <PropertiesContractorsPanel />}
       {tab === 'handover'     && <PropertiesHandoverPanel />}
       {tab === 'renewals'     && <PropertiesRenewalsPanel />}

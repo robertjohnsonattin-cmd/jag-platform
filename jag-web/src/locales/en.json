@@ -93,6 +93,8 @@
     "title": "Notifications",
     "empty": "You're all caught up.",
     "markAllRead": "Mark all read",
+    "markRead": "Mark as read",
+    "delete": "Delete",
     "justNow": "just now",
     "minutesAgo": "{{count}} min ago",
     "hoursAgo": "{{count}}h ago",

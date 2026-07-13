@@ -39,6 +39,25 @@ export interface LeasePdfData {
   tenant_is_company: boolean;
   tenant_identification_type: string | null;
   tenant_identification_number: string | null;
+  tenant_date_of_birth: string | Date | null;
+  tenant_employer_name: string | null;
+  tenant_employment_type: string | null;
+  tenant_phone: string | null;
+  tenant_email: string | null;
+  tenant_nationality: string | null;
+  tenant_permanent_address: string | null;
+  tenant_occupation: string | null;
+  tenant_work_address: string | null;
+  tenant_work_telephone: string | null;
+  tenant_whatsapp_alt: string | null;
+  tenant_occupants_count: number | null;
+  tenant_occupants_detail: string | null;
+  tenant_emergency_contact_name: string | null;
+  tenant_emergency_contact_phone: string | null;
+  tenant_emergency_contact_relation: string | null;
+  tenant_emergency_contact_2_name: string | null;
+  tenant_emergency_contact_2_phone: string | null;
+  tenant_emergency_contact_2_relation: string | null;
   property_name: string | null;
   address_line1: string;
   address_line2: string | null;
@@ -132,8 +151,20 @@ export function generateLeaseAgreementPdf(d: LeasePdfData, fieldSink?: LeaseSign
   const tName = tenantName(d);
   const isMonthToMonth = !d.end_date;
   const start = parseYMD(d.start_date);
-  const lateFeePercent = d.late_fee_type === 'PERCENT' && d.late_fee_value ? parseFloat(d.late_fee_value) : 0;
-  const lateFeeAmount = lateFeePercent > 0 ? (parseFloat(d.monthly_rent) * lateFeePercent) / 100 : 0;
+  // NOTE: this previously only ever computed a fee for late_fee_type === 'PERCENT' —
+  // a lease with late_fee_type 'FIXED' silently fell through to "No automatic late
+  // payment penalty applies", even though a fixed-amount fee was actually configured.
+  const lateFeeValueNum = d.late_fee_value ? parseFloat(d.late_fee_value) : 0;
+  const lateFeeAmount =
+    d.late_fee_type === 'PERCENT' ? (parseFloat(d.monthly_rent) * lateFeeValueNum) / 100
+    : d.late_fee_type === 'FIXED'  ? lateFeeValueNum
+    : 0;
+  const lateFeeDescription =
+    d.late_fee_type === 'PERCENT' && lateFeeValueNum > 0
+      ? `${lateFeeValueNum}% of the monthly rent (${fmtMoney(lateFeeAmount, d.currency)})`
+      : d.late_fee_type === 'FIXED' && lateFeeValueNum > 0
+        ? fmtMoney(lateFeeAmount, d.currency)
+        : null;
   const graceDays = d.late_fee_grace_days ?? 0;
 
   let clauseNum = 0;
@@ -201,7 +232,7 @@ export function generateLeaseAgreementPdf(d: LeasePdfData, fieldSink?: LeaseSign
   partHeader('PART II — RENT & PAYMENTS');
   clause(
     'RENT PAYMENT',
-    `The Tenant shall pay to the Landlord a monthly rental of ${fmtMoney(d.monthly_rent, d.currency)} in advance on or before the ${ordinalDay(d.payment_due_day)} day of each calendar month, without any deduction whatsoever, unless prior written consent is given by the Landlord.  A grace period of ${graceDays} day(s) applies; rent received after the ${graceDays}th day of the month shall be deemed late.  ${lateFeePercent > 0 ? `A late payment penalty of ${lateFeePercent}% of the monthly rent (${fmtMoney(lateFeeAmount, d.currency)}) shall be applied automatically on the day immediately following the grace period.` : 'No automatic late payment penalty applies to this tenancy.'}  The Tenant shall settle all outstanding rent and penalties directly.  Only where such sums remain unpaid may the Landlord, as a last resort, deduct them from the Security Deposit, in which case the Tenant shall replenish the deposit to its full original amount within fourteen (14) days of written notice from the Landlord.`,
+    `The Tenant shall pay to the Landlord a monthly rental of ${fmtMoney(d.monthly_rent, d.currency)} in advance on or before the ${ordinalDay(d.payment_due_day)} day of each calendar month, without any deduction whatsoever, unless prior written consent is given by the Landlord.  A grace period of ${graceDays} day(s) applies; rent received after the ${graceDays}th day of the month shall be deemed late.  ${lateFeeDescription ? `A late payment penalty of ${lateFeeDescription} shall be applied automatically on the day immediately following the grace period.` : 'No automatic late payment penalty applies to this tenancy.'}  The Tenant shall settle all outstanding rent and penalties directly.  Only where such sums remain unpaid may the Landlord, as a last resort, deduct them from the Security Deposit, in which case the Tenant shall replenish the deposit to its full original amount within fourteen (14) days of written notice from the Landlord.`,
   );
   clause(
     'PAYMENT METHOD & NOTICE',
@@ -228,7 +259,7 @@ export function generateLeaseAgreementPdf(d: LeasePdfData, fieldSink?: LeaseSign
   );
   clause(
     'CONDITION REPORT',
-    `On the commencement date, both parties shall complete and sign the Property Condition & Inventory Checklist at Schedule B, which shall be the definitive reference for assessing damage at the end of the tenancy, distinguishing damage from fair wear and tear.  A failure by the Tenant to attend and sign shall not prevent the Landlord from completing Schedule B unilaterally and serving a copy on the Tenant.`,
+    `On the commencement date, both parties shall complete and sign the Property Condition & Inventory Checklist at Schedule C, which shall be the definitive reference for assessing damage at the end of the tenancy, distinguishing damage from fair wear and tear.  A failure by the Tenant to attend and sign shall not prevent the Landlord from completing Schedule C unilaterally and serving a copy on the Tenant.`,
   );
 
   // ── PART IV — STATUTORY MATTERS ─────────────────────────────────────────────
@@ -296,7 +327,7 @@ export function generateLeaseAgreementPdf(d: LeasePdfData, fieldSink?: LeaseSign
   partHeader('PART VII — NOTICES & COMMUNICATIONS');
   clause(
     'FORM OF NOTICE',
-    `All formal notices required under this Agreement shall be in writing and deemed properly served if: (a) delivered personally; (b) left at the Premises or at the receiving party's last known address; (c) sent by registered post (deemed served two (2) business days after posting); or (d) sent by WhatsApp message or email to the contact details in Schedule C, where a delivery or read receipt is obtained and retained by the sender.  Day-to-day communications may be conducted informally but shall not constitute formal notice for the purposes of any clause requiring written notice, including termination and breach.`,
+    `All formal notices required under this Agreement shall be in writing and deemed properly served if: (a) delivered personally; (b) left at the Premises or at the receiving party's last known address; (c) sent by registered post (deemed served two (2) business days after posting); or (d) sent by WhatsApp message or email to the contact details in Schedule B, where a delivery or read receipt is obtained and retained by the sender.  Day-to-day communications may be conducted informally but shall not constitute formal notice for the purposes of any clause requiring written notice, including termination and breach.`,
   );
 
   // ── PART VIII — TENANT'S COVENANTS ──────────────────────────────────────────
@@ -349,7 +380,7 @@ export function generateLeaseAgreementPdf(d: LeasePdfData, fieldSink?: LeaseSign
   );
   clause(
     'VISITORS & OVERNIGHT GUESTS',
-    `The Premises are let for the exclusive occupation of the Tenant and persons listed in Schedule C.  Overnight guests are permitted for periods not exceeding seven (7) consecutive nights without the Landlord's prior written consent.  No person shall take up de facto residence without the Landlord's prior written consent.  The Tenant shall be fully and personally responsible for the conduct of all visitors and guests on the Premises or in common areas.`,
+    `The Premises are let for the exclusive occupation of the Tenant and persons listed in Schedule B.  Overnight guests are permitted for periods not exceeding seven (7) consecutive nights without the Landlord's prior written consent.  No person shall take up de facto residence without the Landlord's prior written consent.  The Tenant shall be fully and personally responsible for the conduct of all visitors and guests on the Premises or in common areas.`,
   );
   clause(
     'COMMON AREAS, PARKING & WASTE',
@@ -467,10 +498,85 @@ export function generateLeaseAgreementPdf(d: LeasePdfData, fieldSink?: LeaseSign
   fieldRow('Branch', '_______________________________');
   fieldRow('Landlord WhatsApp', LANDLORD_WHATSAPP);
   fieldRow('Landlord Email', LANDLORD_EMAIL);
+  doc.moveDown(0.5);
+  fieldRow('Payment Due Day', `${ordinalDay(d.payment_due_day)} of each month`);
+  fieldRow('Grace Period', `${graceDays} day(s)`);
+  fieldRow('Late Payment Penalty', lateFeeDescription ?? 'None');
 
-  // ── SCHEDULE B — PROPERTY CONDITION & INVENTORY CHECKLIST ───────────────────
+  // ── SCHEDULE B — TENANT INFORMATION ─────────────────────────────────────────
   doc.addPage();
-  doc.font('Helvetica-Bold').fontSize(12).text('SCHEDULE B — PROPERTY CONDITION & INVENTORY CHECKLIST', { align: 'center' });
+  doc.font('Helvetica-Bold').fontSize(12).text('SCHEDULE B — TENANT INFORMATION', { align: 'center' });
+  doc.moveDown(1);
+  // Enter Once: anything already captured on the tenant's rental application
+  // (name/ID/DOB/employer/phone/email/address/occupation/occupants/emergency
+  // contact) is printed directly rather than asked for again as a fillable
+  // field — only information the application genuinely never collected still
+  // needs to be filled in here.
+  const TENANT_INFO_FIELDS: Array<[string, string | null]> = [
+    ['Full Legal Name', tName],
+    [`ID / Driver's Permit / Passport No.`, d.tenant_identification_number],
+    ['Date of Birth', d.tenant_date_of_birth ? fmtDate(d.tenant_date_of_birth) : null],
+    ['Nationality', d.tenant_nationality],
+    ['Permanent / Family Address', d.tenant_permanent_address],
+    ['Occupation', d.tenant_occupation],
+    ['Employer / Place of Work', d.tenant_employer_name],
+    ['Work Address', d.tenant_work_address],
+    ['Mobile Number', d.tenant_phone],
+    ['Work Telephone', d.tenant_work_telephone],
+    ['Email Address', d.tenant_email],
+    ['WhatsApp No. (if different from mobile)', d.tenant_whatsapp_alt],
+    ['No. of Authorised Occupants', d.tenant_occupants_count != null ? String(d.tenant_occupants_count) : null],
+    [`Occupants' Full Names & Relation to Tenant`, d.tenant_occupants_detail],
+  ];
+  doc.font('Helvetica').fontSize(10);
+  for (const [label, knownValue] of TENANT_INFO_FIELDS) {
+    ensureSpace(26);
+    doc.font('Helvetica-Bold').fontSize(9).text(`${label}:  `, { continued: !!knownValue });
+    if (knownValue) {
+      doc.font('Helvetica').fontSize(9).text(knownValue);
+    } else {
+      const lineY = doc.y;
+      doc.font('Helvetica').fontSize(9).text('_______________________________________________________________');
+      recordField(label, 'text', 'TENANT', 56, lineY, 483, 14);
+    }
+    doc.moveDown(0.4);
+  }
+
+  doc.moveDown(0.8);
+  ensureSpace(90);
+  doc.font('Helvetica-Bold').fontSize(10).text('Emergency Contacts');
+  doc.moveDown(0.4);
+  const ECOLS = [56, 200, 320, 410];
+  const ecHeaderY = doc.y;
+  doc.font('Helvetica-Bold').fontSize(8);
+  doc.text('Full Name', ECOLS[0], ecHeaderY, { width: 140 });
+  doc.text('Relation', ECOLS[1], ecHeaderY, { width: 110 });
+  doc.text('Mobile No.', ECOLS[2], ecHeaderY, { width: 85 });
+  doc.text('Address', ECOLS[3], ecHeaderY, { width: 130 });
+  doc.y = ecHeaderY + 16;
+  const knownContacts = [
+    [d.tenant_emergency_contact_name, d.tenant_emergency_contact_relation, d.tenant_emergency_contact_phone],
+    [d.tenant_emergency_contact_2_name, d.tenant_emergency_contact_2_relation, d.tenant_emergency_contact_2_phone],
+  ];
+  for (let i = 0; i < 3; i++) {
+    const y = doc.y;
+    doc.rect(ECOLS[0], y, 480, 24).stroke();
+    doc.moveTo(ECOLS[1], y).lineTo(ECOLS[1], y + 24).stroke();
+    doc.moveTo(ECOLS[2], y).lineTo(ECOLS[2], y + 24).stroke();
+    doc.moveTo(ECOLS[3], y).lineTo(ECOLS[3], y + 24).stroke();
+    const known = knownContacts[i];
+    if (known?.[0]) {
+      doc.font('Helvetica').fontSize(8);
+      doc.text(known[0] ?? '', ECOLS[0] + 4, y + 8, { width: 132 });
+      doc.text(known[1] ?? '', ECOLS[1] + 4, y + 8, { width: 102 });
+      doc.text(known[2] ?? '', ECOLS[2] + 4, y + 8, { width: 77 });
+    }
+    doc.y = y + 24;
+  }
+
+  // ── SCHEDULE C — PROPERTY CONDITION & INVENTORY CHECKLIST ───────────────────
+  doc.addPage();
+  doc.font('Helvetica-Bold').fontSize(12).text('SCHEDULE C — PROPERTY CONDITION & INVENTORY CHECKLIST', { align: 'center' });
   doc.moveDown(0.8);
   doc.font('Helvetica').fontSize(9).text(
     'To be completed and signed by BOTH parties on the commencement date and again on the vacating date. This Schedule is binding evidence of the condition of the Premises at each date.',
@@ -552,63 +658,12 @@ export function generateLeaseAgreementPdf(d: LeasePdfData, fieldSink?: LeaseSign
   doc.moveDown(0.4);
   doc.text('                    Tenant Signature: ________________________  Date: ___________');
 
-  // ── SCHEDULE C — TENANT INFORMATION ─────────────────────────────────────────
-  doc.addPage();
-  doc.font('Helvetica-Bold').fontSize(12).text('SCHEDULE C — TENANT INFORMATION', { align: 'center' });
-  doc.moveDown(1);
-  const TENANT_INFO_FIELDS = [
-    'Full Legal Name',
-    `ID / Driver's Permit / Passport No.`,
-    'Date of Birth',
-    'Nationality',
-    'Permanent / Family Address',
-    'Occupation',
-    'Employer / Place of Work',
-    'Work Address',
-    'Mobile Number',
-    'Work Telephone',
-    'Email Address',
-    'WhatsApp No. (if different from mobile)',
-    'No. of Authorised Occupants',
-    `Occupants' Full Names & Relation to Tenant`,
-  ];
-  doc.font('Helvetica').fontSize(10);
-  for (const label of TENANT_INFO_FIELDS) {
-    ensureSpace(26);
-    doc.font('Helvetica-Bold').fontSize(9).text(`${label}:`);
-    const lineY = doc.y;
-    doc.font('Helvetica').fontSize(9).text('_______________________________________________________________');
-    recordField(label, 'text', 'TENANT', 56, lineY, 483, 14);
-    doc.moveDown(0.4);
-  }
-
-  doc.moveDown(0.8);
-  ensureSpace(90);
-  doc.font('Helvetica-Bold').fontSize(10).text('Emergency Contacts');
-  doc.moveDown(0.4);
-  const ECOLS = [56, 200, 320, 410];
-  const ecHeaderY = doc.y;
-  doc.font('Helvetica-Bold').fontSize(8);
-  doc.text('Full Name', ECOLS[0], ecHeaderY, { width: 140 });
-  doc.text('Relation', ECOLS[1], ecHeaderY, { width: 110 });
-  doc.text('Mobile No.', ECOLS[2], ecHeaderY, { width: 85 });
-  doc.text('Address', ECOLS[3], ecHeaderY, { width: 130 });
-  doc.y = ecHeaderY + 16;
-  for (let i = 0; i < 3; i++) {
-    const y = doc.y;
-    doc.rect(ECOLS[0], y, 480, 24).stroke();
-    doc.moveTo(ECOLS[1], y).lineTo(ECOLS[1], y + 24).stroke();
-    doc.moveTo(ECOLS[2], y).lineTo(ECOLS[2], y + 24).stroke();
-    doc.moveTo(ECOLS[3], y).lineTo(ECOLS[3], y + 24).stroke();
-    doc.y = y + 24;
-  }
-
   // ── ACKNOWLEDGEMENT ──────────────────────────────────────────────────────────
   doc.addPage();
   doc.font('Helvetica-Bold').fontSize(12).text('ACKNOWLEDGEMENT OF RECEIPT & UNDERSTANDING', { align: 'center' });
   doc.moveDown(1);
   doc.font('Helvetica').fontSize(10).text(
-    `Both parties confirm that they have read, understood, and agreed to all terms and conditions of this Agreement and Schedules A, B, and C; that Schedule B was completed at move-in; and that the Tenant has received _____ set(s) of keys to the Premises.`,
+    `Both parties confirm that they have read, understood, and agreed to all terms and conditions of this Agreement and Schedules A, B, and C; that Schedule C was completed at move-in; and that the Tenant has received _____ set(s) of keys to the Premises.`,
     { align: 'justify' },
   );
   doc.moveDown(0.8);

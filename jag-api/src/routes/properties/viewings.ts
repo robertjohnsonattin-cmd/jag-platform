@@ -221,12 +221,12 @@ viewingsRouter.post('/send-post-viewing-links', async (req: Request, res: Respon
 
     const rows = await withOwnerRLS(propertiesPool, ownerId, async client => {
       const { rows } = await client.query<Record<string, unknown>>(
-        `SELECT e.id, e.prospect_phone, e.prospect_name
+        `SELECT v.id AS viewing_id, e.id, e.prospect_phone, e.prospect_name
          FROM prop_viewings v
          JOIN prop_enquiries e ON e.id = v.enquiry_id
          WHERE v.owner_id = $1
            AND v.status = 'COMPLETED'
-           AND v.completed_at >= NOW() - INTERVAL '24 hours'
+           AND v.post_viewing_app_link_sent_at IS NULL
            AND e.stage = 'VIEWED'`,
         [ownerId],
       );
@@ -238,17 +238,11 @@ viewingsRouter.post('/send-post-viewing-links', async (req: Request, res: Respon
     for (const row of rows) {
       if (!row['prospect_phone']) continue;
       // One-time application token → public /apply/<token> form (30-day validity).
+      // Token/stage are persisted regardless of WhatsApp delivery — the link must
+      // exist even during a WhatsApp outage (e.g. template pending Meta approval)
+      // so the owner can still share it manually.
       const token = randomBytes(24).toString('hex');
       try {
-        await sendTemplate({
-          to: String(row['prospect_phone']),
-          templateName: 'jag_enq_post_viewing',
-          languageCode: 'en_US',
-          components: [{ type: 'body', parameters: [
-            { type: 'text', text: String(row['prospect_name'] ?? '') },
-            { type: 'text', text: `${applyBase}/${token}` },
-          ] }],
-        });
         await withOwnerRLS(propertiesPool, ownerId, async client => {
           await client.query(
             `UPDATE prop_enquiries
@@ -257,9 +251,22 @@ viewingsRouter.post('/send-post-viewing-links', async (req: Request, res: Respon
              WHERE id = $1`,
             [row['id'], token],
           );
+          await client.query(
+            `UPDATE prop_viewings SET post_viewing_app_link_sent_at = NOW() WHERE id = $1`,
+            [row['viewing_id']],
+          );
         });
         sent.push(String(row['id']));
-      } catch { /* skip on WA error */ }
+        sendTemplate({
+          to: String(row['prospect_phone']),
+          templateName: 'jag_enq_post_viewing',
+          languageCode: 'en_US',
+          components: [{ type: 'body', parameters: [
+            { type: 'text', text: String(row['prospect_name'] ?? '') },
+            { type: 'text', text: `${applyBase}/${token}` },
+          ] }],
+        }).catch(e => logger.warn({ entity: 'PROPERTIES', action: 'WA_POST_VIEWING_LINK_FAILED', error_message: (e as Error).message }));
+      } catch { /* skip on DB error */ }
     }
     res.json(ok({ sent: sent.length }));
   } catch (e) { next(e); }
@@ -285,7 +292,16 @@ viewingsRouter.patch('/:id', async (req: Request, res: Response, next: NextFunct
         `UPDATE prop_viewings SET ${sets.join(', ')} WHERE id = $${vals.length - 1} AND owner_id = $${vals.length} RETURNING *`,
         vals,
       );
-      return rows[0] ?? null;
+      const viewing = rows[0] ?? null;
+      // Marking a viewing COMPLETED moves the enquiry to VIEWED, which is the
+      // precondition send-post-viewing-links checks before issuing an application link.
+      if (viewing && body.status === 'COMPLETED') {
+        await client.query(
+          `UPDATE prop_enquiries SET stage = 'VIEWED' WHERE id = $1 AND stage = 'VIEWING_SCHEDULED'`,
+          [viewing.enquiry_id],
+        );
+      }
+      return viewing;
     });
     if (!row) return void res.status(404).json(err('Viewing not found', 'NOT_FOUND'));
     res.json(ok(row));

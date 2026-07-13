@@ -149,7 +149,7 @@ router.patch('/read-all', async (req: Request, res: Response, next: NextFunction
       const updated = await withTenantRLS(client, req.rlsCtx, async (c) => {
         const result = await c.query(
           `UPDATE notification_queue
-           SET    is_read = true, updated_at = now()
+           SET    is_read = true
            WHERE  is_read = false`,
         );
         const n = result.rowCount ?? 0;
@@ -204,8 +204,7 @@ router.patch('/:id/read', async (req: Request, res: Response, next: NextFunction
       const updated = await withTenantRLS(client, req.rlsCtx, async (c) => {
         const result = await c.query<NotifRow>(
           `UPDATE notification_queue
-           SET    is_read    = true,
-                  updated_at = now()
+           SET    is_read = true
            WHERE  id = $1
              AND  is_read = false
            RETURNING id, tenant_id, tier, channel, title, body, payload,
@@ -245,6 +244,52 @@ router.patch('/:id/read', async (req: Request, res: Response, next: NextFunction
       });
 
       ok(res, updated);
+    } finally {
+      client.release();
+    }
+  } catch (e) {
+    next(e);
+  }
+});
+
+// ── DELETE /api/v1/notifications/:id ─────────────────────────────────────────
+//
+// Deletes a single notification. RLS (user_id) scopes the DELETE to the caller's
+// own notifications — a mismatched id finds zero rows, indistinguishable from
+// not-found by design (same as the /read endpoint above).
+
+router.delete('/:id', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const idParse = NotifIdSchema.safeParse(req.params);
+    if (!idParse.success) {
+      err(res, 422, 'VALIDATION_ERROR', 'Notification ID must be a valid UUID.');
+      return;
+    }
+
+    const { id } = idParse.data;
+    const { userId, tenantId } = req.rlsCtx;
+
+    const client = await corePool.connect();
+    try {
+      const deleted = await withTenantRLS(client, req.rlsCtx, async (c) => {
+        const result = await c.query(`DELETE FROM notification_queue WHERE id = $1 RETURNING id`, [id]);
+        if (result.rows.length === 0) return false;
+
+        await c.query(
+          `INSERT INTO audit_log (tenant_id, user_id, entity, action, record_id, source)
+           VALUES ($1, $2, 'Notification', 'DELETE', $3, 'API')`,
+          [tenantId, userId, id],
+        );
+        return true;
+      });
+
+      if (!deleted) {
+        err(res, 404, 'NOTIFICATION_NOT_FOUND', 'Notification not found.');
+        return;
+      }
+
+      logger.info({ entity: 'NOTIFICATIONS', action: 'DELETE', user_id: userId, tenant_id: tenantId, record_id: id });
+      ok(res, { deleted: id });
     } finally {
       client.release();
     }
