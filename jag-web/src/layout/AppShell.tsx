@@ -76,7 +76,7 @@ export default function AppShell() {
           <div className="flex items-center gap-2">
             {/* Desktop notification bell — mobile uses the top bar instance */}
             <div className="hidden md:block">
-              <NotificationBell />
+              <NotificationBell align="left" />
             </div>
             <button
               className="md:hidden text-slate-400 hover:text-white p-1"

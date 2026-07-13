@@ -53,7 +53,13 @@ const TIER_DOT: Record<number, string> = {
   3: 'bg-slate-400',
 }
 
-export default function NotificationBell() {
+// align='left': used by the desktop sidebar mount, which sits in a narrow
+// 224px column near the sidebar's right edge — a right-anchored (right-0)
+// dropdown would extend left past the sidebar's own edge and off the page,
+// where the root layout's overflow-hidden clips it (looked like truncated
+// notification text). align='right' (default) keeps the original behavior
+// for the mobile top-bar mount, which has room to spare on both sides.
+export default function NotificationBell({ align = 'right' }: { align?: 'left' | 'right' } = {}) {
   const { t } = useTranslation()
   const qc = useQueryClient()
   const navigate = useNavigate()
@@ -126,7 +132,7 @@ export default function NotificationBell() {
       </button>
 
       {open && (
-        <div className="absolute right-0 mt-2 w-80 max-w-[calc(100vw-2rem)] bg-slate-800 border border-slate-700 rounded-xl shadow-2xl z-50 overflow-hidden">
+        <div className={`absolute ${align === 'left' ? 'left-0' : 'right-0'} mt-2 w-80 max-w-[calc(100vw-2rem)] bg-slate-800 border border-slate-700 rounded-xl shadow-2xl z-50 overflow-hidden`}>
           <div className="flex items-center justify-between px-4 py-3 border-b border-slate-700">
             <span className="text-sm font-semibold text-white">{t('notifications.title')}</span>
             {count > 0 && (
