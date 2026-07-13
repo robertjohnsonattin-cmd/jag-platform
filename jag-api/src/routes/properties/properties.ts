@@ -21,6 +21,7 @@ import { ok, err } from '../../lib/response';
 import { generateLeaseAgreementPdf, type LeaseSignField } from '../../lib/lease-pdf';
 import { createSigningSubmission } from '../../lib/documenso';
 import { sendTemplate } from '../../lib/whatsapp';
+import { getPaymentDetails } from '../../lib/payment-config';
 import multer from 'multer';
 import { minioClient, ensureBucket, getObjectStream, mediaObjectKey, BUCKET_DOCUMENTS, BUCKET_SIGNED_DOCUMENTS } from '../../lib/minio';
 import PDFDocument from 'pdfkit';
@@ -842,6 +843,29 @@ propertiesRouter.post('/:propertyId/leases/:leaseId/send-for-signing', async (re
             ]},
           ],
         }).catch(e => logger.warn({ entity: 'PROPERTIES', action: 'LEASE_SIGN_WA_FAILED', error_message: (e as Error).message }));
+
+        // Immediately follow up asking for the security deposit — deposit
+        // collection is otherwise a fully manual step nobody prompts the
+        // tenant for; ask for it as soon as the lease goes out for signing
+        // rather than waiting on move-in day.
+        if (parseFloat(String(row.security_deposit ?? 0)) > 0) {
+          const pay = getPaymentDetails();
+          sendTemplate({
+            to: row.tenant_phone,
+            templateName: 'jag_onb_deposit_request',
+            components: [{ type: 'body', parameters: [
+              { type: 'text', text: tenantName || 'Tenant' },
+              { type: 'text', text: String(row.property_name ?? '') },
+              { type: 'text', text: String(row.unit_number ?? '') },
+              { type: 'text', text: `TTD $${parseFloat(String(row.security_deposit ?? 0)).toFixed(2)}` },
+              { type: 'text', text: pay.payee },
+              { type: 'text', text: pay.bank },
+              { type: 'text', text: pay.acctType },
+              { type: 'text', text: pay.acctNo },
+              { type: 'text', text: process.env.JAG_MANAGER_PHONE ?? '' },
+            ]}],
+          }).catch(e => logger.warn({ entity: 'PROPERTIES', action: 'DEPOSIT_REQUEST_WA_FAILED', error_message: (e as Error).message }));
+        }
       }
 
       logger.info({ entity: 'PROPERTIES', action: 'LEASE_SENT_FOR_SIGNING', user_id: req.rlsCtx.userId, record_id: leaseId, submission_id: submissionId });

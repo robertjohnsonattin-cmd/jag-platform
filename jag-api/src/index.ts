@@ -142,9 +142,11 @@ app.use('/internal/gps/battery-sync', batterySyncRouter);
 // ── Public routes (no Keycloak auth) — property booking page API ──────────────
 import { publicBookingRouter, publicScheduleRouter } from './routes/properties/viewings';
 import { publicApplyRouter } from './routes/properties/public-apply';
+import { publicLeaseCopyRouter } from './routes/properties/public-lease-copy';
 app.use('/api/v1/public/book', express.json(), publicBookingRouter);
 app.use('/api/v1/public/schedule', express.json(), publicScheduleRouter);
 app.use('/api/v1/public/apply', express.json(), publicApplyRouter);
+app.use('/api/v1/public/lease-copy', express.json(), publicLeaseCopyRouter);
 
 // ── Phase 1B routes (STD-05: all API routes prefixed /api/v1/) ─────────────────
 import { authRouter }          from './routes/auth';

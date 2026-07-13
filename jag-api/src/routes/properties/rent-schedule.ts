@@ -38,14 +38,22 @@ const WaiveSchema = z.object({
 
 export async function generateRentSchedule(ownerId: string, leaseId: string): Promise<number> {
   return withOwnerRLS(propertiesPool, ownerId, async client => {
+    // NOTE: previously joined prop_applications and referenced l.tenant_name /
+    // l.rent_amount_ttd / l.rent_due_day — none of those exist on
+    // prop_lease_agreements (confirmed against the live schema), so this query
+    // has always thrown "column does not exist" and generateRentSchedule has
+    // never successfully run. Fixed to use the real columns (monthly_rent,
+    // payment_due_day) and the real tenant linkage (prop_property_tenants via
+    // tenant_id), matching the pattern already used in properties.ts.
     const { rows: [lease] } = await client.query(
       `SELECT l.*, u.id AS unit_id_val,
-              COALESCE(t.full_name, l.tenant_name) AS t_name,
-              COALESCE(t.phone, '') AS t_phone,
-              COALESCE(t.email, '') AS t_email
+              CASE WHEN pt.is_company AND pt.company_name IS NOT NULL THEN pt.company_name
+                   ELSE TRIM(CONCAT(pt.first_name, ' ', COALESCE(pt.last_name, ''))) END AS t_name,
+              COALESCE(pt.phone, '') AS t_phone,
+              COALESCE(pt.email, '') AS t_email
        FROM prop_lease_agreements l
        LEFT JOIN prop_units u ON u.id = l.unit_id
-       LEFT JOIN prop_applications t ON t.unit_id = l.unit_id AND t.status = 'APPROVED'
+       JOIN prop_property_tenants pt ON pt.id = l.tenant_id
        WHERE l.id = $1 AND l.owner_id = $2`,
       [leaseId, ownerId],
     );
@@ -53,25 +61,46 @@ export async function generateRentSchedule(ownerId: string, leaseId: string): Pr
 
     const start = new Date(lease.start_date as string);
     const end   = new Date(lease.end_date as string);
-    const rent  = parseFloat(String(lease.rent_amount_ttd ?? 0));
-    const dueDay = (lease.rent_due_day as number | undefined) ?? 1;
+    const rent  = parseFloat(String(lease.monthly_rent ?? 0));
+    const dueDay = (lease.payment_due_day as number | undefined) ?? 1;
     let inserted = 0;
     let current = new Date(start.getFullYear(), start.getMonth(), 1);
 
     while (current <= end) {
       const yr = current.getFullYear();
       const mo = current.getMonth() + 1;
-      const dueDate = new Date(yr, current.getMonth(), dueDay);
+      const monthStart = new Date(yr, current.getMonth(), 1);
+      const monthEnd   = new Date(yr, current.getMonth() + 1, 0); // last calendar day of this month
+      // Clip the billing period to the lease's actual start/end within this
+      // calendar month — a lease starting the 20th only occupies 12 of July's
+      // 31 days, so it's charged 12/31 of the monthly rent, not the full month.
+      const periodStart = monthStart < start ? start : monthStart;
+      const periodEnd   = monthEnd > end ? end : monthEnd;
+
+      const daysInMonth   = monthEnd.getDate();
+      const daysOccupied  = Math.round((periodEnd.getTime() - periodStart.getTime()) / 86400000) + 1;
+      const isProrated    = daysOccupied < daysInMonth;
+      const amountDue     = isProrated
+        ? Math.round((rent / daysInMonth) * daysOccupied * 100) / 100
+        : rent;
+      // A prorated first period is due on move-in day itself, not the lease's
+      // recurring due-day (which may fall before the tenant even moves in).
+      const dueDate = periodStart > monthStart
+        ? periodStart
+        : new Date(yr, current.getMonth(), Math.min(dueDay, daysInMonth));
+
       const idem = `${leaseId}-${yr}-${mo}`;
       const { rowCount } = await client.query(
         `INSERT INTO prop_rent_schedule
            (owner_id, lease_id, unit_id, tenant_name, tenant_phone, tenant_email,
-            period_year, period_month, due_date, amount_due_ttd, idempotency_key)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+            period_year, period_month, due_date, amount_due_ttd,
+            period_start_date, period_end_date, is_prorated, idempotency_key)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
          ON CONFLICT (lease_id, period_year, period_month) DO NOTHING`,
         [ownerId, leaseId, lease.unit_id_val ?? lease.unit_id,
          lease.t_name ?? '', lease.t_phone ?? '', lease.t_email ?? '',
-         yr, mo, dueDate.toISOString().slice(0, 10), rent, idem],
+         yr, mo, dueDate.toISOString().slice(0, 10), amountDue,
+         periodStart.toISOString().slice(0, 10), periodEnd.toISOString().slice(0, 10), isProrated, idem],
       );
       inserted += rowCount ?? 0;
       current.setMonth(current.getMonth() + 1);
@@ -131,14 +160,18 @@ rentScheduleRouter.post('/send-reminders', async (req: Request, res: Response, n
 
     const sent: string[] = [];
     const rows = await withOwnerRLS(propertiesPool, ownerId, async client => {
+      // Was joining prop_lease_agreements for la.tenant_phone/la.tenant_name —
+      // neither column exists there (confirmed against live schema); this batch
+      // has been throwing on every cron run. prop_rent_schedule already carries
+      // its own denormalized tenant_phone/tenant_name (set by generateRentSchedule),
+      // same as every other batch endpoint in this file — read from rs directly.
       const { rows } = await client.query<Record<string, unknown>>(
         `SELECT rs.id, rs.period_year, rs.period_month, rs.amount_due_ttd, rs.due_date,
-                la.tenant_phone, la.tenant_name
+                rs.tenant_phone, rs.tenant_name
          FROM prop_rent_schedule rs
-         JOIN prop_lease_agreements la ON la.id = rs.lease_id
          WHERE rs.owner_id = $1
            AND rs.status IN ('UPCOMING','REMINDER_SENT','LATE')
-           AND (rs.reminder_sent_at IS NULL OR rs.reminder_sent_at < NOW() - INTERVAL '23 hours')
+           AND (rs.reminder_d5_sent_at IS NULL OR rs.reminder_d5_sent_at < NOW() - INTERVAL '23 hours')
            AND rs.due_date <= CURRENT_DATE + INTERVAL '3 days'`,
         [ownerId],
       );
@@ -160,7 +193,7 @@ rentScheduleRouter.post('/send-reminders', async (req: Request, res: Response, n
         });
         await withOwnerRLS(propertiesPool, ownerId, async client => {
           await client.query(
-            `UPDATE prop_rent_schedule SET reminder_sent_at = NOW(), status = CASE WHEN status = 'UPCOMING' THEN 'REMINDER_SENT' ELSE status END WHERE id = $1`,
+            `UPDATE prop_rent_schedule SET reminder_d5_sent_at = NOW(), status = CASE WHEN status = 'UPCOMING' THEN 'REMINDER_SENT' ELSE status END WHERE id = $1`,
             [row['id']],
           );
         });

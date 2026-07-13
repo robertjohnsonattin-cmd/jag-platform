@@ -20,12 +20,13 @@
 // real webhook delivery yet — verify on the first end-to-end signing test.
 
 import { Router, type Request, type Response } from 'express';
-import { timingSafeEqual } from 'crypto';
+import { randomUUID, timingSafeEqual } from 'crypto';
 import { propertiesPool } from '../../db/index';
 import { withOwnerRLS } from '../../middleware/rls';
 import { logger } from '../../lib/logger';
 import { getSubmission, downloadSignedPdf } from '../../lib/documenso';
 import { minioClient, ensureBucket, mediaObjectKey, BUCKET_SIGNED_DOCUMENTS } from '../../lib/minio';
+import { sendTemplate } from '../../lib/whatsapp';
 
 export const documensoWebhookRouter = Router();
 
@@ -89,15 +90,53 @@ documensoWebhookRouter.post('/', (req: Request, res: Response): void => {
           const key = mediaObjectKey(OWNER_ID, 'lease-agreements', lease.id, 'signed-agreement.pdf');
           await minioClient.putObject(BUCKET_SIGNED_DOCUMENTS, key, pdf, pdf.length, { 'Content-Type': 'application/pdf' });
 
+          const copyToken = randomUUID();
           await withOwnerRLS(propertiesPool, OWNER_ID, async c =>
             c.query(
               `UPDATE prop_lease_agreements
-               SET    signature_status = 'SIGNED', signed_pdf_object_key = $1, agreement_signed_at = NOW()
-               WHERE  id = $2`,
-              [key, lease.id],
+               SET    signature_status = 'SIGNED', signed_pdf_object_key = $1,
+                      agreement_signed_at = NOW(), signed_copy_token = $2
+               WHERE  id = $3`,
+              [key, copyToken, lease.id],
             ),
           );
+          const tenant = await withOwnerRLS(propertiesPool, OWNER_ID, async c =>
+            c.query(
+              `SELECT pt.phone AS tenant_phone,
+                      CASE WHEN pt.is_company AND pt.company_name IS NOT NULL THEN pt.company_name
+                           ELSE TRIM(CONCAT(pt.first_name, ' ', COALESCE(pt.last_name, ''))) END AS tenant_name,
+                      p.name AS property_name, u.unit_number
+               FROM   prop_lease_agreements la
+               JOIN   prop_property_tenants pt ON pt.id = la.tenant_id
+               JOIN   prop_properties p ON p.id = la.property_id
+               LEFT JOIN prop_units u ON u.id = la.unit_id
+               WHERE  la.id = $1`,
+              [lease.id],
+            ).then(r => r.rows[0] ?? null),
+          );
           logger.info({ entity: 'DOCUMENSO', action: 'LEASE_SIGNED', lease_id: lease.id, document_id: documentId });
+
+          // Hand the tenant a self-serve download link the moment both parties
+          // have signed — previously nothing pushed the signed copy to them at
+          // all; staff had to notice and send it manually. Links to a public,
+          // token-gated page (same pattern as /apply and /book) rather than the
+          // auth-gated download route, since the tenant has no Keycloak login.
+          if (tenant?.tenant_phone) {
+            sendTemplate({
+              to: tenant.tenant_phone,
+              templateName: 'jag_onb_lease_signed_copy',
+              components: [
+                { type: 'body', parameters: [
+                  { type: 'text', text: tenant.tenant_name || 'Tenant' },
+                  { type: 'text', text: String(tenant.property_name ?? '') },
+                  { type: 'text', text: String(tenant.unit_number ?? '') },
+                ]},
+                { type: 'button', sub_type: 'url', index: '0', parameters: [
+                  { type: 'text', text: copyToken },
+                ]},
+              ],
+            }).catch(e => logger.warn({ entity: 'DOCUMENSO', action: 'SIGNED_COPY_WA_FAILED', error_message: e instanceof Error ? e.message : String(e) }));
+          }
         }
         return;
       }
