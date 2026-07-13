@@ -36,6 +36,44 @@ const WaiveSchema = z.object({
   reason: z.string().min(1),
 }).strict();
 
+export interface ProratedPeriod {
+  periodStart: string;
+  periodEnd: string;
+  daysOccupied: number;
+  daysInMonth: number;
+  amountDue: number;
+  isProrated: boolean;
+}
+
+// Shared by generateRentSchedule() below and the move-in payment-request
+// WhatsApp message (properties.ts send-for-signing) — both need to quote the
+// same prorated first-month amount, so the day-count math lives in one place.
+export function calculateProratedPeriod(monthStart: Date, monthEnd: Date, leaseStart: Date, leaseEnd: Date, monthlyRent: number): ProratedPeriod {
+  const periodStart = monthStart < leaseStart ? leaseStart : monthStart;
+  const periodEnd   = monthEnd > leaseEnd ? leaseEnd : monthEnd;
+  const daysInMonth  = monthEnd.getDate();
+  const daysOccupied = Math.round((periodEnd.getTime() - periodStart.getTime()) / 86400000) + 1;
+  const isProrated   = daysOccupied < daysInMonth;
+  const amountDue    = isProrated
+    ? Math.round((monthlyRent / daysInMonth) * daysOccupied * 100) / 100
+    : monthlyRent;
+  return {
+    periodStart: periodStart.toISOString().slice(0, 10),
+    periodEnd: periodEnd.toISOString().slice(0, 10),
+    daysOccupied, daysInMonth, amountDue, isProrated,
+  };
+}
+
+// Convenience wrapper for just the lease's first calendar-month period —
+// what a move-in payment request needs to quote before a rent schedule exists.
+export function calculateFirstPeriodRent(startDate: string, endDate: string | null | undefined, monthlyRent: number): ProratedPeriod {
+  const start = new Date(startDate);
+  const monthStart = new Date(start.getFullYear(), start.getMonth(), 1);
+  const monthEnd   = new Date(start.getFullYear(), start.getMonth() + 1, 0);
+  const end = endDate ? new Date(endDate) : monthEnd;
+  return calculateProratedPeriod(monthStart, monthEnd, start, end, monthlyRent);
+}
+
 export async function generateRentSchedule(ownerId: string, leaseId: string): Promise<number> {
   return withOwnerRLS(propertiesPool, ownerId, async client => {
     // NOTE: previously joined prop_applications and referenced l.tenant_name /
@@ -74,20 +112,14 @@ export async function generateRentSchedule(ownerId: string, leaseId: string): Pr
       // Clip the billing period to the lease's actual start/end within this
       // calendar month — a lease starting the 20th only occupies 12 of July's
       // 31 days, so it's charged 12/31 of the monthly rent, not the full month.
-      const periodStart = monthStart < start ? start : monthStart;
-      const periodEnd   = monthEnd > end ? end : monthEnd;
+      const period = calculateProratedPeriod(monthStart, monthEnd, start, end, rent);
+      const periodStartDate = monthStart < start ? start : monthStart;
 
-      const daysInMonth   = monthEnd.getDate();
-      const daysOccupied  = Math.round((periodEnd.getTime() - periodStart.getTime()) / 86400000) + 1;
-      const isProrated    = daysOccupied < daysInMonth;
-      const amountDue     = isProrated
-        ? Math.round((rent / daysInMonth) * daysOccupied * 100) / 100
-        : rent;
       // A prorated first period is due on move-in day itself, not the lease's
       // recurring due-day (which may fall before the tenant even moves in).
-      const dueDate = periodStart > monthStart
-        ? periodStart
-        : new Date(yr, current.getMonth(), Math.min(dueDay, daysInMonth));
+      const dueDate = periodStartDate > monthStart
+        ? periodStartDate
+        : new Date(yr, current.getMonth(), Math.min(dueDay, period.daysInMonth));
 
       const idem = `${leaseId}-${yr}-${mo}`;
       const { rowCount } = await client.query(
@@ -99,8 +131,8 @@ export async function generateRentSchedule(ownerId: string, leaseId: string): Pr
          ON CONFLICT (lease_id, period_year, period_month) DO NOTHING`,
         [ownerId, leaseId, lease.unit_id_val ?? lease.unit_id,
          lease.t_name ?? '', lease.t_phone ?? '', lease.t_email ?? '',
-         yr, mo, dueDate.toISOString().slice(0, 10), amountDue,
-         periodStart.toISOString().slice(0, 10), periodEnd.toISOString().slice(0, 10), isProrated, idem],
+         yr, mo, dueDate.toISOString().slice(0, 10), period.amountDue,
+         period.periodStart, period.periodEnd, period.isProrated, idem],
       );
       inserted += rowCount ?? 0;
       current.setMonth(current.getMonth() + 1);

@@ -22,6 +22,7 @@ import { generateLeaseAgreementPdf, type LeaseSignField } from '../../lib/lease-
 import { createSigningSubmission } from '../../lib/documenso';
 import { sendTemplate } from '../../lib/whatsapp';
 import { getPaymentDetails } from '../../lib/payment-config';
+import { calculateFirstPeriodRent } from './rent-schedule';
 import multer from 'multer';
 import { minioClient, ensureBucket, getObjectStream, mediaObjectKey, BUCKET_DOCUMENTS, BUCKET_SIGNED_DOCUMENTS } from '../../lib/minio';
 import PDFDocument from 'pdfkit';
@@ -844,27 +845,34 @@ propertiesRouter.post('/:propertyId/leases/:leaseId/send-for-signing', async (re
           ],
         }).catch(e => logger.warn({ entity: 'PROPERTIES', action: 'LEASE_SIGN_WA_FAILED', error_message: (e as Error).message }));
 
-        // Immediately follow up asking for the security deposit — deposit
-        // collection is otherwise a fully manual step nobody prompts the
-        // tenant for; ask for it as soon as the lease goes out for signing
-        // rather than waiting on move-in day.
-        if (parseFloat(String(row.security_deposit ?? 0)) > 0) {
+        // Immediately follow up with a single move-in payment request covering
+        // BOTH the security deposit and the first month's rent (prorated to the
+        // move-in date, e.g. move-in on the 20th only owes ~12/31 of the month) —
+        // both are needed before handover, so ask for them together rather than
+        // two separate asks landing at different points in the flow.
+        const deposit = parseFloat(String(row.security_deposit ?? 0));
+        const firstRent = calculateFirstPeriodRent(row.start_date, row.end_date, parseFloat(String(row.monthly_rent ?? 0)));
+        const totalDue = Math.round((deposit + firstRent.amountDue) * 100) / 100;
+        if (deposit > 0 || firstRent.amountDue > 0) {
           const pay = getPaymentDetails();
           sendTemplate({
             to: row.tenant_phone,
-            templateName: 'jag_onb_deposit_request',
+            templateName: 'jag_onb_movein_payment_request',
             components: [{ type: 'body', parameters: [
               { type: 'text', text: tenantName || 'Tenant' },
               { type: 'text', text: String(row.property_name ?? '') },
               { type: 'text', text: String(row.unit_number ?? '') },
-              { type: 'text', text: `TTD $${parseFloat(String(row.security_deposit ?? 0)).toFixed(2)}` },
+              { type: 'text', text: `TTD $${deposit.toFixed(2)}` },
+              { type: 'text', text: firstRent.periodStart },
+              { type: 'text', text: `TTD $${firstRent.amountDue.toFixed(2)}` },
+              { type: 'text', text: `TTD $${totalDue.toFixed(2)}` },
               { type: 'text', text: pay.payee },
               { type: 'text', text: pay.bank },
               { type: 'text', text: pay.acctType },
               { type: 'text', text: pay.acctNo },
               { type: 'text', text: process.env.JAG_MANAGER_PHONE ?? '' },
             ]}],
-          }).catch(e => logger.warn({ entity: 'PROPERTIES', action: 'DEPOSIT_REQUEST_WA_FAILED', error_message: (e as Error).message }));
+          }).catch(e => logger.warn({ entity: 'PROPERTIES', action: 'MOVEIN_PAYMENT_WA_FAILED', error_message: (e as Error).message }));
         }
       }
 
