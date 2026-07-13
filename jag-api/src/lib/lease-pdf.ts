@@ -459,13 +459,16 @@ export function generateLeaseAgreementPdf(d: LeasePdfData, fieldSink?: LeaseSign
   const sigBlock = (label: string, name: string, role: LeaseSignField['role']) => {
     ensureSpace(130);
     doc.font('Helvetica-Bold').fontSize(10).text(`SIGNED by the ${label}`);
-    doc.moveDown(1.2);
+    // Extra gap (was 1.2) so the signature field has clear room to float
+    // between the heading above and the underline below, instead of the
+    // field's top edge landing back on top of the heading text.
+    doc.moveDown(2.4);
     const sigLineY = doc.y;
     doc.font('Helvetica').fontSize(10).text('_________________________________');
     // Box sits above the underline (not on top of it) and is tall enough that
     // a signature image doesn't render squashed — was 16pt tall anchored right
     // on the line, which drew signatures tiny and dates struck through the rule.
-    recordField(`${role}_SIGNATURE`, 'signature', role, 56, sigLineY - 26, 220, 28);
+    recordField(`${role}_SIGNATURE`, 'signature', role, 56, sigLineY - 32, 220, 34);
     doc.text('Signature');
     doc.moveDown(0.8);
     doc.text('_________________________________');
@@ -691,14 +694,23 @@ export function generateLeaseAgreementPdf(d: LeasePdfData, fieldSink?: LeaseSign
   // Stamp "Page X of Y" centered in the bottom margin of every page. Must run
   // after all content is drawn (total page count isn't known until now) and
   // before doc.end(), which flushes the buffered pages.
+  //
+  // The footer y (height - 36) sits below the page's usable content area
+  // (bottom margin 56pt), and PDFKit's .text() auto-triggers addPage() when
+  // asked to write past that boundary — even via switchToPage on an already-
+  // rendered page. That silently doubled the page count (12 -> 22). Zeroing
+  // the bottom margin for the write stops PDFKit from treating it as overflow.
   const range = doc.bufferedPageRange();
   for (let i = range.start; i < range.start + range.count; i++) {
     doc.switchToPage(i);
+    const savedBottomMargin = doc.page.margins.bottom;
+    doc.page.margins.bottom = 0;
     doc.font('Helvetica').fontSize(8).fillColor('#666666').text(
       `Page ${i - range.start + 1} of ${range.count}`,
       0, doc.page.height - 36,
       { align: 'center', width: doc.page.width },
     );
+    doc.page.margins.bottom = savedBottomMargin;
   }
 
   doc.end();
