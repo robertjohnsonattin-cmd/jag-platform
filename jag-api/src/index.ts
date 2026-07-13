@@ -81,6 +81,18 @@ app.use('/internal/whatsapp/webhook', express.raw({ type: 'application/json', li
   },
   whatsappWebhookRouter);
 
+// ── Documenso webhook — mount BEFORE the global express.json() with a large
+// limit. Documenso's DOCUMENT_COMPLETED payload embeds the full base64-encoded
+// signed PDF, so a real lease/handover webhook body is ~400kb+ — well over
+// express.json()'s default 100kb limit. Under the global 100kb parser the body
+// was silently rejected (413-class), leaving req.body empty, so the handler
+// read documentId='' and returned early WITHOUT updating our record — every
+// completed signature stayed stuck at signature_status='SENT'. Auth here is a
+// secret header (X-Documenso-Secret), not an HMAC over the raw bytes, so a
+// normal (large-limit) JSON parse is fine — no raw-buffer capture needed.
+import { documensoWebhookRouter } from './routes/internal/documenso-webhook';
+app.use('/internal/documenso-webhook', express.json({ limit: '10mb' }), documensoWebhookRouter);
+
 // ── JSON body parser (all other routes) ───────────────────────────────────────
 app.use(express.json());
 
@@ -124,8 +136,8 @@ app.use('/internal/traccar-event', traccarEventRouter);
 import { batterySyncRouter } from './routes/internal/traccar-event';
 app.use('/internal/gps/battery-sync', batterySyncRouter);
 
-import { documensoWebhookRouter } from './routes/internal/documenso-webhook';
-app.use('/internal/documenso-webhook', documensoWebhookRouter);
+// documensoWebhookRouter is mounted above, before the global express.json()
+// (its payload exceeds the default 100kb limit — see the comment there).
 
 // ── Public routes (no Keycloak auth) — property booking page API ──────────────
 import { publicBookingRouter, publicScheduleRouter } from './routes/properties/viewings';

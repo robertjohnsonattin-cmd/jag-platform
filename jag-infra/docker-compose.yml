@@ -270,6 +270,18 @@ services:
       # Set once Robert's owner account existed — blocks new account creation
       # (email/password, Google, Microsoft, OIDC) on this instance going forward.
       NEXT_PUBLIC_DISABLE_SIGNUP:          "true"
+      # Without a real signing cert, Documenso falls back to a placeholder path
+      # ('./example/cert.p12') that doesn't exist in this image, and the
+      # internal.seal-document background job fails silently — every document
+      # gets stuck at "all recipients signed" but never flips to COMPLETED.
+      # Self-signed cert is standard for self-hosted Documenso (no public CA
+      # needed for internal document-sealing). Found + fixed 2026-07-13 during
+      # the first real end-to-end lease-signing test.
+      NEXT_PRIVATE_SIGNING_TRANSPORT:       local
+      NEXT_PRIVATE_SIGNING_LOCAL_FILE_PATH: /opt/documenso/cert.p12
+      NEXT_PRIVATE_SIGNING_PASSPHRASE:      ${DOCUMENSO_SIGNING_PASSPHRASE}
+    volumes:
+      - /opt/jag/jag-infra/documenso/cert.p12:/opt/documenso/cert.p12:ro
     ports:
       - "127.0.0.1:3010:3000"    # fronted by Caddy at sign.jagcorporate.com
     extra_hosts:

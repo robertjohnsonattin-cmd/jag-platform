@@ -2,7 +2,12 @@
 # JAG Holdings — MinIO IAM bucket policy setup (run once)
 #
 # Creates the 'jag-app-buckets' policy restricting the jag_app access key
-# to only the 4 authorised buckets. Works for both MinIO users and service accounts.
+# to only the 5 authorised buckets (bank-statements, receipts, documents,
+# photos, signed-documents). Works for both MinIO users and service accounts.
+# NOTE: jag-signed-documents was added 2026-07-13 — it had been referenced in
+# code (BUCKET_SIGNED_DOCUMENTS, Documenso signed-lease storage) but was never
+# in this policy, so every signed-PDF write failed with "Valid and authorized
+# credentials required" and no lease/handover ever recorded its signed copy.
 #
 # USAGE:
 #   MINIO_ROOT_PASSWORD=<password> JAG_APP_ACCESS_KEY=aVl4SrRl0YtilT55zCNe \
@@ -56,7 +61,8 @@ cat > "$POLICY_FILE" << 'POLICY'
         "arn:aws:s3:::jag-bank-statements/*",
         "arn:aws:s3:::jag-receipts/*",
         "arn:aws:s3:::jag-documents/*",
-        "arn:aws:s3:::jag-photos/*"
+        "arn:aws:s3:::jag-photos/*",
+        "arn:aws:s3:::jag-signed-documents/*"
       ]
     },
     {
@@ -70,7 +76,8 @@ cat > "$POLICY_FILE" << 'POLICY'
         "arn:aws:s3:::jag-bank-statements",
         "arn:aws:s3:::jag-receipts",
         "arn:aws:s3:::jag-documents",
-        "arn:aws:s3:::jag-photos"
+        "arn:aws:s3:::jag-photos",
+        "arn:aws:s3:::jag-signed-documents"
       ]
     }
   ]

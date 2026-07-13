@@ -53,10 +53,17 @@ documensoWebhookRouter.post('/', (req: Request, res: Response): void => {
   // webhook delivery is never blocked or retried by us.
   res.status(200).end();
 
-  const payload = req.body as DocumensoWebhookPayload;
+  const payload = (req.body ?? {}) as DocumensoWebhookPayload;
   const eventType = payload.event ?? '';
   const documentId = String(payload.data?.id ?? '');
-  if (!documentId) return;
+  if (!documentId) {
+    // Previously a silent return — which masked a body-parser bug (Documenso's
+    // ~400kb PDF-embedded payload exceeded express.json()'s 100kb limit, so
+    // req.body arrived empty and every completed signature was dropped). Log it
+    // so an empty/unparsed body is visible rather than looking like success.
+    logger.warn({ entity: 'DOCUMENSO', action: 'WEBHOOK_EMPTY_BODY', event_type: eventType });
+    return;
+  }
 
   const isCompleted = eventType === 'document.completed' || payload.data?.status === 'COMPLETED';
   if (!isCompleted) {
