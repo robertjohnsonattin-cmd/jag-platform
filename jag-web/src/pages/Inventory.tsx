@@ -1730,15 +1730,21 @@ function VehiclesTab({ focusVehicleId, focusTab }: { focusVehicleId?: string | n
   const pagination = data?.pagination
 
   // Deep-link from a notification (e.g. a GPS alert) straight to this vehicle's
-  // manage modal, on the requested subtab.
+  // manage modal, on the requested subtab. Fires once only — focusVehicleId
+  // comes from the URL and never clears on its own, so without the
+  // already-opened guard this re-fired every time manageVehicle went back to
+  // null (i.e. right after the user closed the modal), reopening it instantly
+  // and making the close (×) button appear broken.
+  const autoOpenedRef = useRef(false)
   useEffect(() => {
-    if (!focusVehicleId || manageVehicle) return
+    if (!focusVehicleId || autoOpenedRef.current) return
     const match = vehicles.find(v => v.id === focusVehicleId)
     if (match) {
+      autoOpenedRef.current = true
       setManageVehicle(match)
       setManageVehicleTab(focusTab)
     }
-  }, [focusVehicleId, focusTab, vehicles, manageVehicle])
+  }, [focusVehicleId, focusTab, vehicles])
 
   const nowMs = Date.now()
   const SOON_MS  = 30 * 24 * 60 * 60 * 1000 // 30 days
