@@ -5,17 +5,59 @@ import { tenancyApi } from '../../api/tenancy'
 
 const cls = 'w-full bg-slate-700 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500'
 
+// Same 27-item list as Schedule C in the lease PDF (jag-api/src/lib/lease-pdf.ts
+// CHECKLIST_ITEMS) — kept in sync manually since the two projects don't share code.
+const CONDITION_CHECKLIST_ITEMS = [
+  'Living Room — walls, ceiling, floor',
+  'Living Room — doors & windows',
+  'Living Room — light fixtures & switches',
+  'Living Room — ceiling fan(s)',
+  'Dining Area — walls, ceiling, floor',
+  'Kitchen — cabinets & counter-tops',
+  'Kitchen — sink & taps',
+  'Kitchen — light fixtures & switches',
+  'Kitchen — appliances (if any)',
+  'Bedroom(s) — walls, ceiling, floor',
+  'Bedroom(s) — doors & windows',
+  'Bedroom(s) — light fixtures & switches',
+  'Bedroom(s) — ceiling fan(s)',
+  'Bathroom — toilet bowl & cistern',
+  'Bathroom — toilet seat & cover',
+  'Bathroom — basin & taps',
+  'Bathroom — shower/tub & fittings',
+  'Bathroom — tiles & grouting',
+  'Bathroom — light fixture & extractor',
+  'Electrical — switches, sockets & panel',
+  'Plumbing — taps & water pressure',
+  'Air-conditioning unit(s)',
+  'Locks & keys',
+  'Gallery / Balcony',
+  'Parking space',
+  'Common area / stairwell',
+]
+
+const CONDITION_OPTIONS = ['', 'E', 'G', 'F', 'P', 'N/A']
+
+interface ConditionItemForm { item: string; condition: string; notes: string }
+
+function blankConditionItems(): ConditionItemForm[] {
+  return CONDITION_CHECKLIST_ITEMS.map(item => ({ item, condition: '', notes: '' }))
+}
+
 export default function PropertiesHandoverPanel() {
   const { t } = useTranslation()
   const qc = useQueryClient()
   const [unitId, setUnitId] = useState('')
   const [showCreate, setShowCreate] = useState(false)
   const [compareId, setCompareId] = useState<string | null>(null)
+  const [editConditionsId, setEditConditionsId] = useState<string | null>(null)
+  const [editConditionItems, setEditConditionItems] = useState<ConditionItemForm[]>([])
   const [form, setForm] = useState({
     unit_id: '', lease_id: '', type: 'ENTRY' as 'ENTRY' | 'EXIT',
     tec_meter_reading: '', tec_account_number: '', wasa_meter_reading: '', wasa_account_number: '',
     keys_issued: '0', gate_remotes_issued: '0', notes: '',
   })
+  const [conditionItems, setConditionItems] = useState<ConditionItemForm[]>(blankConditionItems())
 
   const { data: checklists = [] } = useQuery({
     queryKey: ['handover', unitId],
@@ -35,9 +77,32 @@ export default function PropertiesHandoverPanel() {
       keys_issued: parseInt(form.keys_issued) || 0,
       gate_remotes_issued: parseInt(form.gate_remotes_issued) || 0,
       lease_id: form.lease_id || undefined,
+      condition_items: conditionItems.filter(ci => ci.condition || ci.notes),
     }),
-    onSuccess: () => { setShowCreate(false); qc.invalidateQueries({ queryKey: ['handover', unitId] }) },
+    onSuccess: () => {
+      setShowCreate(false)
+      setConditionItems(blankConditionItems())
+      qc.invalidateQueries({ queryKey: ['handover', unitId] })
+    },
   })
+
+  const saveConditionsMut = useMutation({
+    mutationFn: () => tenancyApi.patchHandover(editConditionsId!, {
+      condition_items: editConditionItems.filter(ci => ci.condition || ci.notes),
+    }),
+    onSuccess: () => { setEditConditionsId(null); qc.invalidateQueries({ queryKey: ['handover', unitId] }) },
+  })
+
+  const openEditConditions = (cl: Record<string, unknown>) => {
+    const existing = ((cl['condition_items'] as ConditionItemForm[]) ?? [])
+    const byItem = new Map(existing.map(ci => [ci.item, ci]))
+    setEditConditionItems(CONDITION_CHECKLIST_ITEMS.map(item => ({
+      item,
+      condition: byItem.get(item)?.condition ?? '',
+      notes: byItem.get(item)?.notes ?? '',
+    })))
+    setEditConditionsId(String(cl['id']))
+  }
 
   const signMut = useMutation({
     mutationFn: ({ id, field }: { id: string; field: 'tenant_signed' | 'manager_signed' }) =>
@@ -95,6 +160,11 @@ export default function PropertiesHandoverPanel() {
                   </button>
                 )}
                 {!cl['tenant_signed'] && !cl['manager_signed'] && (
+                  <button onClick={() => openEditConditions(cl)} className="text-xs text-blue-400 hover:text-blue-300">
+                    📋 {t('tenancy.editConditions', 'Condition Checklist')}
+                  </button>
+                )}
+                {!cl['tenant_signed'] && !cl['manager_signed'] && (
                   <button onClick={() => sendForSigningMut.mutate(String(cl['id']))}
                     disabled={sendForSigningMut.isPending}
                     className="text-xs bg-blue-700 hover:bg-blue-600 disabled:opacity-50 text-white px-2 py-0.5 rounded">
@@ -122,6 +192,11 @@ export default function PropertiesHandoverPanel() {
               <span>{t('tenancy.wasaReading', 'WASA')}: {String(cl['wasa_meter_reading'] ?? '—')}</span>
               <span>{t('tenancy.keysIssued', 'Keys')}: {String(cl['keys_issued'] ?? 0)}</span>
               <span>{t('tenancy.tenantSigned', 'Tenant signed')}: {cl['tenant_signed'] ? '✓' : '—'}</span>
+              <span>
+                {t('tenancy.conditionItems', 'Condition Items')}: {
+                  ((cl['condition_items'] as unknown[]) ?? []).filter((ci) => (ci as Record<string, unknown>)['condition']).length
+                } / {CONDITION_CHECKLIST_ITEMS.length}
+              </span>
             </div>
           </div>
         ))}
@@ -179,12 +254,35 @@ export default function PropertiesHandoverPanel() {
                 <div><label className="block text-xs text-slate-400 mb-1">{t('tenancy.remotes','Remotes')}</label><input type="number" className={cls} value={form.gate_remotes_issued} onChange={set('gate_remotes_issued')} /></div>
               </div>
               <div><label className="block text-xs text-slate-400 mb-1">{t('tenancy.notes','Notes')}</label><textarea className={cls} rows={2} value={form.notes} onChange={set('notes')} /></div>
+
+              <div className="pt-2 border-t border-slate-700">
+                <p className="text-sm font-semibold text-slate-300 mb-1">{t('tenancy.conditionChecklist', 'Schedule C — Property Condition Checklist')}</p>
+                <p className="text-xs text-slate-500 mb-2">{t('tenancy.conditionChecklistHint', 'E = Excellent · G = Good · F = Fair · P = Poor · N/A = Not Applicable')}</p>
+                <ConditionItemsGrid items={conditionItems} onChange={setConditionItems} />
+              </div>
             </div>
             <div className="flex gap-2 justify-end mt-4">
               <button onClick={() => setShowCreate(false)} className="px-4 py-2 text-sm text-slate-400 hover:text-slate-200">{t('common.cancel','Cancel')}</button>
               <button onClick={() => createMut.mutate()} disabled={createMut.isPending}
                 className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded disabled:opacity-40">
                 {createMut.isPending ? t('common.saving','Saving...') : t('common.save','Save')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {editConditionsId && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-slate-800 rounded-lg p-6 w-full max-w-lg overflow-y-auto max-h-[90vh]">
+            <h2 className="text-lg font-semibold mb-1">{t('tenancy.conditionChecklist', 'Schedule C — Property Condition Checklist')}</h2>
+            <p className="text-xs text-slate-500 mb-3">{t('tenancy.conditionChecklistHint', 'E = Excellent · G = Good · F = Fair · P = Poor · N/A = Not Applicable')}</p>
+            <ConditionItemsGrid items={editConditionItems} onChange={setEditConditionItems} />
+            <div className="flex gap-2 justify-end mt-4">
+              <button onClick={() => setEditConditionsId(null)} className="px-4 py-2 text-sm text-slate-400 hover:text-slate-200">{t('common.cancel','Cancel')}</button>
+              <button onClick={() => saveConditionsMut.mutate()} disabled={saveConditionsMut.isPending}
+                className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded disabled:opacity-40">
+                {saveConditionsMut.isPending ? t('common.saving','Saving...') : t('common.save','Save')}
               </button>
             </div>
           </div>
@@ -221,6 +319,36 @@ export default function PropertiesHandoverPanel() {
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+function ConditionItemsGrid({ items, onChange }: { items: ConditionItemForm[]; onChange: (items: ConditionItemForm[]) => void }) {
+  const updateItem = (idx: number, patch: Partial<ConditionItemForm>) => {
+    onChange(items.map((it, i) => i === idx ? { ...it, ...patch } : it))
+  }
+  return (
+    <div className="space-y-1.5 max-h-72 overflow-y-auto pr-1">
+      {items.map((it, idx) => (
+        <div key={it.item} className="grid grid-cols-[1fr_60px] gap-1.5 items-start bg-slate-900/40 rounded p-1.5">
+          <div>
+            <p className="text-xs text-slate-300 leading-tight">{it.item}</p>
+            <input
+              className="w-full bg-slate-700 border border-slate-600 rounded px-2 py-1 text-xs text-slate-100 mt-1 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              placeholder="Notes"
+              value={it.notes}
+              onChange={e => updateItem(idx, { notes: e.target.value })}
+            />
+          </div>
+          <select
+            className="bg-slate-700 border border-slate-600 rounded px-1 py-1 text-xs text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            value={it.condition}
+            onChange={e => updateItem(idx, { condition: e.target.value })}
+          >
+            {CONDITION_OPTIONS.map(opt => <option key={opt || 'blank'} value={opt}>{opt || '—'}</option>)}
+          </select>
+        </div>
+      ))}
     </div>
   )
 }

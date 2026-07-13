@@ -115,17 +115,22 @@ export function generateConditionReportPdf(d: ConditionReportData, fieldSink?: C
   );
   doc.moveDown(1.5);
 
+  // Field boxes need real headroom above the underline they sit on — a box
+  // anchored exactly at the line's y and only 16pt tall renders squashed/
+  // struck-through in Documenso (same bug found and fixed in lease-pdf.ts
+  // during the session-43 lease-signing walkthrough). Float a 34pt box
+  // between the label line and the underline instead.
   const sigBlock = (label: string, role: ConditionSignField['role']) => {
     doc.font('Helvetica-Bold').fontSize(10).text(`SIGNED by the ${label}`);
-    doc.moveDown(1);
-    const sigY = doc.y;
+    doc.moveDown(2.4);
+    const sigY = doc.y - 30;
     doc.font('Helvetica').fontSize(10).text('_________________________________');
-    recordField(`${role}_SIGNATURE`, 'signature', role, 56, sigY, 220, 16);
+    recordField(`${role}_SIGNATURE`, 'signature', role, 56, sigY, 220, 34);
     doc.text('Signature');
-    doc.moveDown(0.6);
-    const dateY = doc.y;
+    doc.moveDown(1.6);
+    const dateY = doc.y - 30;
     doc.text('_________________________________');
-    recordField(`${role}_DATE`, 'date', role, 56, dateY, 220, 16);
+    recordField(`${role}_DATE`, 'date', role, 56, dateY, 220, 34);
     doc.text('Date');
     doc.moveDown(1.2);
   };
