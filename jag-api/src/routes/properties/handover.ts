@@ -2,6 +2,7 @@
 // POST   /api/v1/properties/handover
 // PATCH  /api/v1/properties/handover/:id
 // GET    /api/v1/properties/handover/:id/compare
+// GET    /api/v1/properties/handover/:id/signed-pdf
 
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import { z } from 'zod';
@@ -14,6 +15,7 @@ import { triggerAutoListing } from './listing';
 import { generateConditionReportPdf, type ConditionSignField, type ConditionItem } from '../../lib/condition-report-pdf';
 import { createSigningSubmission } from '../../lib/documenso';
 import { getPaymentDetails } from '../../lib/payment-config';
+import { getObjectStream, BUCKET_SIGNED_DOCUMENTS } from '../../lib/minio';
 import PDFDocument from 'pdfkit';
 
 export const handoverRouter = Router();
@@ -316,5 +318,32 @@ handoverRouter.get('/:id/compare', async (req: Request, res: Response, next: Nex
     });
     if (!data) return void res.status(404).json(err('Exit checklist not found', 'NOT_FOUND'));
     res.json(ok(data));
+  } catch (e) { next(e); }
+});
+
+// ── GET /handover/:id/signed-pdf ───────────────────────────────────────────────
+// Streams the signed condition-report PDF stored by the Documenso webhook once
+// both parties have completed the real e-signature (see routes/internal/
+// documenso-webhook.ts) — auth-gated streaming route, so the frontend must
+// fetch it with a Bearer token (api.download()), not a bare <a href>.
+handoverRouter.get('/:id/signed-pdf', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const ownerId = req.rlsCtx.userId;
+    if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
+    const { id } = IdParam.parse(req.params);
+
+    const row = await withOwnerRLS(propertiesPool, ownerId, async client => {
+      const { rows: [r] } = await client.query(
+        `SELECT signed_pdf_object_key FROM prop_handover_checklists WHERE id = $1 AND owner_id = $2`,
+        [id, ownerId],
+      );
+      return r ?? null;
+    });
+    if (!row || !row.signed_pdf_object_key) return void res.status(404).json(err('No signed copy on file yet.', 'NOT_FOUND'));
+
+    const stream = await getObjectStream(BUCKET_SIGNED_DOCUMENTS, row.signed_pdf_object_key as string);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="handover-signed-${id}.pdf"`);
+    stream.pipe(res);
   } catch (e) { next(e); }
 });

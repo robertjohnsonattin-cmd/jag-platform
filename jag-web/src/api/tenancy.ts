@@ -156,6 +156,9 @@ export const tenancyApi = {
       `/properties/handover/${id}/send-for-signing`, {}
     ),
 
+  downloadHandoverSignedPdf: (id: string) =>
+    api.download(`/properties/handover/${id}/signed-pdf`, `handover-signed-${id}.pdf`),
+
   // ── Renewal Notices ───────────────────────────────────────
   getRenewals: (params?: { status?: string }) =>
     api.get<Row[]>(`/properties/renewals${qs(params)}`),

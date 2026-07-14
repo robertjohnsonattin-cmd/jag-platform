@@ -207,22 +207,37 @@ export default function PropertiesHandoverPanel() {
                     ✍ {t('tenancy.signNow', 'Sign Now')}
                   </button>
                 )}
-                {!cl['tenant_signed'] && (
+                {/* Manual fallback only makes sense when no real e-signing session has
+                    been started — otherwise it's easy to mark this "signed" in our
+                    records while Documenso still shows the tenant as NOT_SIGNED,
+                    with no actual document ever produced (found session 44). */}
+                {!cl['tenant_signed'] && !cl['documenso_document_id'] && (
                   <button onClick={() => signMut.mutate({ id: String(cl['id']), field: 'tenant_signed' })}
                     className="text-xs bg-slate-700 hover:bg-slate-600 text-slate-200 px-2 py-0.5 rounded"
                     title="Offline fallback — use only if digital signing isn't possible">
                     {t('tenancy.tenantSign', 'Tenant Sign (manual)')}
                   </button>
                 )}
-                {Boolean(cl['tenant_signed']) && !cl['manager_signed'] && (
+                {Boolean(cl['tenant_signed']) && !cl['manager_signed'] && !cl['documenso_document_id'] && (
                   <button onClick={() => signMut.mutate({ id: String(cl['id']), field: 'manager_signed' })}
                     className="text-xs bg-green-800 hover:bg-green-700 text-white px-2 py-0.5 rounded"
                     title="Offline fallback — use only if digital signing isn't possible">
                     {t('tenancy.managerSign', 'Manager Sign (manual)')}
                   </button>
                 )}
+                {Boolean(cl['signed_pdf_object_key']) && (
+                  <button onClick={() => tenancyApi.downloadHandoverSignedPdf(String(cl['id']))}
+                    className="text-xs bg-emerald-800 hover:bg-emerald-700 text-white px-2 py-0.5 rounded">
+                    ⬇ {t('tenancy.downloadSignedPdf', 'Signed PDF')}
+                  </button>
+                )}
               </div>
             </div>
+            {Boolean(cl['documenso_document_id']) && !cl['signed_pdf_object_key'] && (
+              <p className="text-xs text-amber-400 mt-2">
+                {t('tenancy.awaitingDocumensoCompletion', 'Sent for e-signing — awaiting both parties to finish signing in Documenso.')}
+              </p>
+            )}
             <div className="grid grid-cols-2 gap-2 mt-3 text-xs text-slate-400">
               <span>{t('tenancy.tecReading', 'TEC')}: {String(cl['tec_meter_reading'] ?? '—')}</span>
               <span>{t('tenancy.wasaReading', 'WASA')}: {String(cl['wasa_meter_reading'] ?? '—')}</span>
