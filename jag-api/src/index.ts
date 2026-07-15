@@ -136,6 +136,9 @@ app.use('/internal/traccar-event', traccarEventRouter);
 import { batterySyncRouter } from './routes/internal/traccar-event';
 app.use('/internal/gps/battery-sync', batterySyncRouter);
 
+import { documensoReconcileRouter } from './routes/internal/documenso-reconcile';
+app.use('/internal/documenso-reconcile', express.json(), documensoReconcileRouter);
+
 // documensoWebhookRouter is mounted above, before the global express.json()
 // (its payload exceeds the default 100kb limit — see the comment there).
 

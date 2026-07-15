@@ -150,6 +150,11 @@ services:
       DOCUMENSO_API_KEY:              ${DOCUMENSO_API_KEY}
       DOCUMENSO_WEBHOOK_SECRET:       ${DOCUMENSO_WEBHOOK_SECRET}
       DOCUMENSO_PUBLIC_BASE_URL:      ${DOCUMENSO_PUBLIC_BASE_URL}
+      # Bearer token for /internal/documenso-reconcile — the cron-driven sweep
+      # that catches completions the webhook's fire-and-forget window missed
+      # (session 44). Must ALSO be in .cron-secrets, not just .env, since the
+      # cron script sources .cron-secrets — see feedback_cron_secrets_pattern.
+      DOCUMENSO_RECONCILE_TOKEN:      ${DOCUMENSO_RECONCILE_TOKEN}
       # Found missing 2026-07-07 while testing lease e-signature — none of these were
       # ever wired into the api container, so every WhatsApp send (rent reminders,
       # viewing reminders, renewal notices, lease signing links, etc.) has been

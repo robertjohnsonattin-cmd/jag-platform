@@ -20,19 +20,13 @@
 // real webhook delivery yet — verify on the first end-to-end signing test.
 
 import { Router, type Request, type Response } from 'express';
-import { randomUUID, timingSafeEqual } from 'crypto';
-import { propertiesPool } from '../../db/index';
-import { withOwnerRLS } from '../../middleware/rls';
+import { timingSafeEqual } from 'crypto';
 import { logger } from '../../lib/logger';
-import { getSubmission, downloadSignedPdf } from '../../lib/documenso';
-import { minioClient, ensureBucket, mediaObjectKey, BUCKET_SIGNED_DOCUMENTS } from '../../lib/minio';
-import { sendTemplate } from '../../lib/whatsapp';
+import { completeLeaseSigning, completeHandoverSigning } from '../../lib/documenso-completion';
 
 export const documensoWebhookRouter = Router();
 
 const WEBHOOK_SECRET = process.env['DOCUMENSO_WEBHOOK_SECRET'] ?? '';
-// jag_properties is single-owner (Robert) — same fallback constant lib/notifications.ts uses.
-const OWNER_ID = process.env['NOTIFY_OWNER_USER_ID'] ?? '95ca3f77-60ba-4a0f-af70-2832b247b525';
 
 interface DocumensoWebhookPayload {
   event?: string;
@@ -72,106 +66,17 @@ documensoWebhookRouter.post('/', (req: Request, res: Response): void => {
     return;
   }
 
+  // Fire-and-forget: completeLeaseSigning/completeHandoverSigning each check
+  // Documenso's live status before writing anything, so this is safe even if
+  // the event body claims completion prematurely. If the container is killed
+  // mid-flight (a deploy landing in this exact window — see session 44), the
+  // reconciliation sweep (lib/documenso-completion.ts reconcilePendingDocumensoSubmissions,
+  // routes/internal/documenso-reconcile.ts) picks up any document left with no
+  // stored signed PDF and finishes it on the next run.
   void (async () => {
     try {
-      // Is this a Tenancy Agreement submission?
-      const lease = await withOwnerRLS(propertiesPool, OWNER_ID, async c =>
-        c.query<{ id: string }>(
-          `SELECT id FROM prop_lease_agreements WHERE documenso_document_id = $1`,
-          [documentId],
-        ).then(r => r.rows[0] ?? null),
-      );
-
-      if (lease) {
-        const { status } = await getSubmission(documentId);
-        if (status === 'COMPLETED') {
-          const pdf = await downloadSignedPdf(documentId);
-          await ensureBucket(BUCKET_SIGNED_DOCUMENTS);
-          const key = mediaObjectKey(OWNER_ID, 'lease-agreements', lease.id, 'signed-agreement.pdf');
-          await minioClient.putObject(BUCKET_SIGNED_DOCUMENTS, key, pdf, pdf.length, { 'Content-Type': 'application/pdf' });
-
-          const copyToken = randomUUID();
-          await withOwnerRLS(propertiesPool, OWNER_ID, async c =>
-            c.query(
-              `UPDATE prop_lease_agreements
-               SET    signature_status = 'SIGNED', signed_pdf_object_key = $1,
-                      agreement_signed_at = NOW(), signed_copy_token = $2
-               WHERE  id = $3`,
-              [key, copyToken, lease.id],
-            ),
-          );
-          const tenant = await withOwnerRLS(propertiesPool, OWNER_ID, async c =>
-            c.query(
-              `SELECT pt.phone AS tenant_phone,
-                      CASE WHEN pt.is_company AND pt.company_name IS NOT NULL THEN pt.company_name
-                           ELSE TRIM(CONCAT(pt.first_name, ' ', COALESCE(pt.last_name, ''))) END AS tenant_name,
-                      p.name AS property_name, u.unit_number
-               FROM   prop_lease_agreements la
-               JOIN   prop_property_tenants pt ON pt.id = la.tenant_id
-               JOIN   prop_properties p ON p.id = la.property_id
-               LEFT JOIN prop_units u ON u.id = la.unit_id
-               WHERE  la.id = $1`,
-              [lease.id],
-            ).then(r => r.rows[0] ?? null),
-          );
-          logger.info({ entity: 'DOCUMENSO', action: 'LEASE_SIGNED', lease_id: lease.id, document_id: documentId });
-
-          // Hand the tenant a self-serve download link the moment both parties
-          // have signed — previously nothing pushed the signed copy to them at
-          // all; staff had to notice and send it manually. Links to a public,
-          // token-gated page (same pattern as /apply and /book) rather than the
-          // auth-gated download route, since the tenant has no Keycloak login.
-          if (tenant?.tenant_phone) {
-            sendTemplate({
-              to: tenant.tenant_phone,
-              templateName: 'jag_onb_lease_signed_copy',
-              components: [
-                { type: 'body', parameters: [
-                  { type: 'text', text: tenant.tenant_name || 'Tenant' },
-                  { type: 'text', text: String(tenant.property_name ?? '') },
-                  { type: 'text', text: String(tenant.unit_number ?? '') },
-                ]},
-                { type: 'button', sub_type: 'url', index: '0', parameters: [
-                  { type: 'text', text: copyToken },
-                ]},
-              ],
-            }).catch(e => logger.warn({ entity: 'DOCUMENSO', action: 'SIGNED_COPY_WA_FAILED', error_message: e instanceof Error ? e.message : String(e) }));
-          }
-        }
-        return;
-      }
-
-      // Is this a handover condition-report submission?
-      const handover = await withOwnerRLS(propertiesPool, OWNER_ID, async c =>
-        c.query<{ id: string }>(
-          `SELECT id FROM prop_handover_checklists WHERE documenso_document_id = $1`,
-          [documentId],
-        ).then(r => r.rows[0] ?? null),
-      );
-
-      if (handover) {
-        const { status } = await getSubmission(documentId);
-        if (status === 'COMPLETED') {
-          const pdf = await downloadSignedPdf(documentId);
-          await ensureBucket(BUCKET_SIGNED_DOCUMENTS);
-          const key = mediaObjectKey(OWNER_ID, 'handover-checklists', handover.id, 'signed-condition-report.pdf');
-          await minioClient.putObject(BUCKET_SIGNED_DOCUMENTS, key, pdf, pdf.length, { 'Content-Type': 'application/pdf' });
-
-          await withOwnerRLS(propertiesPool, OWNER_ID, async c =>
-            c.query(
-              `UPDATE prop_handover_checklists
-               SET    tenant_signed = true, manager_signed = true,
-                      tenant_signed_at = NOW(), manager_signed_at = NOW(),
-                      signed_pdf_object_key = $1
-               WHERE  id = $2`,
-              [key, handover.id],
-            ),
-          );
-          logger.info({ entity: 'DOCUMENSO', action: 'HANDOVER_SIGNED', handover_id: handover.id, document_id: documentId });
-        }
-        return;
-      }
-
+      if (await completeLeaseSigning(documentId)) return;
+      if (await completeHandoverSigning(documentId)) return;
       logger.warn({ entity: 'DOCUMENSO', action: 'WEBHOOK_NO_MATCH', document_id: documentId });
     } catch (e) {
       logger.warn({ entity: 'DOCUMENSO', action: 'WEBHOOK_HANDLE_FAILED', error: e instanceof Error ? e.message : String(e) });
