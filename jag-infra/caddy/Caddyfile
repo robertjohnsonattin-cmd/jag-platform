@@ -199,6 +199,24 @@ jagcorporate.com, www.jagcorporate.com {
 		}
 	}
 
+	# Crawler-only Open Graph preview for shared booking links (see
+	# jag-api/src/routes/properties/book-preview.ts) — a static SPA index.html
+	# can't carry per-listing meta tags, so link-preview crawlers (which don't
+	# execute JS) get a per-unit HTML stub from jag-api instead of the app.
+	# Real browsers are never matched here and fall through to the normal SPA
+	# route below, which renders the actual booking/viewing-request page.
+	@book_crawler {
+		path /book/*
+		header_regexp UA User-Agent "facebookexternalhit|Facebot|WhatsApp|Twitterbot|LinkedInBot|Slackbot|TelegramBot|Discordbot|Pinterest|redditbot"
+	}
+	handle @book_crawler {
+		reverse_proxy api:3000 {
+			header_up X-Real-IP {http.request.header.CF-Connecting-IP}
+			header_up X-Forwarded-For {http.request.header.CF-Connecting-IP}
+			header_up X-Forwarded-Proto https
+		}
+	}
+
 	# React SPA — fall back to index.html for client-side routing
 	handle {
 		root * /opt/jag/jag-web/dist

@@ -146,10 +146,16 @@ app.use('/internal/documenso-reconcile', express.json(), documensoReconcileRoute
 import { publicBookingRouter, publicScheduleRouter } from './routes/properties/viewings';
 import { publicApplyRouter } from './routes/properties/public-apply';
 import { publicLeaseCopyRouter } from './routes/properties/public-lease-copy';
+import { bookPreviewRouter } from './routes/properties/book-preview';
 app.use('/api/v1/public/book', express.json(), publicBookingRouter);
 app.use('/api/v1/public/schedule', express.json(), publicScheduleRouter);
 app.use('/api/v1/public/apply', express.json(), publicApplyRouter);
 app.use('/api/v1/public/lease-copy', express.json(), publicLeaseCopyRouter);
+
+// Crawler-only preview for shared booking links — Caddy routes ONLY known
+// crawler User-Agents at /book/* here (see Caddyfile); real browsers hit the
+// SPA at the same path and never reach this route. See book-preview.ts.
+app.use('/book', bookPreviewRouter);
 
 // ── Phase 1B routes (STD-05: all API routes prefixed /api/v1/) ─────────────────
 import { authRouter }          from './routes/auth';
