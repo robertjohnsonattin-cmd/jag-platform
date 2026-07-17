@@ -12,11 +12,17 @@ function getEnv() {
     saKeyB64:       process.env.GOOGLE_SERVICE_ACCOUNT_KEY ?? '',
     lookaheadDays:  parseInt(process.env.GOOGLE_CALENDAR_LOOKAHEAD_DAYS ?? '14', 10),
     slotMinutes:    parseInt(process.env.GOOGLE_CALENDAR_SLOT_DURATION_MIN ?? '30', 10),
-    workStart:      process.env.GOOGLE_CALENDAR_WORK_START ?? '09:00',
-    workEnd:        process.env.GOOGLE_CALENDAR_WORK_END ?? '17:00',
     timezone:       process.env.GOOGLE_CALENDAR_TIMEZONE ?? 'America/Port_of_Spain',
   };
 }
+
+// Daily viewing windows (Trinidad local time) — three fixed slots per day instead
+// of one continuous work-hours range.
+const VIEWING_WINDOWS: Array<{ start: string; end: string }> = [
+  { start: '07:30', end: '08:30' },
+  { start: '12:00', end: '13:00' },
+  { start: '16:00', end: '18:00' },
+];
 
 async function getAccessToken(): Promise<string> {
   const env = getEnv();
@@ -99,8 +105,6 @@ function zonedWallTimeToUtc(y: number, m: number, d: number, hh: number, mm: num
 
 function buildAvailableSlots(from: Date, to: Date, busy: TimeSlot[], env: ReturnType<typeof getEnv>): TimeSlot[] {
   const slots: TimeSlot[] = [];
-  const [startH, startM] = env.workStart.split(':').map(Number);
-  const [endH, endM] = env.workEnd.split(':').map(Number);
   const slotMs = env.slotMinutes * 60_000;
 
   const fromYmd = ymdInTz(from, env.timezone);
@@ -115,21 +119,25 @@ function buildAvailableSlots(from: Date, to: Date, busy: TimeSlot[], env: Return
     const dayOfWeek = new Date(cursor).getUTCDay();
 
     if (dayOfWeek !== 0) { // skip Sunday
-      const dayStart = zonedWallTimeToUtc(y, m, d, startH, startM, env.timezone);
-      const dayEnd = zonedWallTimeToUtc(y, m, d, endH, endM, env.timezone);
+      for (const window of VIEWING_WINDOWS) {
+        const [startH, startM] = window.start.split(':').map(Number);
+        const [endH, endM] = window.end.split(':').map(Number);
+        const dayStart = zonedWallTimeToUtc(y, m, d, startH, startM, env.timezone);
+        const dayEnd = zonedWallTimeToUtc(y, m, d, endH, endM, env.timezone);
 
-      let slotStart = dayStart;
-      while (slotStart.getTime() + slotMs <= dayEnd.getTime()) {
-        const slotEnd = new Date(slotStart.getTime() + slotMs);
-        const overlaps = busy.some(b => {
-          const bs = new Date(b.start).getTime();
-          const be = new Date(b.end).getTime();
-          return slotStart.getTime() < be && slotEnd.getTime() > bs;
-        });
-        if (!overlaps && slotStart > new Date()) {
-          slots.push({ start: slotStart.toISOString(), end: slotEnd.toISOString() });
+        let slotStart = dayStart;
+        while (slotStart.getTime() + slotMs <= dayEnd.getTime()) {
+          const slotEnd = new Date(slotStart.getTime() + slotMs);
+          const overlaps = busy.some(b => {
+            const bs = new Date(b.start).getTime();
+            const be = new Date(b.end).getTime();
+            return slotStart.getTime() < be && slotEnd.getTime() > bs;
+          });
+          if (!overlaps && slotStart > new Date()) {
+            slots.push({ start: slotStart.toISOString(), end: slotEnd.toISOString() });
+          }
+          slotStart = new Date(slotStart.getTime() + slotMs);
         }
-        slotStart = new Date(slotStart.getTime() + slotMs);
       }
     }
     cursor += 86_400_000;
@@ -142,7 +150,6 @@ export interface CalendarEventInput {
   description: string;
   start: string; // ISO
   end: string;   // ISO
-  attendeeEmails: string[];
 }
 
 // Used exclusively for property viewing bookings. Multiple prospects can be shown
@@ -150,6 +157,10 @@ export interface CalendarEventInput {
 // availability for the next prospect — created as "transparent" (free) so
 // Google's freeBusy check ignores it. Robert's own manually-added calendar
 // events stay opaque/busy by default and still block as normal.
+// NOTE: does NOT invite attendees — the calendar's service account has no
+// Domain-Wide Delegation, so Google rejects any event with an `attendees` list
+// (403 forbiddenForServiceAccounts) and the event is never created at all.
+// Prospects are notified separately via WhatsApp (see publicScheduleRouter).
 export async function createCalendarEvent(event: CalendarEventInput): Promise<string> {
   const env = getEnv();
   const token = await getAccessToken();
@@ -161,9 +172,7 @@ export async function createCalendarEvent(event: CalendarEventInput): Promise<st
       description: event.description,
       start: { dateTime: event.start, timeZone: env.timezone },
       end: { dateTime: event.end, timeZone: env.timezone },
-      attendees: event.attendeeEmails.map(email => ({ email })),
       transparency: 'transparent',
-      sendUpdates: 'all',
     }),
   });
   if (!res.ok) {
@@ -210,4 +219,23 @@ export async function deleteCalendarEvent(eventId: string): Promise<void> {
     method: 'DELETE',
     headers: { Authorization: `Bearer ${token}` },
   });
+}
+
+// Moves an existing viewing event to a new start/end (reschedule). Same no-attendees
+// constraint as createCalendarEvent.
+export async function updateCalendarEventTime(eventId: string, start: string, end: string): Promise<void> {
+  const env = getEnv();
+  const token = await getAccessToken();
+  const res = await fetch(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(env.calendarId)}/events/${eventId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({
+      start: { dateTime: start, timeZone: env.timezone },
+      end: { dateTime: end, timeZone: env.timezone },
+    }),
+  });
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`Calendar Events API error ${res.status}: ${body}`);
+  }
 }

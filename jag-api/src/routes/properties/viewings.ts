@@ -11,7 +11,7 @@ import { withOwnerRLS } from '../../middleware/rls';
 import { propertiesPool } from '../../db/index';
 import { logger } from '../../lib/logger';
 import { ok, err } from '../../lib/response';
-import { getAvailableSlots, createCalendarEvent } from '../../lib/google-calendar';
+import { getAvailableSlots, createCalendarEvent, updateCalendarEventTime } from '../../lib/google-calendar';
 import { sendTemplate } from '../../lib/whatsapp';
 import { BUCKET_PHOTOS, getPresignedGetUrl } from '../../lib/minio';
 import { enqueueNotification } from '../../lib/notifications';
@@ -304,6 +304,18 @@ viewingsRouter.patch('/:id', async (req: Request, res: Response, next: NextFunct
       return viewing;
     });
     if (!row) return void res.status(404).json(err('Viewing not found', 'NOT_FOUND'));
+
+    // Reschedule: keep the calendar event in sync with the new time (non-blocking).
+    if (row.google_event_id && body.scheduled_at) {
+      const newStart = new Date(body.scheduled_at);
+      const newEnd = new Date(newStart.getTime() + parseInt(process.env.GOOGLE_CALENDAR_SLOT_DURATION_MIN ?? '30', 10) * 60_000);
+      try {
+        await updateCalendarEventTime(row.google_event_id, newStart.toISOString(), newEnd.toISOString());
+      } catch (e) {
+        logger.warn({ entity: 'PROPERTIES', action: 'CALENDAR_RESCHEDULE_FAILED', record_id: row.id, error_message: (e as Error).message });
+      }
+    }
+
     res.json(ok(row));
   } catch (e) { next(e); }
 });
@@ -466,7 +478,6 @@ publicScheduleRouter.post('/:token', async (req: Request, res: Response, next: N
         description: `Unit: ${enquiry.unit_number}\nAddress: ${address}\nProspect phone: ${enquiry.prospect_phone}\nJAG Properties`,
         start: slotStart.toISOString(),
         end: slotEnd.toISOString(),
-        attendeeEmails: [process.env.GOOGLE_CALENDAR_ID ?? '', ...(enquiry.prospect_email ? [enquiry.prospect_email] : [])],
       });
     } catch (e) {
       logger.warn({ entity: 'PUBLIC_SCHEDULE', action: 'CALENDAR_EVENT_FAILED', error_message: (e as Error).message });
@@ -508,6 +519,14 @@ publicScheduleRouter.post('/:token', async (req: Request, res: Response, next: N
     } catch (e) {
       logger.warn({ entity: 'PUBLIC_SCHEDULE', action: 'WA_CONFIRM_FAILED', error_message: (e as Error).message });
     }
+
+    // Owner in-app notification — a viewing was just booked; review/confirm or reschedule (non-blocking).
+    void enqueueNotification({
+      tier: 2,
+      title: 'Viewing booked',
+      body: `${enquiry.prospect_name} booked a viewing of ${enquiry.unit_number ?? 'a unit'} for ${slotStart.toLocaleDateString('en-TT')} ${slotStart.toLocaleTimeString('en-TT', { hour: '2-digit', minute: '2-digit' })}.${googleEventId ? '' : ' (Calendar event failed to create — check manually.)'}`,
+      payload: { module: 'PROPERTIES', kind: 'VIEWING', viewing_id: viewing.id },
+    });
 
     res.status(201).json(ok({ viewing, slot_start: slotStart, slot_end: slotEnd }));
   } catch (e) { next(e); }

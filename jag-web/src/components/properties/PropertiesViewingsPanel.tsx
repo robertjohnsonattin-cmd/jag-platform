@@ -16,6 +16,8 @@ export default function PropertiesViewingsPanel() {
   const { t } = useTranslation()
   const qc = useQueryClient()
   const [statusFilter, setStatusFilter] = useState('')
+  const [rescheduleId, setRescheduleId] = useState<string | null>(null)
+  const [rescheduleValue, setRescheduleValue] = useState('')
 
   const { data: viewings = [] } = useQuery({
     queryKey: ['viewings', statusFilter],
@@ -58,7 +60,20 @@ export default function PropertiesViewingsPanel() {
             </div>
             <div className="flex gap-2 mt-3">
               {String(v['status']) === 'SCHEDULED' && (
+                <button onClick={() => patchMut.mutate({ id: String(v['id']), body: { status: 'CONFIRMED' } })}
+                  className="px-3 py-1 text-xs bg-indigo-700 hover:bg-indigo-600 text-white rounded">
+                  {t('tenancy.confirm', 'Confirm')}
+                </button>
+              )}
+              {(String(v['status']) === 'SCHEDULED' || String(v['status']) === 'CONFIRMED') && (
                 <>
+                  <button onClick={() => {
+                    setRescheduleId(String(v['id']))
+                    const raw = v['scheduled_at'] ? String(v['scheduled_at']) : ''
+                    setRescheduleValue(raw ? raw.slice(0, 16) : '')
+                  }} className="px-3 py-1 text-xs bg-yellow-800 hover:bg-yellow-700 text-white rounded">
+                    {t('tenancy.reschedule', 'Suggest Change / Reschedule')}
+                  </button>
                   <button onClick={() => patchMut.mutate({ id: String(v['id']), body: { status: 'COMPLETED' } })}
                     className="px-3 py-1 text-xs bg-green-700 hover:bg-green-600 text-white rounded">
                     {t('tenancy.markCompleted', 'Mark Completed')}
@@ -74,6 +89,28 @@ export default function PropertiesViewingsPanel() {
                 </>
               )}
             </div>
+            {rescheduleId === String(v['id']) && (
+              <div className="flex items-center gap-2 mt-3 bg-slate-900/50 border border-slate-700 rounded p-2">
+                <input type="datetime-local" value={rescheduleValue} onChange={e => setRescheduleValue(e.target.value)}
+                  className="bg-slate-700 border border-slate-600 rounded px-2 py-1 text-sm text-slate-100" />
+                <button
+                  disabled={!rescheduleValue}
+                  onClick={() => {
+                    patchMut.mutate({
+                      id: String(v['id']),
+                      body: { status: 'RESCHEDULED', scheduled_at: new Date(rescheduleValue).toISOString() },
+                    })
+                    setRescheduleId(null)
+                  }}
+                  className="px-3 py-1 text-xs bg-yellow-700 hover:bg-yellow-600 disabled:opacity-50 text-white rounded">
+                  {t('common.save', 'Save')}
+                </button>
+                <button onClick={() => setRescheduleId(null)}
+                  className="px-3 py-1 text-xs bg-slate-600 hover:bg-slate-500 text-white rounded">
+                  {t('common.cancel', 'Cancel')}
+                </button>
+              </div>
+            )}
             {Boolean(v['notes']) && <p className="text-xs text-slate-500 mt-2">{String(v['notes'])}</p>}
           </div>
         ))}
