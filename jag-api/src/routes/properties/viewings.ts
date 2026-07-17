@@ -26,6 +26,14 @@ export const publicScheduleRouter = Router();
 const PUBLIC_LISTING_OWNER_ID =
   process.env['NOTIFY_OWNER_USER_ID'] ?? '95ca3f77-60ba-4a0f-af70-2832b247b525';
 
+// The VM's system clock runs in UTC — toLocaleDateString/toLocaleTimeString without
+// an explicit timeZone render in UTC regardless of the 'en-TT' locale, silently
+// showing the wrong wall-clock time (Trinidad is UTC-4) in WhatsApp messages and
+// in-app notifications. Always format viewing times through these helpers.
+const TT_TZ = 'America/Port_of_Spain';
+function fmtTTDate(d: Date): string { return d.toLocaleDateString('en-TT', { timeZone: TT_TZ }); }
+function fmtTTTime(d: Date): string { return d.toLocaleTimeString('en-TT', { timeZone: TT_TZ, hour: '2-digit', minute: '2-digit' }); }
+
 const IdParam      = z.object({ id: z.string().uuid() });
 const SlugParam    = z.object({ slug: z.string().min(1) });
 const TokenParam   = z.object({ token: z.string().min(1) });
@@ -149,8 +157,8 @@ viewingsRouter.post('/send-reminders', async (req: Request, res: Response, next:
             { type: 'text', text: String(row['prospect_name'] ?? '') },
             { type: 'text', text: String(row['property_name'] ?? '') },
             { type: 'text', text: String(row['unit_number'] ?? '') },
-            { type: 'text', text: new Date(String(row['scheduled_at'])).toLocaleDateString('en-TT') },
-            { type: 'text', text: new Date(String(row['scheduled_at'])).toLocaleTimeString('en-TT', { hour: '2-digit', minute: '2-digit' }) },
+            { type: 'text', text: fmtTTDate(new Date(String(row['scheduled_at']))) },
+            { type: 'text', text: fmtTTTime(new Date(String(row['scheduled_at']))) },
             { type: 'text', text: String(row['address_line1'] ?? '') },
           ]}],
         });
@@ -198,7 +206,7 @@ viewingsRouter.post('/send-reminders-1h', async (req: Request, res: Response, ne
           components: [{ type: 'body', parameters: [
             { type: 'text', text: String(row['prospect_name'] ?? '') },
             { type: 'text', text: String(row['unit_number'] ?? '') },
-            { type: 'text', text: new Date(String(row['scheduled_at'])).toLocaleTimeString('en-TT', { hour: '2-digit', minute: '2-digit' }) },
+            { type: 'text', text: fmtTTTime(new Date(String(row['scheduled_at']))) },
             { type: 'text', text: String(row['address_line1'] ?? '') },
             { type: 'text', text: process.env.JAG_MANAGER_PHONE ?? '' },
           ]}],
@@ -505,8 +513,8 @@ publicScheduleRouter.post('/:token', async (req: Request, res: Response, next: N
             parameters: [
               { type: 'text', text: enquiry.prospect_name },
               { type: 'text', text: address },
-              { type: 'text', text: slotStart.toLocaleDateString('en-TT') },
-              { type: 'text', text: slotStart.toLocaleTimeString('en-TT', { hour: '2-digit', minute: '2-digit' }) },
+              { type: 'text', text: fmtTTDate(slotStart) },
+              { type: 'text', text: fmtTTTime(slotStart) },
             ],
           },
           // URL button is https://maps.google.com/?q={{1}} — no GPS coords stored,
@@ -524,7 +532,7 @@ publicScheduleRouter.post('/:token', async (req: Request, res: Response, next: N
     void enqueueNotification({
       tier: 2,
       title: 'Viewing booked',
-      body: `${enquiry.prospect_name} booked a viewing of ${enquiry.unit_number ?? 'a unit'} for ${slotStart.toLocaleDateString('en-TT')} ${slotStart.toLocaleTimeString('en-TT', { hour: '2-digit', minute: '2-digit' })}.${googleEventId ? '' : ' (Calendar event failed to create — check manually.)'}`,
+      body: `${enquiry.prospect_name} booked a viewing of ${enquiry.unit_number ?? 'a unit'} for ${fmtTTDate(slotStart)} ${fmtTTTime(slotStart)}.${googleEventId ? '' : ' (Calendar event failed to create — check manually.)'}`,
       payload: { module: 'PROPERTIES', kind: 'VIEWING', viewing_id: viewing.id },
     });
 
