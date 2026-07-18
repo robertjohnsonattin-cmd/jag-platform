@@ -50,6 +50,8 @@ export const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
   OTHER:         'Other',
 }
 
+// Mirrors jag-web/src/lib/entities.ts ENTITY_NAMES (minus the Consolidated pseudo-entity).
+// Update both places if a new entity is added.
 export const ENTITY_OPTIONS = [
   { id: '00000000-0000-0000-0001-000000000008', name: 'Personal — Robert' },
   { id: '00000000-0000-0000-0001-000000000001', name: 'JAG Holdings' },
@@ -59,6 +61,11 @@ export const ENTITY_OPTIONS = [
   { id: '00000000-0000-0000-0001-000000000005', name: 'JAG Finance' },
   { id: '00000000-0000-0000-0001-000000000006', name: 'DragonBridge' },
   { id: '00000000-0000-0000-0001-000000000007', name: 'NLCB' },
+  { id: '00000000-0000-0000-0001-000000000009', name: 'Isabella Johnson-Attin' },
+  { id: '00000000-0000-0000-0001-000000000010', name: 'Phillip Ajack Johnson-Attin' },
+  { id: '00000000-0000-0000-0001-000000000011', name: 'Brian Johnson-Attin' },
+  { id: '00000000-0000-0000-0001-000000000012', name: 'Zhanghua Chang' },
+  { id: '00000000-0000-0000-0001-000000000013', name: 'Theresa Johnson-Attin' },
 ] as const
 
 export const CURRENCIES = ['TTD', 'USD', 'CNY', 'EUR', 'GBP'] as const

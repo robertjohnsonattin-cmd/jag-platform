@@ -19,6 +19,13 @@ export function entityName(id: string): string {
   return ENTITY_NAMES[id] ?? id.slice(0, 8)
 }
 
+const CONSOLIDATED_ENTITY_ID = '00000000-0000-0000-0000-000000000000'
+
+// Every real (non-Consolidated) entity, for pickers that assign ownership (e.g. Expenses).
+export const ENTITY_OPTIONS = Object.entries(ENTITY_NAMES)
+  .filter(([id]) => id !== CONSOLIDATED_ENTITY_ID)
+  .map(([id, name]) => ({ id, name }))
+
 export function fmtTTD(value: string | number | null | undefined): string {
   if (value === null || value === undefined) return '—'
   const n = typeof value === 'string' ? parseFloat(value) : value

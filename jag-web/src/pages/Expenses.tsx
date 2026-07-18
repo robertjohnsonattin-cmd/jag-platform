@@ -7,18 +7,9 @@ import { imsApi } from '../api/ims'
 import { financeApi } from '../api/finance'
 import { propertiesApi } from '../api/properties'
 import { familyApi } from '../api/family'
-import { fmtTTD, fmtDate, entityName } from '../lib/entities'
+import { fmtTTD, fmtDate, entityName, ENTITY_OPTIONS } from '../lib/entities'
 import type { Expense } from '../types/expenses'
 import ConfirmDeleteModal from '../components/ui/ConfirmDeleteModal'
-
-const ENTITY_OPTIONS = [
-  { id: '00000000-0000-0000-0001-000000000001', name: 'JAG Holdings' },
-  { id: '00000000-0000-0000-0001-000000000002', name: 'JABCO' },
-  { id: '00000000-0000-0000-0001-000000000003', name: 'JAG Properties' },
-  { id: '00000000-0000-0000-0001-000000000004', name: 'JAG Entertainment' },
-  { id: '00000000-0000-0000-0001-000000000005', name: 'JAG Finance' },
-  { id: '00000000-0000-0000-0001-000000000006', name: 'DragonBridge' },
-]
 
 const CATEGORIES = [
   'PERSONAL_EXPENSE','GROCERIES','DINING','TRANSPORT','FUEL',
