@@ -20,6 +20,13 @@ export interface WaInteractiveMessage {
   buttons: Array<{ id: string; title: string }>;
 }
 
+export interface WaListMessage {
+  to: string;
+  body: string;
+  buttonText: string;
+  rows: Array<{ id: string; title: string; description?: string }>;
+}
+
 async function callMeta(endpoint: string, payload: unknown): Promise<unknown> {
   const token = process.env.WHATSAPP_ACCESS_TOKEN;
   const phoneId = process.env.WHATSAPP_PHONE_NUMBER_ID;
@@ -74,6 +81,24 @@ export async function sendInteractive({ to, body, buttons }: WaInteractiveMessag
       body: { text: body },
       action: {
         buttons: buttons.map(b => ({ type: 'reply', reply: { id: b.id, title: b.title } })),
+      },
+    },
+  });
+}
+
+// WhatsApp list messages support up to 10 rows in a single section — used when
+// more units are LISTED simultaneously than the 3-button interactive limit allows.
+export async function sendList({ to, body, buttonText, rows }: WaListMessage): Promise<unknown> {
+  return callMeta('messages', {
+    messaging_product: 'whatsapp',
+    to,
+    type: 'interactive',
+    interactive: {
+      type: 'list',
+      body: { text: body },
+      action: {
+        button: buttonText,
+        sections: [{ title: 'Available Units', rows }],
       },
     },
   });

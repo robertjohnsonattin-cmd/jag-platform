@@ -9,7 +9,7 @@ import { Router, type Request, type Response, type NextFunction } from 'express'
 import { propertiesPool } from '../../db/index';
 import { logger } from '../../lib/logger';
 import { withOwnerRLS } from '../../middleware/rls';
-import { sendTemplate, sendInteractive, sendText, verifyWebhookSignature } from '../../lib/whatsapp';
+import { sendTemplate, sendList, sendText, verifyWebhookSignature } from '../../lib/whatsapp';
 import { enqueueNotification } from '../../lib/notifications';
 
 export const whatsappWebhookRouter = Router();
@@ -129,6 +129,12 @@ function extractButtonReply(msg: Record<string, unknown>): { id: string; title: 
   if (buttonReply?.['id']) {
     return { id: String(buttonReply['id']), title: String(buttonReply['title'] ?? '') };
   }
+  // A tap on a list-message row (used when 2+ units are LISTED at once —
+  // see buildAvailabilityReply) arrives as interactive.list_reply, not button_reply.
+  const listReply = interactive?.['list_reply'] as Record<string, unknown> | undefined;
+  if (listReply?.['id']) {
+    return { id: String(listReply['id']), title: String(listReply['title'] ?? '') };
+  }
   // Older "quick reply" template buttons arrive as a `button` object instead
   // of `interactive.button_reply`.
   const legacyButton = msg['button'] as Record<string, unknown> | undefined;
@@ -160,6 +166,25 @@ async function logOutbound(
     [JAG_OWNER_ID, waMessageId, process.env.WHATSAPP_PHONE_NUMBER_ID ?? 'JAG', opts.to,
      opts.messageType, opts.body, opts.enquiryId, opts.ticketId],
   );
+}
+
+type ListedUnitRow = {
+  id: string; booking_slug: string; rent_amount: string | null;
+  suggested_rent_recommended_ttd: string | null; address_line1: string | null; city: string | null;
+};
+
+// WhatsApp list-row limits: title 24 chars, description 72 chars, id 200 chars.
+function truncate(s: string, max: number): string { return s.length > max ? s.slice(0, max - 1) + '…' : s; }
+
+function unitAreaLabel(u: ListedUnitRow): string { return u.city || u.address_line1 || 'Trinidad'; }
+function unitRent(u: ListedUnitRow): string { return u.rent_amount ?? u.suggested_rent_recommended_ttd ?? '—'; }
+
+function availabilityReplyBody(u: ListedUnitRow): string {
+  const bookingBase = process.env.PUBLIC_BOOKING_BASE_URL ?? 'https://jagcorporate.com/book';
+  const managerPhone = process.env.JAG_MANAGER_PHONE ?? '868-753-2637';
+  return `Good day! Yes, it's available. TTD $${unitRent(u)}/month in ${unitAreaLabel(u)}.\n\n`
+    + `You can book a viewing through the link below, alternatively you can call ${managerPhone} for more information.\n\n`
+    + `${bookingBase}/${u.booking_slug}\n\nThanks,\nRobert`;
 }
 
 async function processInboundMessage(msg: Record<string, unknown>): Promise<void> {
@@ -238,7 +263,33 @@ async function processInboundMessage(msg: Record<string, unknown>): Promise<void
 
     if (!body) return;
 
-    // Step 3 — button-reply intents (handled before keyword classification —
+    // Step 3 — a tap on one of the availability-list rows (sent when 2+ units
+    // are LISTED at once — see the greeting below). Links this enquiry to the
+    // chosen unit and sends the same instant availability reply the single-
+    // listing case gets directly.
+    if (buttonReply?.id?.startsWith('unit_')) {
+      const unitId = buttonReply.id.slice('unit_'.length);
+      const { rows: [unit] } = await client.query<ListedUnitRow>(
+        `SELECT u.id, u.booking_slug, u.rent_amount, u.suggested_rent_recommended_ttd,
+                p.address_line1, p.city
+         FROM prop_units u LEFT JOIN prop_properties p ON p.id = u.property_id
+         WHERE u.id = $1 AND u.listing_status = 'LISTED' AND u.booking_slug IS NOT NULL`,
+        [unitId],
+      );
+      if (unit) {
+        await client.query(`UPDATE prop_enquiries SET unit_id = $1 WHERE id = $2`, [unit.id, enquiryId]);
+        const replyBody = availabilityReplyBody(unit);
+        const result = await sendText({ to: from, body: replyBody }).catch(() => null);
+        await logOutbound(client, { to: from, messageType: 'TEXT', body: replyBody, enquiryId, ticketId, result });
+      } else {
+        const replyBody = `Sorry, that unit is no longer available. Let us know what area/property you're asking about and we'll help from there.`;
+        const result = await sendText({ to: from, body: replyBody }).catch(() => null);
+        await logOutbound(client, { to: from, messageType: 'TEXT', body: replyBody, enquiryId, ticketId, result });
+      }
+      return;
+    }
+
+    // Step 3b — button-reply intents (handled before keyword classification —
     // a button title like "Book a Viewing" wouldn't match any P1/P2/payment/
     // renewal keyword, so without this branch a tap just fell through to the
     // generic reply below and re-sent the same greeting menu instead of
@@ -338,18 +389,44 @@ async function processInboundMessage(msg: Record<string, unknown>): Promise<void
         `SELECT 1 FROM prop_whatsapp_messages WHERE enquiry_id = $1 AND direction = 'OUTBOUND' LIMIT 1`,
         [enquiryId],
       );
-      const greetingBody = `Hi! Thank you for your interest. How can we help?`;
       if (!priorOutbound) {
         try {
-          const result = await sendInteractive({
-            to: from,
-            body: greetingBody,
-            buttons: [
-              { id: 'book_viewing', title: 'Book a Viewing' },
-              { id: 'ask_question', title: 'Ask a Question' },
-            ],
-          });
-          await logOutbound(client, { to: from, messageType: 'INTERACTIVE', body: greetingBody, enquiryId, ticketId, result });
+          const { rows: listedUnits } = await client.query<ListedUnitRow>(
+            `SELECT u.id, u.booking_slug, u.rent_amount, u.suggested_rent_recommended_ttd,
+                    p.address_line1, p.city
+             FROM prop_units u LEFT JOIN prop_properties p ON p.id = u.property_id
+             WHERE u.listing_status = 'LISTED' AND u.booking_slug IS NOT NULL
+             ORDER BY u.listed_at DESC LIMIT 10`,
+          );
+
+          if (listedUnits.length === 0) {
+            // No current listing to reference — fall back to asking directly.
+            const replyBody = `Hi! Thanks for your interest. Let us know which property or area you're asking about and we'll help from there.`;
+            const result = await sendText({ to: from, body: replyBody }).catch(() => null);
+            await logOutbound(client, { to: from, messageType: 'TEXT', body: replyBody, enquiryId, ticketId, result });
+          } else if (listedUnits.length === 1) {
+            // Only one active listing — no ambiguity, answer instantly.
+            const unit = listedUnits[0];
+            await client.query(`UPDATE prop_enquiries SET unit_id = $1 WHERE id = $2`, [unit.id, enquiryId]);
+            const replyBody = availabilityReplyBody(unit);
+            const result = await sendText({ to: from, body: replyBody }).catch(() => null);
+            await logOutbound(client, { to: from, messageType: 'TEXT', body: replyBody, enquiryId, ticketId, result });
+          } else {
+            // Multiple active listings — WhatsApp has no way to know which ad
+            // the prospect saw, so ask which one via a list message (up to 10 rows).
+            const greetingBody = `Hi! Thanks for your interest — we currently have a few units available. Which one are you asking about?`;
+            const result = await sendList({
+              to: from,
+              body: greetingBody,
+              buttonText: 'View Units',
+              rows: listedUnits.map(u => ({
+                id: `unit_${u.id}`,
+                title: truncate(unitAreaLabel(u), 24),
+                description: truncate(`TTD $${unitRent(u)}/month`, 72),
+              })),
+            });
+            await logOutbound(client, { to: from, messageType: 'INTERACTIVE', body: greetingBody, enquiryId, ticketId, result });
+          }
         } catch { /* best effort */ }
       } else {
         const replyBody = `Got it — we'll get back to you shortly.`;
