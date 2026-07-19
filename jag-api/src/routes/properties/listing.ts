@@ -490,6 +490,15 @@ const ListingInfoSchema = z.object({
   rent_amount:           z.number().positive().optional(),
 }).strict();
 
+// Default suffix appended to every listing description — Facebook Marketplace only
+// allows posting rentals from a personal profile (no Page/Messenger automation
+// possible), so this gives prospects a path to the automated WhatsApp enquiry flow.
+const WHATSAPP_CONTACT_LINE = 'For a faster response, WhatsApp us directly: 868-277-3726 (Robert).';
+function ensureWhatsappSuffix(description: string): string {
+  if (description.includes(WHATSAPP_CONTACT_LINE)) return description;
+  return `${description.trimEnd()}\n\n${WHATSAPP_CONTACT_LINE}`;
+}
+
 // GET /properties/units/:id/photos
 listingRouter.get('/photos', async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -620,6 +629,10 @@ listingRouter.patch('/listing-info', async (req: Request, res: Response, next: N
     const { id } = IdParam.parse(req.params);
     const body = ListingInfoSchema.parse(req.body);
     if (Object.keys(body).length === 0) return void res.status(400).json(err('No fields to update', 'VALIDATION_ERROR'));
+
+    if (body.listing_description) {
+      body.listing_description = ensureWhatsappSuffix(body.listing_description);
+    }
 
     const sets: string[] = [];
     const vals: unknown[] = [];
