@@ -20,6 +20,14 @@ import { enqueueNotification } from '../../lib/notifications';
 export const maintenanceTicketsRouter = Router();
 export const contractorsRouter        = Router();
 
+// The VM's system clock runs in UTC — toLocaleString without an explicit timeZone
+// renders in UTC regardless of the 'en-TT' locale, silently showing the wrong
+// wall-clock time (Trinidad is UTC-4) in WhatsApp messages. See same fix in
+// routes/properties/viewings.ts.
+function fmtTTDateTime(d: Date): string {
+  return d.toLocaleString('en-TT', { timeZone: 'America/Port_of_Spain' });
+}
+
 const IdParam = z.object({ id: z.string().uuid() });
 
 const CategoryEnum  = z.enum([
@@ -367,7 +375,7 @@ maintenanceTicketsRouter.patch('/:id', async (req: Request, res: Response, next:
       });
       if (contractor) {
         const visitTime = body.estimated_visit_at
-          ? new Date(String(body.estimated_visit_at)).toLocaleString('en-TT')
+          ? fmtTTDateTime(new Date(String(body.estimated_visit_at)))
           : 'To be confirmed';
         sendTemplate({
           to: String(row.reported_by_phone),
