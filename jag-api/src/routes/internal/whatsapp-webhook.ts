@@ -328,10 +328,16 @@ async function processInboundMessage(msg: Record<string, unknown>): Promise<void
     // current place", "you sent me this number") and get silently swallowed by the
     // maintenance/payment/renewal branches below (which do nothing for non-tenants),
     // instead of reaching the availability-reply logic in the final else branch.
+    // prop_lease_agreements has no tenant_phone column — phone lives on
+    // prop_property_tenants, joined via tenant_id. This exact wrong-column
+    // query pre-existed in the maintenance-ticket branch below (silently
+    // erroring out and swallowing the message whenever it fired) before this
+    // fix; found while testing the new availability auto-reply.
     const { rows: [activeLease] } = await client.query(
       `SELECT u.id FROM prop_lease_agreements la
        JOIN prop_units u ON u.id = la.unit_id
-       WHERE la.tenant_phone = $1 AND la.status = 'ACTIVE' LIMIT 1`,
+       JOIN prop_property_tenants pt ON pt.id = la.tenant_id
+       WHERE pt.phone = $1 AND la.status = 'ACTIVE' LIMIT 1`,
       [from],
     );
     const lower = body.toLowerCase();
