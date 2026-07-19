@@ -322,11 +322,22 @@ async function processInboundMessage(msg: Record<string, unknown>): Promise<void
       return;
     }
 
-    // Step 4 — intent classification (keyword-based; Ollama optional for future)
+    // Step 4 — intent classification (keyword-based; Ollama optional for future).
+    // Gated on the sender being a matched active tenant — without this, a brand-new
+    // prospect's first message could contain an overlapping word ("I'm leaving my
+    // current place", "you sent me this number") and get silently swallowed by the
+    // maintenance/payment/renewal branches below (which do nothing for non-tenants),
+    // instead of reaching the availability-reply logic in the final else branch.
+    const { rows: [activeLease] } = await client.query(
+      `SELECT u.id FROM prop_lease_agreements la
+       JOIN prop_units u ON u.id = la.unit_id
+       WHERE la.tenant_phone = $1 AND la.status = 'ACTIVE' LIMIT 1`,
+      [from],
+    );
     const lower = body.toLowerCase();
-    const isMaintenanceKw = [...P1_KEYWORDS, ...P2_KEYWORDS].some(k => lower.includes(k));
-    const isPaymentKw     = ['paid','payment','transferred','sent'].some(k => lower.includes(k));
-    const isRenewalKw     = ['renew','staying','leaving','vacating','extend'].some(k => lower.includes(k));
+    const isMaintenanceKw = Boolean(activeLease) && [...P1_KEYWORDS, ...P2_KEYWORDS].some(k => lower.includes(k));
+    const isPaymentKw     = Boolean(activeLease) && ['paid','payment','transferred','sent'].some(k => lower.includes(k));
+    const isRenewalKw     = Boolean(activeLease) && ['renew','staying','leaving','vacating','extend'].some(k => lower.includes(k));
 
     if (isMaintenanceKw) {
       // Auto-create maintenance ticket
@@ -339,13 +350,7 @@ async function processInboundMessage(msg: Record<string, unknown>): Promise<void
       );
       const seq       = String(parseInt(cnt.count) + 1).padStart(4, '0');
       const ticketRef = `MNT-${new Date().getFullYear()}-${seq}`;
-
-      const { rows: [unit] } = await client.query(
-        `SELECT u.id FROM prop_lease_agreements la
-         JOIN prop_units u ON u.id = la.unit_id
-         WHERE la.tenant_phone = $1 AND la.status = 'ACTIVE' LIMIT 1`,
-        [from],
-      );
+      const unit = activeLease;
 
       if (unit) {
         const { rows: [ticket] } = await client.query(
