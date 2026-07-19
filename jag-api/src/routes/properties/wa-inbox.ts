@@ -4,7 +4,7 @@
 // POST /api/v1/properties/wa-inbox/:phone/log         — log call / note
 //
 // The inbox is a unified view of:
-//   prop_wa_messages (WA API messages, INBOUND + OUTBOUND)
+//   prop_whatsapp_messages (WA API messages, INBOUND + OUTBOUND)
 //   prop_contact_log (manual calls, notes, emails, in-person visits)
 // keyed on contact phone number
 
@@ -43,7 +43,7 @@ waInboxRouter.get('/', async (req: Request, res: Response, next: NextFunction) =
         `WITH thread_summary AS (
            SELECT from_number AS phone, MAX(created_at) AS last_at,
                   COUNT(*) FILTER (WHERE direction = 'INBOUND' AND read_at IS NULL) AS unread
-           FROM prop_wa_messages
+           FROM prop_whatsapp_messages
            WHERE owner_id = $1
            GROUP BY from_number
            UNION ALL
@@ -78,7 +78,7 @@ waInboxRouter.get('/:phone', async (req: Request, res: Response, next: NextFunct
         `SELECT id, direction, message_type, body, template_name, delivery_status,
                 created_at, read_at,
                 'WA_MESSAGE' AS entry_type
-         FROM prop_wa_messages
+         FROM prop_whatsapp_messages
          WHERE owner_id = $1 AND (from_number = $2 OR to_number = $2)
          ORDER BY created_at DESC LIMIT 200`,
         [ownerId, phone],
@@ -107,7 +107,7 @@ waInboxRouter.get('/:phone', async (req: Request, res: Response, next: NextFunct
 
       // Mark unread inbound messages as read
       await client.query(
-        `UPDATE prop_wa_messages SET read_at = NOW()
+        `UPDATE prop_whatsapp_messages SET read_at = NOW()
          WHERE owner_id = $1 AND from_number = $2 AND direction = 'INBOUND' AND read_at IS NULL`,
         [ownerId, phone],
       );
@@ -131,10 +131,10 @@ waInboxRouter.post('/:phone/reply', async (req: Request, res: Response, next: Ne
 
     await withOwnerRLS(propertiesPool, ownerId, async client => {
       await client.query(
-        `INSERT INTO prop_wa_messages
+        `INSERT INTO prop_whatsapp_messages
            (owner_id, direction, to_number, from_number, message_type, body, delivery_status, sent_at)
          VALUES ($1,'OUTBOUND',$2,$3,'TEXT',$4,'SENT',NOW())`,
-        [ownerId, phone, process.env.WHATSAPP_BUSINESS_PHONE ?? '', msgBody],
+        [ownerId, phone, process.env.WHATSAPP_PHONE_NUMBER_ID ?? 'JAG', msgBody],
       );
     });
 
