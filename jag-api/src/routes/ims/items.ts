@@ -9,6 +9,7 @@
 
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import multer from 'multer';
+import { Jimp } from 'jimp';
 import { z } from 'zod';
 import { withTenantRLS, withOwnerRLS, type RLSContext } from '../../middleware/rls';
 import { commercialPool, corePool, familyPool } from '../../db/index';
@@ -27,6 +28,26 @@ const photoUpload = multer({
     cb(null, ['image/jpeg', 'image/png', 'image/webp'].includes(file.mimetype));
   },
 });
+
+const PHOTO_MAX_EDGE = 1600;   // long edge in px -- matches digital-os/tools/inventory_import.py's bulk-import resize
+const PHOTO_QUALITY  = 85;     // JPEG quality -- same
+
+// Downscale to PHOTO_MAX_EDGE on the long edge (only if larger) and always
+// re-encode as JPEG, so storage size is bounded and format is consistent
+// regardless of what the browser/camera sent. Pure-JS (jimp) deliberately --
+// see the Dockerfile note: prod node_modules are built on the Windows host
+// and copied into the Alpine container as-is, so a native-binding library
+// (e.g. sharp) built there would carry the wrong platform binary and break
+// silently inside the container.
+async function normalizePhoto(buffer: Buffer): Promise<{ buffer: Buffer; mimetype: string }> {
+  const img = await Jimp.read(buffer);
+  if (Math.max(img.width, img.height) > PHOTO_MAX_EDGE) {
+    if (img.width >= img.height) img.resize({ w: PHOTO_MAX_EDGE });
+    else img.resize({ h: PHOTO_MAX_EDGE });
+  }
+  const out = await img.getBuffer('image/jpeg', { quality: PHOTO_QUALITY });
+  return { buffer: out, mimetype: 'image/jpeg' };
+}
 
 export const imsItemsRouter = Router();
 
@@ -490,12 +511,19 @@ imsItemsRouter.post(
       const { userId, tenantId, ownerId } = req.rlsCtx;
       const isPrimary = req.body?.is_primary === 'true';
 
-      const key = mediaObjectKey(ownerId, 'ims', id, req.file.originalname);
+      let normalized: { buffer: Buffer; mimetype: string };
+      try {
+        normalized = await normalizePhoto(req.file.buffer);
+      } catch {
+        err(res, 422, 'INVALID_IMAGE', 'Could not read the uploaded image.'); return;
+      }
+      const jpegName = req.file.originalname.replace(/\.[^.]+$/, '') + '.jpg';
+      const key = mediaObjectKey(ownerId, 'ims', id, jpegName);
 
       await ensureBucket(BUCKET_PHOTOS);
       await minioClient.putObject(
-        BUCKET_PHOTOS, key, req.file.buffer, req.file.size,
-        { 'Content-Type': req.file.mimetype },
+        BUCKET_PHOTOS, key, normalized.buffer, normalized.buffer.length,
+        { 'Content-Type': normalized.mimetype },
       );
 
       const client = await commercialPool.connect();

@@ -96,6 +96,20 @@ if [[ $FRONTEND_ONLY -eq 0 ]]; then
   $SCP_CMD -r "$SCRIPT_DIR/jag-api/dist/." "$VM_HOST:/opt/jag/jag-api/dist/" || fail "SCP of dist/ failed."
   info "dist/ uploaded."
 
+  # Regression 2026-07-20: this step was missing entirely. The Dockerfile's
+  # `COPY prod_modules/node_modules` builds from whatever is already sitting
+  # in /opt/jag/jag-api/prod_modules/ on the VM -- a stale, independent copy
+  # that nothing else here updates. Adding a new backend dependency (jimp)
+  # shipped a dist/ that required it while the container's node_modules
+  # didn't have it, causing an immediate crash-loop and a ~1h production
+  # outage. Always resync node_modules alongside dist/ so the two can never
+  # drift apart again.
+  info "Step 4a — Rebuilding prod_modules/ and uploading to VM…"
+  ( cd "$SCRIPT_DIR/jag-api" && npm run prod-install ) || fail "prod-install failed."
+  $SCP_CMD -r "$SCRIPT_DIR/jag-api/prod_modules/node_modules" "$VM_HOST:/opt/jag/jag-api/prod_modules/" \
+    || fail "SCP of prod_modules/node_modules failed."
+  info "prod_modules/node_modules uploaded."
+
   info "Step 4b — Rebuilding and restarting API container…"
   $SSH_CMD "$VM_HOST" "
     set -e

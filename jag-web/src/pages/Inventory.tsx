@@ -8,6 +8,7 @@ import { glApi } from '../api/gl'
 import { tenantApi } from '../api/client'
 import ConfirmDeleteModal from '../components/ui/ConfirmDeleteModal'
 import AuthedImg from '../components/AuthedImg'
+import PhotoLightbox from '../components/PhotoLightbox'
 import { VehicleGpsTab, FleetMapModal, TrackersModal } from '../components/ims/VehicleGps'
 import type {
   Item, ItemDetail,
@@ -1457,6 +1458,7 @@ function PhotosTab({ itemId }: { itemId: string }) {
   const fileRef = useCallback((node: HTMLInputElement | null) => { if (node) node.value = '' }, [])
   const [uploading, setUploading] = useState(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
+  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null)
 
   const { data: photos = [], isLoading } = useQuery({
     queryKey: ['ims-photos', itemId],
@@ -1502,8 +1504,12 @@ function PhotosTab({ itemId }: { itemId: string }) {
       )}
 
       <div className="grid grid-cols-2 gap-2">
-        {photos.map(p => (
-          <div key={p.id} className="relative group rounded-lg overflow-hidden bg-slate-700 aspect-square">
+        {photos.map((p, i) => (
+          <div
+            key={p.id}
+            className="relative group rounded-lg overflow-hidden bg-slate-700 aspect-square cursor-pointer"
+            onClick={() => setLightboxIndex(i)}
+          >
             <AuthedImg
               path={imsApi.photoDownloadUrl(itemId, p.id)}
               alt={t('inv.itemPhoto')}
@@ -1513,13 +1519,22 @@ function PhotosTab({ itemId }: { itemId: string }) {
               <span className="absolute top-1 left-1 bg-orange-600 text-white text-xs px-1.5 py-0.5 rounded">{t('inv.primaryLabel')}</span>
             )}
             <button
-              onClick={() => deletePhoto(p.id)}
+              onClick={(e) => { e.stopPropagation(); deletePhoto(p.id) }}
               className="absolute top-1 right-1 bg-black/60 text-white rounded-full w-6 h-6 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-600"
               title={t('inv.deletePhoto')}
             >&times;</button>
           </div>
         ))}
       </div>
+
+      {lightboxIndex !== null && (
+        <PhotoLightbox
+          paths={photos.map(p => imsApi.photoDownloadUrl(itemId, p.id))}
+          index={lightboxIndex}
+          onClose={() => setLightboxIndex(null)}
+          onIndexChange={setLightboxIndex}
+        />
+      )}
     </div>
   )
 }
@@ -3246,6 +3261,7 @@ function VehiclePhotosTab({ itemId }: { itemId: string }) {
   const qc = useQueryClient()
   const inputRef = useRef<HTMLInputElement>(null)
   const [uploading, setUploading] = useState(false)
+  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null)
 
   const { data: photos = [], isLoading } = useQuery({
     queryKey: ['item-photos', itemId],
@@ -3287,8 +3303,12 @@ function VehiclePhotosTab({ itemId }: { itemId: string }) {
         </div>
       ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-          {photos.map(photo => (
-            <div key={photo.id} className="relative group rounded-lg overflow-hidden border border-slate-700 bg-slate-900 aspect-video">
+          {photos.map((photo, i) => (
+            <div
+              key={photo.id}
+              className="relative group rounded-lg overflow-hidden border border-slate-700 bg-slate-900 aspect-video cursor-pointer"
+              onClick={() => setLightboxIndex(i)}
+            >
               <AuthedImg
                 path={imsApi.photoDownloadUrl(itemId, photo.id)}
                 alt=""
@@ -3298,12 +3318,21 @@ function VehiclePhotosTab({ itemId }: { itemId: string }) {
                 <span className="absolute top-1 left-1 px-1.5 py-0.5 bg-orange-600 text-white text-xs rounded">Primary</span>
               )}
               <button
-                onClick={() => handleDelete(photo.id)}
+                onClick={(e) => { e.stopPropagation(); handleDelete(photo.id) }}
                 className="absolute top-1 right-1 w-6 h-6 bg-red-700 hover:bg-red-600 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"
               >×</button>
             </div>
           ))}
         </div>
+      )}
+
+      {lightboxIndex !== null && (
+        <PhotoLightbox
+          paths={photos.map(p => imsApi.photoDownloadUrl(itemId, p.id))}
+          index={lightboxIndex}
+          onClose={() => setLightboxIndex(null)}
+          onIndexChange={setLightboxIndex}
+        />
       )}
     </div>
   )
