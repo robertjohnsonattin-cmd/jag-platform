@@ -20,6 +20,7 @@ const PayMethodEnum = z.enum(['BANK_TRANSFER','CHEQUE','CASH']);
 const CreateDepositSchema = z.object({
   unit_id:           z.string().uuid(),
   lease_id:          z.string().uuid().optional(),
+  application_id:    z.string().uuid().optional(),
   tenant_name:       z.string().min(1).max(200),
   amount_ttd:        z.number().positive(),
   months_equivalent: z.number().positive().optional(),
@@ -48,10 +49,12 @@ depositsRouter.get('/', async (req: Request, res: Response, next: NextFunction) 
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
 
     const unitId = req.query['unit_id'] as string | undefined;
+    const tenantId = req.query['tenant_id'] as string | undefined;
     const rows = await withOwnerRLS(propertiesPool, ownerId, async client => {
       const conds: string[] = [];
       const vals: unknown[] = [ownerId];
       if (unitId) { vals.push(unitId); conds.push(`d.unit_id = $${vals.length}`); }
+      if (tenantId) { vals.push(tenantId); conds.push(`d.tenant_id = $${vals.length}`); }
       const where = conds.length ? ' AND ' + conds.join(' AND ') : '';
       const { rows: r } = await client.query(
         `SELECT d.*, u.unit_number, p.name AS property_name
@@ -74,46 +77,71 @@ depositsRouter.post('/', async (req: Request, res: Response, next: NextFunction)
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
     const body = CreateDepositSchema.parse(req.body);
 
-    const row = await withOwnerRLS(propertiesPool, ownerId, async client => {
+    const inserted = await withOwnerRLS(propertiesPool, ownerId, async client => {
       const { rows: [cnt] } = await client.query(
         `SELECT COUNT(*) FROM prop_deposits WHERE owner_id = $1`, [ownerId],
       );
       const receiptNumber = `DEP-${new Date().getFullYear()}-${padSeq(parseInt(cnt.count) + 1)}`;
 
+      // A deposit is often taken right after an application is APPROVED, before
+      // any lease exists. If a lease_id was given (older flow / retroactive entry),
+      // resolve tenant_id from it immediately rather than waiting on the lease
+      // backfill in POST /properties/:propertyId/leases. If only application_id
+      // was given, tenant_id stays null until create-tenant runs (see applications.ts).
+      let tenantId: string | null = null;
+      if (body.lease_id) {
+        const { rows: [la] } = await client.query(
+          `SELECT tenant_id FROM prop_lease_agreements WHERE id = $1`, [body.lease_id],
+        );
+        tenantId = la?.tenant_id ?? null;
+      }
+
+      const { rows: unitRows } = await client.query(`SELECT unit_number FROM prop_units WHERE id = $1`, [body.unit_id]);
+
       const { rows } = await client.query(
-        `INSERT INTO prop_deposits (owner_id, unit_id, lease_id, tenant_name, amount_ttd, months_equivalent,
-           payment_method, received_date, reference_bank, reference_number, held_in_account,
-           receipt_number, idempotency_key)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,
-        [ownerId, body.unit_id, body.lease_id ?? null, body.tenant_name, body.amount_ttd,
-         body.months_equivalent ?? null, body.payment_method ?? null, body.received_date,
+        `INSERT INTO prop_deposits (owner_id, unit_id, lease_id, application_id, tenant_id, tenant_name,
+           amount_ttd, months_equivalent, payment_method, received_date, reference_bank, reference_number,
+           held_in_account, receipt_number, idempotency_key)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING *`,
+        [ownerId, body.unit_id, body.lease_id ?? null, body.application_id ?? null, tenantId, body.tenant_name,
+         body.amount_ttd, body.months_equivalent ?? null, body.payment_method ?? null, body.received_date,
          body.reference_bank ?? null, body.reference_number ?? null, body.held_in_account ?? null,
          receiptNumber, body.idempotency_key],
       );
-      return rows[0];
+      return { row: rows[0], unitNumber: unitRows[0]?.unit_number as string | undefined };
     });
+    const row = inserted.row;
     logger.info({ entity: 'PROPERTIES', action: 'DEPOSIT_RECORDED', record_id: row.id, user_id: ownerId });
 
-    // JAG_ONB_001 — deposit receipt to tenant
+    // JAG_ONB_001 — deposit receipt to tenant. Try the application first (name/phone
+    // are on file the moment it's APPROVED — no lease required), then fall back to
+    // an active lease on the unit for deposits recorded the older way.
     if (body.payment_method) {
-      const phone = await withOwnerRLS(propertiesPool, ownerId, async client => {
+      const recipient = await withOwnerRLS(propertiesPool, ownerId, async client => {
+        if (body.application_id) {
+          const { rows: [app] } = await client.query(
+            `SELECT phone AS tenant_phone, full_name AS tenant_name FROM prop_applications WHERE id = $1`,
+            [body.application_id],
+          );
+          if (app?.tenant_phone) return app;
+        }
         const { rows: [la] } = await client.query(
-          `SELECT la.tenant_phone, la.tenant_name FROM prop_lease_agreements la
-           WHERE la.unit_id = $1 AND la.status = 'ACTIVE' LIMIT 1`,
+          `SELECT tenant_phone, tenant_name FROM prop_lease_agreements
+           WHERE unit_id = $1 AND status = 'ACTIVE' LIMIT 1`,
           [body.unit_id],
         );
         return la ?? null;
       });
-      if (phone?.tenant_phone) {
+      if (recipient?.tenant_phone) {
         sendTemplate({
-          to: phone.tenant_phone,
+          to: recipient.tenant_phone,
           templateName: 'jag_onb_deposit_receipt_v2',
           components: [{ type: 'body', parameters: [
-            { type: 'text', text: phone.tenant_name ?? body.tenant_name },
+            { type: 'text', text: recipient.tenant_name ?? body.tenant_name },
             { type: 'text', text: `TTD $${body.amount_ttd.toFixed(2)}` },
             { type: 'text', text: body.received_date },
             { type: 'text', text: body.payment_method ?? 'BANK_TRANSFER' },
-            { type: 'text', text: row.unit_number ?? body.unit_id.slice(0, 8) },
+            { type: 'text', text: inserted.unitNumber ?? body.unit_id.slice(0, 8) },
             { type: 'text', text: row.receipt_number },
           ]}],
         }).catch(e => logger.warn({ entity: 'PROPERTIES', action: 'WA_DEPOSIT_RECEIPT_FAILED', error_message: (e as Error).message }));

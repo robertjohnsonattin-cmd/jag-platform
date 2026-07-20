@@ -100,7 +100,7 @@ export const tenancyApi = {
     api.post<void>(`/properties/rent-schedule/${id}/waive`, body),
 
   // ── Deposits ──────────────────────────────────────────────
-  getDeposits: (params?: { lease_id?: string; status?: string }) =>
+  getDeposits: (params?: { lease_id?: string; status?: string; unit_id?: string; tenant_id?: string }) =>
     api.get<Row[]>(`/properties/deposits${qs(params)}`),
 
   createDeposit: (body: Row) =>

@@ -2,9 +2,18 @@ import { useState, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { propertiesApi } from '../../api/properties'
+import { tenancyApi } from '../../api/tenancy'
+import { api } from '../../api/client'
 import type { PropertyTenant, TenantDocument, TenantDocType } from '../../types/properties'
 import { fmtDate } from '../../lib/entities'
 import ConfirmDeleteModal from '../ui/ConfirmDeleteModal'
+
+const DEPOSIT_STATUS_COLORS: Record<string, string> = {
+  HELD:               'bg-blue-900/50 text-blue-300 border-blue-700',
+  PARTIALLY_RETURNED: 'bg-orange-900/50 text-orange-300 border-orange-700',
+  RETURNED:           'bg-green-900/50 text-green-300 border-green-700',
+  FORFEITED:          'bg-red-900/50 text-red-300 border-red-700',
+}
 
 const cls = 'w-full bg-slate-700 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500'
 
@@ -413,6 +422,69 @@ function TenantDocsModal({ tenant, onClose }: { tenant: PropertyTenant; onClose:
   )
 }
 
+// ── Tenant Deposits Modal ─────────────────────────────────────────────────────
+// Deposits have no tenant_id column (see prop_deposits schema) -- the backend
+// resolves them for a tenant via lease_id -> prop_lease_agreements.tenant_id,
+// which is only populated once a lease exists (either set at deposit creation,
+// or backfilled automatically when a lease is added later for that unit).
+
+function TenantDepositsModal({ tenant, onClose }: { tenant: PropertyTenant; onClose: () => void }) {
+  const { t } = useTranslation()
+
+  const tenantName = tenant.is_company
+    ? (tenant.company_name ?? 'Tenant')
+    : `${tenant.first_name}${tenant.last_name ? ` ${tenant.last_name}` : ''}`
+
+  const { data: deposits = [], isLoading } = useQuery({
+    queryKey: ['tenant-deposits', tenant.id],
+    queryFn: () => tenancyApi.getDeposits({ tenant_id: tenant.id }),
+  })
+
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
+      <div className="bg-slate-800 border border-slate-700 rounded-xl w-full max-w-2xl p-6 shadow-2xl max-h-[90vh] flex flex-col">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h2 className="text-lg font-semibold text-white">{t('tenants.deposits.title', 'Deposits')}</h2>
+            <p className="text-xs text-slate-400 mt-0.5">{tenantName}</p>
+          </div>
+          <button onClick={onClose} className="text-slate-500 hover:text-slate-300 text-xl leading-none">×</button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto space-y-3">
+          {isLoading && <p className="text-slate-400 text-sm">{t('common.loading')}</p>}
+          {!isLoading && deposits.length === 0 && (
+            <p className="text-slate-500 text-sm text-center py-8">
+              {t('tenants.deposits.none', 'No deposits linked to this tenant yet. A deposit only shows up here once a lease links it — record the deposit against the unit, then create the lease (or vice versa).')}
+            </p>
+          )}
+          {deposits.map((d: Record<string, unknown>) => (
+            <div key={String(d['id'])} className="bg-slate-700/50 rounded-lg border border-slate-700 p-3">
+              <div className="flex items-start justify-between">
+                <div>
+                  <p className="text-xs text-slate-400">{t('tenants.deposits.unit', 'Unit')} {String(d['unit_number'] ?? '—')} · {String(d['received_date'] ?? '')}</p>
+                  <p className="text-sm font-mono text-slate-200 mt-1">
+                    TTD ${parseFloat(String(d['amount_ttd'] ?? 0)).toLocaleString('en-TT', { minimumFractionDigits: 2 })}
+                  </p>
+                  <p className="text-xs text-slate-500">{t('tenancy.receiptNo', 'Receipt')}: {String(d['receipt_number'] ?? '—')}
+                    <button onClick={() => void api.openHtml(`/properties/deposits/${String(d['id'])}/receipt`).catch(() => alert('Could not open the receipt.'))}
+                      className="text-blue-400 hover:text-blue-300 ml-2">{t('tenancy.printReceipt', 'Print receipt')}</button>
+                  </p>
+                </div>
+                <span className={`text-xs px-2 py-0.5 rounded border ${DEPOSIT_STATUS_COLORS[String(d['status'])] ?? ''}`}>{String(d['status'])}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="mt-4 pt-4 border-t border-slate-700 flex justify-end">
+          <button onClick={onClose} className="px-4 py-2 text-sm text-slate-400 hover:text-white transition-colors">{t('common.close', 'Close')}</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Main Panel ────────────────────────────────────────────────────────────────
 
 export default function TenantsPanel() {
@@ -423,6 +495,7 @@ export default function TenantsPanel() {
   const [editingTenant, setEditingTenant] = useState<PropertyTenant | null>(null)
   const [deletingTenant, setDeletingTenant] = useState<PropertyTenant | null>(null)
   const [docsForTenant, setDocsForTenant] = useState<PropertyTenant | null>(null)
+  const [depositsForTenant, setDepositsForTenant] = useState<PropertyTenant | null>(null)
   const qc = useQueryClient()
 
   const handleSearch = (val: string) => {
@@ -490,6 +563,11 @@ export default function TenantsPanel() {
                       title={t('tenants.docs.title', 'Documents')}
                     >{t('tenants.docsBtn', 'Docs')}</button>
                     <button
+                      onClick={() => setDepositsForTenant(tn)}
+                      className="text-xs text-slate-500 hover:text-green-400 transition-colors"
+                      title={t('tenants.deposits.title', 'Deposits')}
+                    >{t('tenants.deposits.btn', 'Deposits')}</button>
+                    <button
                       onClick={() => setEditingTenant(tn)}
                       className="text-xs text-slate-500 hover:text-blue-400 transition-colors"
                     >{t('tenants.editBtn')}</button>
@@ -508,6 +586,7 @@ export default function TenantsPanel() {
 
       {showAdd && <AddTenantModal onClose={() => setShowAdd(false)} onCreated={refresh} />}
       {docsForTenant && <TenantDocsModal tenant={docsForTenant} onClose={() => setDocsForTenant(null)} />}
+      {depositsForTenant && <TenantDepositsModal tenant={depositsForTenant} onClose={() => setDepositsForTenant(null)} />}
       {deletingTenant && (
         <ConfirmDeleteModal
           label={deletingTenant.is_company ? (deletingTenant.company_name ?? 'Tenant') : `${deletingTenant.first_name}${deletingTenant.last_name ? ` ${deletingTenant.last_name}` : ''}`}

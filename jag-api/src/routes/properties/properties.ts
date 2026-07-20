@@ -622,6 +622,15 @@ propertiesRouter.post('/:propertyId/leases', async (req: Request, res: Response,
         // (derived from unit-level is_rented) never reflected new leases at all.
         if (b.unit_id) {
           await c.query(`UPDATE prop_units SET is_rented = true WHERE id = $1`, [b.unit_id]);
+          // Deposits taken before this lease existed (lease_id/tenant_id left NULL
+          // at the time — see prop_deposits migration 052) only resolve back to a
+          // tenant once linked. Backfill both now so the deposit surfaces under
+          // the tenant it was actually for.
+          await c.query(
+            `UPDATE prop_deposits SET lease_id = $1, tenant_id = $2
+             WHERE unit_id = $3 AND owner_id = $4 AND lease_id IS NULL`,
+            [result.rows[0].id, b.tenant_id, b.unit_id, ownerId],
+          );
         }
         return result.rows[0];
       });

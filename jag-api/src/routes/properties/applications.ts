@@ -397,6 +397,14 @@ applicationsRouter.post('/:id/create-tenant', async (req: Request, res: Response
         );
       }
 
+      // Any deposit taken right after approval (linked via application_id, before
+      // this tenant record existed) now has somewhere to point -- see prop_deposits
+      // migration 052 and the deposit-creation resolution in deposits.ts.
+      await client.query(
+        `UPDATE prop_deposits SET tenant_id = $1 WHERE application_id = $2 AND tenant_id IS NULL`,
+        [tenant.id, id],
+      );
+
       logger.info({ entity: 'PROPERTIES', action: 'TENANT_FROM_APPLICATION', application_id: id, tenant_id: tenant.id, docs_copied: appDocs.length, user_id: ownerId });
       return { tenant, docs_copied: appDocs.length };
     });

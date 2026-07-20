@@ -18,13 +18,38 @@ export default function PropertiesDepositsPanel() {
   const qc = useQueryClient()
   const [showAdd, setShowAdd] = useState(false)
   const [reconcileId, setReconcileId] = useState<string | null>(null)
-  const [form, setForm] = useState({ unit_id: '', tenant_name: '', amount_ttd: '', months_equivalent: '', payment_method: 'BANK_TRANSFER', received_date: new Date().toISOString().slice(0,10), reference_bank: '', reference_number: '', held_in_account: '' })
+  const [form, setForm] = useState({ application_id: '', unit_id: '', tenant_name: '', amount_ttd: '', months_equivalent: '', payment_method: 'BANK_TRANSFER', received_date: new Date().toISOString().slice(0,10), reference_bank: '', reference_number: '', held_in_account: '' })
   const [recForm, setRecForm] = useState({ deductions_ttd: '0', deduction_notes: '', refund_amount_ttd: '', refund_date: '', status: 'RETURNED', tenant_signed_off: false })
 
   const { data: deposits = [] } = useQuery({ queryKey: ['deposits'], queryFn: () => tenancyApi.getDeposits() })
 
+  // APPROVED applications already have the tenant's name/unit on file, so a deposit
+  // taken right after approval -- before any lease exists -- can still resolve to the
+  // right tenant and send its WhatsApp receipt immediately (see deposits.ts).
+  const { data: approvedApps = [] } = useQuery({
+    queryKey: ['applications', 'APPROVED'],
+    queryFn: () => tenancyApi.getApplications({ status: 'APPROVED' }),
+    enabled: showAdd,
+  })
+
+  const selectApplication = (appId: string) => {
+    const app = approvedApps.find((a: Record<string, unknown>) => String(a['id']) === appId)
+    setForm(f => ({
+      ...f,
+      application_id: appId,
+      unit_id: app ? String(app['unit_id'] ?? '') : f.unit_id,
+      tenant_name: app ? String(app['full_name'] ?? '') : f.tenant_name,
+    }))
+  }
+
   const createMut = useMutation({
-    mutationFn: () => tenancyApi.createDeposit({ ...form, amount_ttd: parseFloat(form.amount_ttd), months_equivalent: parseFloat(form.months_equivalent) || undefined, idempotency_key: crypto.randomUUID() }),
+    mutationFn: () => tenancyApi.createDeposit({
+      ...form,
+      application_id: form.application_id || undefined,
+      amount_ttd: parseFloat(form.amount_ttd),
+      months_equivalent: parseFloat(form.months_equivalent) || undefined,
+      idempotency_key: crypto.randomUUID(),
+    }),
     onSuccess: () => { setShowAdd(false); qc.invalidateQueries({ queryKey: ['deposits'] }) },
   })
 
@@ -82,6 +107,20 @@ export default function PropertiesDepositsPanel() {
           <div className="bg-slate-800 rounded-lg p-6 w-full max-w-md overflow-y-auto max-h-[90vh]">
             <h2 className="text-lg font-semibold mb-4">{t('tenancy.recordDeposit', 'Record Deposit')}</h2>
             <div className="space-y-3">
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">{t('tenancy.fromApprovedApp', 'From Approved Application (optional)')}</label>
+                <select className={cls} value={form.application_id} onChange={e => selectApplication(e.target.value)}>
+                  <option value="">{t('tenancy.fromApprovedAppNone', '— None, enter manually —')}</option>
+                  {approvedApps.map((a: Record<string, unknown>) => (
+                    <option key={String(a['id'])} value={String(a['id'])}>
+                      {String(a['full_name'])} — {String(a['unit_number'] ?? '')} {String(a['property_name'] ?? '')}
+                    </option>
+                  ))}
+                </select>
+                {form.application_id && (
+                  <p className="text-xs text-slate-500 mt-1">{t('tenancy.fromApprovedAppHint', "Receipt will be sent to this applicant's phone on file — no lease needed yet.")}</p>
+                )}
+              </div>
               {[['unit_id','Unit ID (UUID)'],['tenant_name','Tenant Name'],['amount_ttd','Amount TTD'],['months_equivalent','Months Equivalent'],['received_date','Received Date'],['reference_bank','Bank'],['reference_number','Bank Reference'],['held_in_account','Held in Account']].map(([k,label]) => (
                 <div key={k}>
                   <label className="block text-xs text-slate-400 mb-1">{label}</label>
