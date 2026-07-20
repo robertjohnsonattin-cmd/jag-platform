@@ -59,6 +59,8 @@ const CreateItemSchema = z.object({
   reorder_point:    z.number().min(0).optional(),
   unit_value:       z.number().min(0).optional(),
   serial_number:    z.string().max(100).optional(),
+  manufacturer:     z.string().max(100).optional(),
+  model_number:     z.string().max(100).optional(),
   condition:        ConditionEnum.default('GOOD'),
   is_asset:         z.boolean().default(false),
   vat_code:         VatCodeEnum.default('STANDARD'),
@@ -73,6 +75,8 @@ const PatchItemSchema = z.object({
   reorder_point:    z.number().min(0).nullable().optional(),
   unit_value:       z.number().min(0).nullable().optional(),
   serial_number:    z.string().max(100).nullable().optional(),
+  manufacturer:     z.string().max(100).nullable().optional(),
+  model_number:     z.string().max(100).nullable().optional(),
   condition:        ConditionEnum.optional(),
   is_active:        z.boolean().optional(),
   vat_code:         VatCodeEnum.optional(),
@@ -189,7 +193,8 @@ imsItemsRouter.get('/items', async (req: Request, res: Response, next: NextFunct
         const dataResult = await c.query(
           `SELECT i.id, i.name, i.sku, i.description, i.unit_of_measure,
                   i.quantity_on_hand, i.quantity_reserved, i.reorder_point,
-                  i.unit_value, i.serial_number, i.condition, i.is_asset,
+                  i.unit_value, i.serial_number, i.manufacturer, i.model_number,
+                  i.condition, i.is_asset,
                   i.is_active, i.disposed_at, i.disposal_type, i.disposal_notes,
                   i.sale_price_ttd, i.buyer_name, i.disposal_gl_entry_id,
                   i.last_modified_at, i.created_at,
@@ -293,8 +298,8 @@ imsItemsRouter.post('/items', async (req: Request, res: Response, next: NextFunc
           `INSERT INTO ims_items
              (tenant_id, location_id, category_id, name, description, sku,
               unit_of_measure, quantity_on_hand, reorder_point, unit_value,
-              serial_number, condition, is_asset, vat_code, last_modified_by)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+              serial_number, manufacturer, model_number, condition, is_asset, vat_code, last_modified_by)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
            RETURNING id`,
           [
             tenantId,
@@ -308,6 +313,8 @@ imsItemsRouter.post('/items', async (req: Request, res: Response, next: NextFunc
             body.reorder_point ?? null,
             body.unit_value ?? null,
             body.serial_number ?? null,
+            body.manufacturer ?? null,
+            body.model_number ?? null,
             body.condition,
             body.is_asset,
             body.vat_code,
@@ -656,6 +663,8 @@ imsItemsRouter.patch('/items/:id', async (req: Request, res: Response, next: Nex
     if (body.reorder_point   !== undefined) setCols.push(`reorder_point    = ${push(body.reorder_point)}`);
     if (body.unit_value      !== undefined) setCols.push(`unit_value       = ${push(body.unit_value)}`);
     if (body.serial_number   !== undefined) setCols.push(`serial_number    = ${push(body.serial_number)}`);
+    if (body.manufacturer    !== undefined) setCols.push(`manufacturer     = ${push(body.manufacturer)}`);
+    if (body.model_number    !== undefined) setCols.push(`model_number     = ${push(body.model_number)}`);
     if (body.condition       !== undefined) setCols.push(`condition        = ${push(body.condition)}`);
     if (body.is_active       !== undefined) setCols.push(`is_active        = ${push(body.is_active)}`);
     if (body.vat_code        !== undefined) setCols.push(`vat_code         = ${push(body.vat_code)}`);

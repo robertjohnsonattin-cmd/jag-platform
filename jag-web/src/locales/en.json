@@ -2373,6 +2373,8 @@
     "totalValue": "Total Value",
     "conditionLbl": "Condition",
     "categoryLbl": "Category",
+    "manufacturerLbl": "Manufacturer",
+    "modelNumberLbl": "Model Number",
     "serialNumberLbl": "Serial Number",
     "assetLbl": "Asset",
     "lastModified": "Last Modified",

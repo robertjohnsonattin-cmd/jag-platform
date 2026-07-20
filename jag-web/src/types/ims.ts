@@ -58,6 +58,8 @@ export interface Item {
   reorder_point: number | null
   unit_value: number | null
   serial_number: string | null
+  manufacturer: string | null
+  model_number: string | null
   condition: ItemCondition
   is_asset: boolean
   is_vehicle: boolean

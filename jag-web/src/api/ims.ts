@@ -60,13 +60,15 @@ export const imsApi = {
   createItem: (data: {
     name: string; location_id: string; unit_of_measure?: string; description?: string;
     sku?: string; category_id?: string; quantity_on_hand?: number; reorder_point?: number;
-    unit_value?: number; serial_number?: string; condition?: string; is_asset?: boolean; vat_code?: string;
+    unit_value?: number; serial_number?: string; manufacturer?: string; model_number?: string;
+    condition?: string; is_asset?: boolean; vat_code?: string;
   }): Promise<ItemDetail> =>
     client.post('/ims/items', data),
 
   updateItem: (id: string, data: Partial<Pick<Item,
     'name' | 'description' | 'unit_of_measure' | 'quantity_on_hand' |
-    'reorder_point' | 'unit_value' | 'serial_number' | 'condition' | 'is_active'
+    'reorder_point' | 'unit_value' | 'serial_number' | 'manufacturer' | 'model_number' |
+    'condition' | 'is_active'
   >>): Promise<ItemDetail> =>
     client.patch(`/ims/items/${id}`, data),
 

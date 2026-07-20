@@ -99,7 +99,7 @@ function AddItemModal({
     name: '', location_id: '', sku: '', category_id: '',
     unit_of_measure: 'each', description: '',
     quantity_on_hand: '0', reorder_point: '',
-    unit_value: '', serial_number: '',
+    unit_value: '', serial_number: '', manufacturer: '', model_number: '',
     condition: 'GOOD', is_asset: false, vat_code: 'STANDARD',
   })
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
@@ -119,6 +119,8 @@ function AddItemModal({
       reorder_point: form.reorder_point ? Number(form.reorder_point) : undefined,
       unit_value: form.unit_value ? Number(form.unit_value) : undefined,
       serial_number: form.serial_number || undefined,
+      manufacturer: form.manufacturer || undefined,
+      model_number: form.model_number || undefined,
       condition: form.condition,
       is_asset: form.is_asset,
       vat_code: form.vat_code,
@@ -182,6 +184,16 @@ function AddItemModal({
             <div className="flex-1">
               <label className="block text-xs text-slate-400 mb-1">{t('inv.serialNumber')}</label>
               <input value={form.serial_number} onChange={set('serial_number')} className={cls} />
+            </div>
+          </div>
+          <div className="flex gap-3">
+            <div className="flex-1">
+              <label className="block text-xs text-slate-400 mb-1">{t('inv.manufacturerLbl')}</label>
+              <input value={form.manufacturer} onChange={set('manufacturer')} className={cls} />
+            </div>
+            <div className="flex-1">
+              <label className="block text-xs text-slate-400 mb-1">{t('inv.modelNumberLbl')}</label>
+              <input value={form.model_number} onChange={set('model_number')} className={cls} />
             </div>
           </div>
           <div className="flex gap-3">
@@ -854,6 +866,8 @@ function EditItemModal({
     name: item.name,
     description: '',
     unit_value: item.unit_value != null ? String(item.unit_value) : '',
+    manufacturer: item.manufacturer ?? '',
+    model_number: item.model_number ?? '',
     condition: item.condition,
     location_id: '',
   })
@@ -867,6 +881,8 @@ function EditItemModal({
       if (form.description) patch.description = form.description
       if (form.condition !== item.condition) patch.condition = form.condition
       if (form.unit_value !== String(item.unit_value ?? '')) patch.unit_value = form.unit_value ? Number(form.unit_value) : null
+      if (form.manufacturer !== (item.manufacturer ?? '')) patch.manufacturer = form.manufacturer || null
+      if (form.model_number !== (item.model_number ?? '')) patch.model_number = form.model_number || null
       return imsApi.updateItem(item.id, patch as Parameters<typeof imsApi.updateItem>[1])
     },
     onSuccess: () => {
@@ -896,6 +912,16 @@ function EditItemModal({
               <select value={form.condition} onChange={set('condition')} className={cls}>
                 {['NEW','GOOD','FAIR','POOR','WRITTEN_OFF'].map(c => <option key={c} value={c}>{c}</option>)}
               </select>
+            </div>
+          </div>
+          <div className="flex gap-3">
+            <div className="flex-1">
+              <label className="block text-xs text-slate-400 mb-1">{t('inv.manufacturerLbl')}</label>
+              <input value={form.manufacturer} onChange={set('manufacturer')} className={cls} />
+            </div>
+            <div className="flex-1">
+              <label className="block text-xs text-slate-400 mb-1">{t('inv.modelNumberLbl')}</label>
+              <input value={form.model_number} onChange={set('model_number')} className={cls} />
             </div>
           </div>
           <div>
@@ -1257,6 +1283,8 @@ function ItemDetailPanel({
                   ['totalValue',    t('inv.totalValue'),     fmtMoney(d.unit_value != null ? d.unit_value * d.quantity_on_hand : null)],
                   ['condition',     t('inv.conditionLbl'),   null],
                   ['category',      t('inv.categoryLbl'),    d.category_name ?? '—'],
+                  ['manufacturer',  t('inv.manufacturerLbl'), d.manufacturer ?? '—'],
+                  ['modelNumber',   t('inv.modelNumberLbl'), d.model_number ?? '—'],
                   ['serialNumber',  t('inv.serialNumberLbl'), d.serial_number ?? '—'],
                   ['asset',         t('inv.assetLbl'),       d.is_asset ? t('common.yes') : t('common.no')],
                   ['lastModified',  t('inv.lastModified'),   fmtDate(d.last_modified_at)],
