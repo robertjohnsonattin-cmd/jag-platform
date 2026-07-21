@@ -17,7 +17,6 @@
     "build:batch": "tsc --project ../scripts/ollama-batch/tsconfig.json"
   },
   "dependencies": {
-    "canvas": "^3.2.3",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
     "google-auth-library": "^10.7.0",
