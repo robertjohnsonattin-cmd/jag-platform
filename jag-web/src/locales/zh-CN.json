@@ -1417,6 +1417,12 @@
       "none": "暂无上传文件。",
       "fromApp": "来自申请",
       "delete": "删除文件",
+      "expired": "已过期 {{days}} 天",
+      "expiresToday": "今天到期",
+      "expiresIn": "{{days}} 天后到期",
+      "expiryOptional": "到期日期（可选）",
+      "editExpiry": "编辑到期日期",
+      "setExpiry": "+ 设置到期日期",
       "types": {
         "national_id": "身份证",
         "passport": "护照",

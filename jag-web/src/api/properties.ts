@@ -119,16 +119,20 @@ export const propertiesApi = {
   getTenantDocuments: (tenantId: string) =>
     api.get<TenantDocument[]>(`/properties/tenants/${tenantId}/documents`),
 
-  uploadTenantDocument: (tenantId: string, docType: TenantDocType, file: File, notes?: string) => {
+  uploadTenantDocument: (tenantId: string, docType: TenantDocType, file: File, notes?: string, expiryDate?: string) => {
     const form = new FormData()
     form.append('file', file)
     form.append('doc_type', docType)
     if (notes) form.append('notes', notes)
+    if (expiryDate) form.append('expiry_date', expiryDate)
     return api.postForm<TenantDocument>(`/properties/tenants/${tenantId}/documents`, form)
   },
 
   downloadTenantDocument: (tenantId: string, docId: string, fileName: string) =>
     api.download(`/properties/tenants/${tenantId}/documents/${docId}/download`, fileName),
+
+  updateTenantDocumentExpiry: (tenantId: string, docId: string, expiryDate: string | null) =>
+    api.patch<TenantDocument>(`/properties/tenants/${tenantId}/documents/${docId}`, { expiry_date: expiryDate }),
 
   deleteTenantDocument: (tenantId: string, docId: string) =>
     api.delete<{ deleted: boolean; id: string }>(`/properties/tenants/${tenantId}/documents/${docId}`),

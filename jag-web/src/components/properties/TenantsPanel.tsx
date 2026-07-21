@@ -315,14 +315,39 @@ const DOC_TYPE_LABELS: Record<string, string> = {
   tenancy_agreement: 'Tenancy Agreement', other: 'Other',
 }
 
+function daysUntilExpiry(expiry: string | null): number | null {
+  if (!expiry) return null
+  const diff = new Date(expiry).getTime() - Date.now()
+  return Math.ceil(diff / (1000 * 60 * 60 * 24))
+}
+
+function ExpiryBadge({ expiry }: { expiry: string | null }) {
+  const { t } = useTranslation()
+  if (!expiry) return null
+  const days = daysUntilExpiry(expiry)!
+  const style =
+    days < 0  ? 'bg-red-900/50 text-red-300 border-red-700' :
+    days <= 30 ? 'bg-amber-900/50 text-amber-300 border-amber-700' :
+    'bg-slate-600/50 text-slate-300 border-slate-600'
+  const label =
+    days < 0  ? t('tenants.docs.expired', 'Expired {{days}}d ago', { days: Math.abs(days) }) :
+    days === 0 ? t('tenants.docs.expiresToday', 'Expires today') :
+    t('tenants.docs.expiresIn', 'Expires in {{days}}d', { days })
+  return (
+    <span className={`text-xs border px-1.5 py-0.5 rounded ${style}`}>{label}</span>
+  )
+}
+
 function TenantDocsModal({ tenant, onClose }: { tenant: PropertyTenant; onClose: () => void }) {
   const { t } = useTranslation()
   const qc = useQueryClient()
   const fileRef = useRef<HTMLInputElement>(null)
   const [docType, setDocType] = useState<TenantDocType>('national_id')
+  const [expiryDate, setExpiryDate] = useState('')
   const [uploading, setUploading] = useState(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [editingExpiryId, setEditingExpiryId] = useState<string | null>(null)
 
   const tenantName = tenant.is_company
     ? (tenant.company_name ?? 'Tenant')
@@ -341,11 +366,21 @@ function TenantDocsModal({ tenant, onClose }: { tenant: PropertyTenant; onClose:
     },
   })
 
+  const expiryMut = useMutation({
+    mutationFn: ({ docId, expiry }: { docId: string; expiry: string | null }) =>
+      propertiesApi.updateTenantDocumentExpiry(tenant.id, docId, expiry),
+    onSuccess: () => {
+      setEditingExpiryId(null)
+      void qc.invalidateQueries({ queryKey: ['tenant-docs', tenant.id] })
+    },
+  })
+
   async function handleUpload(file: File) {
     setUploading(true)
     setUploadError(null)
     try {
-      await propertiesApi.uploadTenantDocument(tenant.id, docType, file)
+      await propertiesApi.uploadTenantDocument(tenant.id, docType, file, undefined, expiryDate || undefined)
+      setExpiryDate('')
       void qc.invalidateQueries({ queryKey: ['tenant-docs', tenant.id] })
     } catch {
       setUploadError(t('tenants.docs.uploadError', 'Upload failed. Please try again.'))
@@ -391,6 +426,13 @@ function TenantDocsModal({ tenant, onClose }: { tenant: PropertyTenant; onClose:
             ))}
           </select>
           <input
+            type="date"
+            value={expiryDate}
+            onChange={e => setExpiryDate(e.target.value)}
+            title={t('tenants.docs.expiryOptional', 'Expiry date (optional)')}
+            className="bg-slate-700 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          />
+          <input
             ref={fileRef}
             type="file"
             accept=".pdf,.jpg,.jpeg,.png"
@@ -423,9 +465,35 @@ function TenantDocsModal({ tenant, onClose }: { tenant: PropertyTenant; onClose:
                         {t(`tenants.docs.types.${doc.doc_type}`, DOC_TYPE_LABELS[doc.doc_type] ?? doc.doc_type)}
                       </span>
                       {sourceTag(doc)}
+                      <ExpiryBadge expiry={doc.expiry_date} />
                     </div>
                     <p className="text-sm text-slate-200 mt-1 truncate">{doc.file_name}</p>
                     <p className="text-xs text-slate-500">{fmtDate(doc.created_at)}</p>
+                    {editingExpiryId === doc.id ? (
+                      <div className="flex items-center gap-1.5 mt-1.5">
+                        <input
+                          type="date"
+                          defaultValue={doc.expiry_date ?? ''}
+                          autoFocus
+                          onKeyDown={e => {
+                            if (e.key === 'Enter') expiryMut.mutate({ docId: doc.id, expiry: (e.target as HTMLInputElement).value || null })
+                            if (e.key === 'Escape') setEditingExpiryId(null)
+                          }}
+                          onBlur={e => expiryMut.mutate({ docId: doc.id, expiry: e.target.value || null })}
+                          className="bg-slate-700 border border-slate-600 rounded px-2 py-1 text-xs text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        />
+                        {expiryMut.isPending && <span className="text-xs text-slate-500">…</span>}
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => setEditingExpiryId(doc.id)}
+                        className="text-xs text-slate-500 hover:text-blue-400 transition-colors mt-1"
+                      >
+                        {doc.expiry_date
+                          ? t('tenants.docs.editExpiry', 'Edit expiry')
+                          : t('tenants.docs.setExpiry', '+ Set expiry date')}
+                      </button>
+                    )}
                   </div>
                   <div className="flex gap-2 flex-shrink-0">
                     <button

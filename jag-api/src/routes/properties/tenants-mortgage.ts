@@ -5,6 +5,7 @@
 // GET    /api/v1/properties/tenants/:id/documents
 // POST   /api/v1/properties/tenants/:id/documents/upload-url
 // POST   /api/v1/properties/tenants/:id/documents
+// PATCH  /api/v1/properties/tenants/:id/documents/:docId
 // DELETE /api/v1/properties/tenants/:id/documents/:docId
 // GET    /api/v1/properties/:propertyId/mortgage
 // POST   /api/v1/properties/:propertyId/mortgage
@@ -268,6 +269,12 @@ const DocParam = z.object({ id: z.string().uuid(), docId: z.string().uuid() });
 
 const docUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
+const ExpiryDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+
+const PatchTenantDocSchema = z.object({
+  expiry_date: ExpiryDateSchema.nullable(),
+}).strict();
+
 // GET /:id/documents — list tenant docs (no presigned URLs; use /:id/documents/:docId/download)
 propTenantsRouter.get('/:id/documents', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
@@ -277,7 +284,7 @@ propTenantsRouter.get('/:id/documents', async (req: Request, res: Response, next
       const rows = await withOwnerRLS(client, req.rlsCtx, (c) =>
         c.query(
           `SELECT id, tenant_id, doc_type, label, file_name,
-                  file_size_bytes, mime_type, notes, source, application_id, created_at
+                  file_size_bytes, mime_type, notes, source, application_id, expiry_date, created_at
            FROM prop_tenant_documents WHERE tenant_id = $1 ORDER BY created_at ASC`,
           [id],
         ).then(r => r.rows),
@@ -298,6 +305,14 @@ propTenantsRouter.post('/:id/documents', docUpload.single('file'), async (req: R
     if (!docTypeResult.success) { err(res, 422, 'VALIDATION_ERROR', 'Invalid doc_type.'); return; }
     const docType = docTypeResult.data;
     const notes = typeof req.body['notes'] === 'string' ? req.body['notes'].slice(0, 2000) : null;
+
+    let expiryDate: string | null = null;
+    if (typeof req.body['expiry_date'] === 'string' && req.body['expiry_date'] !== '') {
+      const expiryResult = ExpiryDateSchema.safeParse(req.body['expiry_date']);
+      if (!expiryResult.success) { err(res, 422, 'VALIDATION_ERROR', 'expiry_date must be YYYY-MM-DD.'); return; }
+      expiryDate = expiryResult.data;
+    }
+
     const { userId: ownerId } = req.rlsCtx;
 
     const key = mediaObjectKey(ownerId, 'tenant-docs', id, `${docType}_${file.originalname}`);
@@ -309,14 +324,38 @@ propTenantsRouter.post('/:id/documents', docUpload.single('file'), async (req: R
       const doc = await withOwnerRLS(client, req.rlsCtx, (c) =>
         c.query(
           `INSERT INTO prop_tenant_documents
-             (owner_id, tenant_id, doc_type, label, minio_object_key, file_name, file_size_bytes, mime_type, notes, source)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'MANUAL') RETURNING *`,
+             (owner_id, tenant_id, doc_type, label, minio_object_key, file_name, file_size_bytes, mime_type, notes, expiry_date, source)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'MANUAL') RETURNING *`,
           [ownerId, id, docType, docType.replace(/_/g, ' '), key, file.originalname,
-           file.size, file.mimetype, notes],
+           file.size, file.mimetype, notes, expiryDate],
         ).then(r => r.rows[0]),
       );
       logger.info({ entity: 'PROPERTIES', action: 'TENANT_DOC_UPLOADED', tenant_id: id, record_id: doc.id, user_id: ownerId });
       ok(res, doc, 201);
+    } finally { client.release(); }
+  } catch (e) { next(e); }
+});
+
+// PATCH /:id/documents/:docId — update expiry_date on an existing document
+propTenantsRouter.patch('/:id/documents/:docId', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const { id, docId } = DocParam.parse(req.params);
+    const bodyParsed = PatchTenantDocSchema.safeParse(req.body);
+    if (!bodyParsed.success) { err(res, 422, 'VALIDATION_ERROR', 'Request body validation failed.'); return; }
+    const { userId: ownerId } = req.rlsCtx;
+
+    const client = await propertiesPool.connect();
+    try {
+      const doc = await withOwnerRLS(client, req.rlsCtx, (c) =>
+        c.query(
+          `UPDATE prop_tenant_documents SET expiry_date = $1
+           WHERE id = $2 AND tenant_id = $3 RETURNING *`,
+          [bodyParsed.data.expiry_date, docId, id],
+        ).then(r => r.rows[0] ?? null),
+      );
+      if (!doc) { err(res, 404, 'NOT_FOUND', 'Document not found.'); return; }
+      logger.info({ entity: 'PROPERTIES', action: 'TENANT_DOC_EXPIRY_UPDATED', tenant_id: id, record_id: docId, user_id: ownerId });
+      ok(res, doc);
     } finally { client.release(); }
   } catch (e) { next(e); }
 });

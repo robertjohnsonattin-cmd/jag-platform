@@ -1418,6 +1418,12 @@
       "none": "No documents uploaded yet.",
       "fromApp": "from application",
       "delete": "Delete document",
+      "expired": "Expired {{days}}d ago",
+      "expiresToday": "Expires today",
+      "expiresIn": "Expires in {{days}}d",
+      "expiryOptional": "Expiry date (optional)",
+      "editExpiry": "Edit expiry",
+      "setExpiry": "+ Set expiry date",
       "types": {
         "national_id": "National ID",
         "passport": "Passport",

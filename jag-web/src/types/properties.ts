@@ -156,6 +156,7 @@ export interface TenantDocument {
   notes: string | null
   source: 'MANUAL' | 'APPLICATION'
   application_id: string | null
+  expiry_date: string | null
   created_at: string
 }
 
