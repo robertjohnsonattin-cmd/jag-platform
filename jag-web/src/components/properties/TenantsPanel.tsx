@@ -576,6 +576,68 @@ function TenantMaintenanceModal({ tenant, onClose }: { tenant: PropertyTenant; o
   )
 }
 
+// ── Tenant Handover Modal ────────────────────────────────────────────────────
+// prop_handover_checklists had no tenant_id, only an optional lease_id (the
+// frontend form DOES collect it via a picker, unlike maintenance tickets, but
+// it's optional and there was no general list route at all -- only
+// GET /unit/:unitId). tenant_id resolved from lease_id if given, else the
+// unit's active lease at creation time (migration 055).
+
+function TenantHandoverModal({ tenant, onClose }: { tenant: PropertyTenant; onClose: () => void }) {
+  const { t } = useTranslation()
+
+  const tenantName = tenant.is_company
+    ? (tenant.company_name ?? 'Tenant')
+    : `${tenant.first_name}${tenant.last_name ? ` ${tenant.last_name}` : ''}`
+
+  const { data: checklists = [], isLoading } = useQuery({
+    queryKey: ['tenant-handover', tenant.id],
+    queryFn: () => tenancyApi.getHandoverForTenant(tenant.id),
+  })
+
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
+      <div className="bg-slate-800 border border-slate-700 rounded-xl w-full max-w-2xl p-6 shadow-2xl max-h-[90vh] flex flex-col">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h2 className="text-lg font-semibold text-white">{t('tenants.handover.title', 'Handover')}</h2>
+            <p className="text-xs text-slate-400 mt-0.5">{tenantName}</p>
+          </div>
+          <button onClick={onClose} className="text-slate-500 hover:text-slate-300 text-xl leading-none">×</button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto space-y-3">
+          {isLoading && <p className="text-slate-400 text-sm">{t('common.loading')}</p>}
+          {!isLoading && checklists.length === 0 && (
+            <p className="text-slate-500 text-sm text-center py-8">{t('tenants.handover.none', 'No handover checklists on file for this tenant.')}</p>
+          )}
+          {checklists.map((h: Record<string, unknown>) => (
+            <div key={String(h['id'])} className="bg-slate-700/50 rounded-lg border border-slate-700 p-3">
+              <div className="flex items-start justify-between">
+                <div>
+                  <p className="text-sm text-slate-200">{String(h['property_name'] ?? '—')}{h['unit_number'] ? ` · Unit ${String(h['unit_number'])}` : ''}</p>
+                  <p className="text-xs text-slate-400 mt-0.5">{fmtDate(String(h['created_at']))}</p>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    {t('tenants.handover.keys', 'Keys')}: {String(h['keys_issued'] ?? 0)}{h['keys_returned'] != null ? ` / ${String(h['keys_returned'])} ${t('tenants.handover.returned', 'returned')}` : ''}
+                  </p>
+                </div>
+                <div className="flex flex-col items-end gap-1 flex-shrink-0 ml-2">
+                  <span className="text-xs px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-600">{String(h['type'] ?? '')}</span>
+                  {Boolean(h['completed_at']) && <span className="text-xs px-2 py-0.5 rounded border bg-green-900/50 text-green-300 border-green-700">{t('tenants.handover.completed', 'Completed')}</span>}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="mt-4 pt-4 border-t border-slate-700 flex justify-end">
+          <button onClick={onClose} className="px-4 py-2 text-sm text-slate-400 hover:text-white transition-colors">{t('common.close', 'Close')}</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Tenant Renewals Modal ────────────────────────────────────────────────────
 // Unlike deposits/applications/maintenance, prop_renewal_notices already had
 // lease_id NOT NULL (renewal notices can't exist without a lease), so tenant_id
@@ -771,6 +833,7 @@ export default function TenantsPanel() {
   const [applicationsForTenant, setApplicationsForTenant] = useState<PropertyTenant | null>(null)
   const [maintenanceForTenant, setMaintenanceForTenant] = useState<PropertyTenant | null>(null)
   const [renewalsForTenant, setRenewalsForTenant] = useState<PropertyTenant | null>(null)
+  const [handoverForTenant, setHandoverForTenant] = useState<PropertyTenant | null>(null)
   const qc = useQueryClient()
 
   const handleSearch = (val: string) => {
@@ -863,6 +926,11 @@ export default function TenantsPanel() {
                       title={t('tenants.renewals.title', 'Renewals')}
                     >{t('tenants.renewals.btn', 'Renewals')}</button>
                     <button
+                      onClick={() => setHandoverForTenant(tn)}
+                      className="text-xs text-slate-500 hover:text-green-400 transition-colors"
+                      title={t('tenants.handover.title', 'Handover')}
+                    >{t('tenants.handover.btn', 'Handover')}</button>
+                    <button
                       onClick={() => setEditingTenant(tn)}
                       className="text-xs text-slate-500 hover:text-blue-400 transition-colors"
                     >{t('tenants.editBtn')}</button>
@@ -886,6 +954,7 @@ export default function TenantsPanel() {
       {applicationsForTenant && <TenantApplicationsModal tenant={applicationsForTenant} onClose={() => setApplicationsForTenant(null)} />}
       {maintenanceForTenant && <TenantMaintenanceModal tenant={maintenanceForTenant} onClose={() => setMaintenanceForTenant(null)} />}
       {renewalsForTenant && <TenantRenewalsModal tenant={renewalsForTenant} onClose={() => setRenewalsForTenant(null)} />}
+      {handoverForTenant && <TenantHandoverModal tenant={handoverForTenant} onClose={() => setHandoverForTenant(null)} />}
       {deletingTenant && (
         <ConfirmDeleteModal
           label={deletingTenant.is_company ? (deletingTenant.company_name ?? 'Tenant') : `${deletingTenant.first_name}${deletingTenant.last_name ? ` ${deletingTenant.last_name}` : ''}`}

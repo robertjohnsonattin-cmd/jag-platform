@@ -142,6 +142,9 @@ export const tenancyApi = {
   getHandoverByUnit: (unitId: string) =>
     api.get<Row[]>(`/properties/handover/unit/${unitId}`),
 
+  getHandoverForTenant: (tenantId: string) =>
+    api.get<Row[]>(`/properties/handover${qs({ tenant_id: tenantId })}`),
+
   createHandover: (body: Row) =>
     api.post<Row>('/properties/handover', body),
 

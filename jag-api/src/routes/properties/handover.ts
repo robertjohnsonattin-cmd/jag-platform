@@ -78,6 +78,34 @@ const PatchHandoverSchema = z.object({
   completed_at:          z.string().optional(),
 }).strict();
 
+// No general list route existed at all -- only /unit/:unitId, scoped by unit.
+// Added for the tenant_id filter (see migration 055); tenant_id is required
+// since there's no other reasonable general-purpose listing here.
+const TenantHandoverQuery = z.object({ tenant_id: z.string().uuid() });
+
+handoverRouter.get('/', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const ownerId = req.rlsCtx.userId;
+    if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
+    const parsed = TenantHandoverQuery.safeParse(req.query);
+    if (!parsed.success) { err(res, 422, 'VALIDATION_ERROR', 'tenant_id is required and must be a valid UUID.'); return; }
+
+    const rows = await withOwnerRLS(propertiesPool, ownerId, async client => {
+      const { rows: r } = await client.query(
+        `SELECT h.*, u.unit_number, p.name AS property_name
+         FROM prop_handover_checklists h
+         LEFT JOIN prop_units u ON u.id = h.unit_id
+         LEFT JOIN prop_properties p ON p.id = u.property_id
+         WHERE h.tenant_id = $1 AND h.owner_id = $2
+         ORDER BY h.created_at DESC`,
+        [parsed.data.tenant_id, ownerId],
+      );
+      return r;
+    });
+    res.json(ok(rows));
+  } catch (e) { next(e); }
+});
+
 handoverRouter.get('/unit/:unitId', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const ownerId = req.rlsCtx.userId;
@@ -102,15 +130,27 @@ handoverRouter.post('/', async (req: Request, res: Response, next: NextFunction)
     const body = CreateHandoverSchema.parse(req.body);
 
     const row = await withOwnerRLS(propertiesPool, ownerId, async client => {
+      let tenantId: string | null = null;
+      if (body.lease_id) {
+        const { rows: [la] } = await client.query(`SELECT tenant_id FROM prop_lease_agreements WHERE id = $1`, [body.lease_id]);
+        tenantId = la?.tenant_id ?? null;
+      } else {
+        const { rows: [la] } = await client.query(
+          `SELECT tenant_id FROM prop_lease_agreements WHERE unit_id = $1 AND status = 'ACTIVE' LIMIT 1`,
+          [body.unit_id],
+        );
+        tenantId = la?.tenant_id ?? null;
+      }
+
       const { rows } = await client.query(
         `INSERT INTO prop_handover_checklists
-           (owner_id, unit_id, lease_id, type,
+           (owner_id, unit_id, lease_id, tenant_id, type,
             tec_meter_reading, tec_account_number, wasa_meter_reading, wasa_account_number,
             condition_items, inventory_items,
             keys_issued, keys_returned, gate_remotes_issued, gate_remotes_returned,
             photo_urls, notes)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING *`,
-        [ownerId, body.unit_id, body.lease_id ?? null, body.type,
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING *`,
+        [ownerId, body.unit_id, body.lease_id ?? null, tenantId, body.type,
          body.tec_meter_reading ?? null, body.tec_account_number ?? null,
          body.wasa_meter_reading ?? null, body.wasa_account_number ?? null,
          JSON.stringify(body.condition_items ?? []),

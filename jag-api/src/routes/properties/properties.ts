@@ -670,6 +670,13 @@ propertiesRouter.post('/:propertyId/leases', async (req: Request, res: Response,
              WHERE unit_id = $2 AND owner_id = $3 AND tenant_id IS NULL`,
             [b.tenant_id, b.unit_id, ownerId],
           );
+          // Same backfill for ENTRY handover checklists done on this unit before
+          // the lease was on file (see migration 055).
+          await c.query(
+            `UPDATE prop_handover_checklists SET tenant_id = $1
+             WHERE unit_id = $2 AND owner_id = $3 AND tenant_id IS NULL`,
+            [b.tenant_id, b.unit_id, ownerId],
+          );
         }
         return result.rows[0];
       });
