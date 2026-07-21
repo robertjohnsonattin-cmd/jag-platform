@@ -50,6 +50,27 @@ check_ssh() {
   info "VM reachable."
 }
 
+# Plain `scp -r` on a directory with hundreds of small files (node_modules,
+# compiled dist/) has been observed to silently stall partway through --
+# TCP stays ESTABLISHED, no error, no timeout, remote byte count just stops
+# growing (found session 44, 2026-07-21; see CLAUDE.md). Tar into one file
+# locally, scp that single file (fast and reliable), extract on the VM.
+tar_upload() {
+  local local_dir="$1" remote_dir="$2" label="$3"
+  local tmp_tar; tmp_tar="$(mktemp -u).tar.gz"
+  local remote_tar="/tmp/deploy_$(basename "$remote_dir")_$(date +%s).tar.gz"
+  tar -czf "$tmp_tar" -C "$local_dir" . || { rm -f "$tmp_tar"; fail "tar of $label failed."; }
+  $SCP_CMD "$tmp_tar" "$VM_HOST:$remote_tar" || { rm -f "$tmp_tar"; fail "SCP of $label archive failed."; }
+  rm -f "$tmp_tar"
+  $SSH_CMD "$VM_HOST" "
+    set -e
+    rm -rf '$remote_dir'
+    mkdir -p '$remote_dir'
+    tar -xzf '$remote_tar' -C '$remote_dir'
+    rm -f '$remote_tar'
+  " || fail "Remote extract of $label failed."
+}
+
 # ── Robert sign-off ───────────────────────────────────────────────────────────
 echo ""
 echo -e "${YELLOW}┌─────────────────────────────────────────────────────┐${NC}"
@@ -93,7 +114,7 @@ check_ssh
 if [[ $FRONTEND_ONLY -eq 0 ]]; then
   info "Step 4/7 — Uploading compiled dist/ to VM…"
   # The Dockerfile copies dist/ (pre-built on host) — never src/
-  $SCP_CMD -r "$SCRIPT_DIR/jag-api/dist/." "$VM_HOST:/opt/jag/jag-api/dist/" || fail "SCP of dist/ failed."
+  tar_upload "$SCRIPT_DIR/jag-api/dist" "/opt/jag/jag-api/dist" "dist/"
   info "dist/ uploaded."
 
   # Regression 2026-07-20: this step was missing entirely. The Dockerfile's
@@ -106,8 +127,7 @@ if [[ $FRONTEND_ONLY -eq 0 ]]; then
   # drift apart again.
   info "Step 4a — Rebuilding prod_modules/ and uploading to VM…"
   ( cd "$SCRIPT_DIR/jag-api" && npm run prod-install ) || fail "prod-install failed."
-  $SCP_CMD -r "$SCRIPT_DIR/jag-api/prod_modules/node_modules" "$VM_HOST:/opt/jag/jag-api/prod_modules/" \
-    || fail "SCP of prod_modules/node_modules failed."
+  tar_upload "$SCRIPT_DIR/jag-api/prod_modules/node_modules" "/opt/jag/jag-api/prod_modules/node_modules" "prod_modules/node_modules"
   info "prod_modules/node_modules uploaded."
 
   info "Step 4b — Rebuilding and restarting API container…"
