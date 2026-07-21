@@ -1030,6 +1030,110 @@ function PayInvoiceModal({ propertyId, inv, onClose, onUpdated }: {
   )
 }
 
+// ─── Allocate Vendor Invoice Modal ────────────────────────────────────────────
+function AllocateInvoiceModal({ propertyId, inv, onClose, onUpdated }: {
+  propertyId: string; inv: VendorInvoice; onClose: () => void; onUpdated: () => void
+}) {
+  const { t } = useTranslation()
+  const [method, setMethod] = useState<'EQUAL' | 'PERCENTAGE'>('EQUAL')
+  const [selected, setSelected] = useState<string[]>([])
+  const [pcts, setPcts] = useState<Record<string, string>>({})
+
+  const { data: units = [] } = useQuery({
+    queryKey: ['properties', propertyId, 'units-alloc'],
+    queryFn: () => propertiesApi.getUnits(propertyId),
+  })
+  const { data: existing = [] } = useQuery({
+    queryKey: ['invoice-allocations', inv.id],
+    queryFn: () => propertiesApi.getInvoiceAllocations(propertyId, inv.id),
+  })
+
+  const toggleUnit = (unitId: string) => {
+    setSelected(s => s.includes(unitId) ? s.filter(id => id !== unitId) : [...s, unitId])
+  }
+
+  const pctSum = selected.reduce((sum, id) => sum + (parseFloat(pcts[id]) || 0), 0)
+
+  const { mutate, isPending, error } = useMutation({
+    mutationFn: () => method === 'EQUAL'
+      ? propertiesApi.allocateInvoiceEqual(propertyId, inv.id, selected)
+      : propertiesApi.allocateInvoicePct(propertyId, inv.id, selected.map(id => ({ unit_id: id, pct: parseFloat(pcts[id]) || 0 }))),
+    onSuccess: () => { onUpdated(); onClose() },
+  })
+
+  const clearMut = useMutation({
+    mutationFn: () => propertiesApi.clearInvoiceAllocations(propertyId, inv.id),
+    onSuccess: () => { onUpdated() },
+  })
+
+  const canSave = selected.length > 0 && (method === 'EQUAL' || Math.abs(pctSum - 100) <= 0.5)
+
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
+      <div className="bg-slate-800 border border-slate-700 rounded-xl w-full max-w-md p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
+        <h2 className="text-base font-semibold mb-1 text-white">{t('propertiesPanel.allocateTitle', 'Allocate Cost')}</h2>
+        <p className="text-xs text-slate-400 mb-4">{inv.vendor_name} — {fmtTTD(inv.amount)}</p>
+
+        {existing.length > 0 && (
+          <div className="mb-4 p-2 bg-slate-700/40 rounded border border-slate-600 text-xs text-slate-300 space-y-0.5">
+            <p className="text-slate-400 mb-1">{t('propertiesPanel.currentAllocation', 'Current allocation:')}</p>
+            {existing.map(a => (
+              <div key={a.id} className="flex justify-between">
+                <span>{t('propertiesPanel.unitLabel', 'Unit')} {a.unit_number}</span>
+                <span>{a.pct}% · {fmtTTD(a.amount)}</span>
+              </div>
+            ))}
+            <button onClick={() => clearMut.mutate()} disabled={clearMut.isPending}
+              className="text-red-400 hover:text-red-300 text-xs mt-1">
+              {t('propertiesPanel.clearAllocation', 'Clear allocation')}
+            </button>
+          </div>
+        )}
+
+        <div className="flex gap-2 mb-3">
+          <button onClick={() => setMethod('EQUAL')}
+            className={`flex-1 py-1.5 text-xs rounded border ${method === 'EQUAL' ? 'bg-blue-600 border-blue-500 text-white' : 'bg-slate-700 border-slate-600 text-slate-300'}`}>
+            {t('propertiesPanel.splitEqual', 'Split Equally')}
+          </button>
+          <button onClick={() => setMethod('PERCENTAGE')}
+            className={`flex-1 py-1.5 text-xs rounded border ${method === 'PERCENTAGE' ? 'bg-blue-600 border-blue-500 text-white' : 'bg-slate-700 border-slate-600 text-slate-300'}`}>
+            {t('propertiesPanel.splitPct', 'By Percentage')}
+          </button>
+        </div>
+
+        <div className="space-y-1.5 max-h-64 overflow-y-auto">
+          {units.map((u: Unit) => (
+            <div key={u.id} className="flex items-center gap-2 px-2 py-1.5 bg-slate-700/30 rounded">
+              <input type="checkbox" checked={selected.includes(u.id)} onChange={() => toggleUnit(u.id)} />
+              <span className="text-sm text-slate-200 flex-1">{u.unit_number}</span>
+              {method === 'PERCENTAGE' && selected.includes(u.id) && (
+                <input type="number" className="w-16 bg-slate-700 border border-slate-600 rounded px-1.5 py-0.5 text-xs text-slate-100"
+                  value={pcts[u.id] ?? ''} onChange={e => setPcts(p => ({ ...p, [u.id]: e.target.value }))} placeholder="%" />
+              )}
+            </div>
+          ))}
+        </div>
+
+        {method === 'PERCENTAGE' && selected.length > 0 && (
+          <p className={`text-xs mt-2 ${Math.abs(pctSum - 100) <= 0.5 ? 'text-green-400' : 'text-amber-400'}`}>
+            {t('propertiesPanel.pctSum', 'Total: {{pct}}%', { pct: pctSum.toFixed(1) })}
+          </p>
+        )}
+
+        {error && <p className="text-red-400 text-xs mt-2">{error instanceof Error ? error.message : 'Failed.'}</p>}
+
+        <div className="flex gap-3 mt-5">
+          <button onClick={() => mutate()} disabled={isPending || !canSave}
+            className="flex-1 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-sm rounded-lg transition-colors">
+            {isPending ? t('common.saving') : t('common.save')}
+          </button>
+          <button onClick={onClose} className="px-4 py-2 text-slate-400 hover:text-white text-sm transition-colors">{t('common.cancel')}</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ─── Add Property Insurance Modal ────────────────────────────────────────────
 const PROP_INS_TYPES = ['BUILDING','CONTENTS','COMPREHENSIVE','FLOOD','FIRE','LIABILITY','OTHER'] as const
 
@@ -2171,6 +2275,7 @@ function PropertyDetail({ property, onDeleted }: { property: Property; onDeleted
   const [showAddUtility, setShowAddUtility] = useState(false)
   const [showAddInvoice, setShowAddInvoice] = useState(false)
   const [payingInvoice, setPayingInvoice] = useState<VendorInvoice | null>(null)
+  const [allocatingInvoice, setAllocatingInvoice] = useState<VendorInvoice | null>(null)
   const [showAddInsurance, setShowAddInsurance] = useState(false)
   const [showAddTax, setShowAddTax] = useState(false)
   const [payingTax, setPayingTax] = useState<PropertyTaxRecord | null>(null)
@@ -2652,8 +2757,10 @@ function PropertyDetail({ property, onDeleted }: { property: Property; onDeleted
                           )}
                           {inv.status === 'APPROVED' && (
                             <button onClick={() => setPayingInvoice(inv)}
-                              className="text-xs text-green-400 hover:text-green-300 transition-colors">{t('propertiesPanel.payBtn')}</button>
+                              className="text-xs text-green-400 hover:text-green-300 transition-colors mr-2">{t('propertiesPanel.payBtn')}</button>
                           )}
+                          <button onClick={() => setAllocatingInvoice(inv)}
+                            className="text-xs text-slate-400 hover:text-slate-200 transition-colors">{t('propertiesPanel.allocateBtn', 'Allocate')}</button>
                         </td>
                       </tr>
                     ))}
@@ -3019,6 +3126,8 @@ function PropertyDetail({ property, onDeleted }: { property: Property; onDeleted
         onCreated={() => void qc.invalidateQueries({ queryKey: ['properties', property.id, 'invoices'] })} />}
       {payingInvoice    && <PayInvoiceModal propertyId={property.id} inv={payingInvoice} onClose={() => setPayingInvoice(null)}
         onUpdated={() => void qc.invalidateQueries({ queryKey: ['properties', property.id, 'invoices'] })} />}
+      {allocatingInvoice && <AllocateInvoiceModal propertyId={property.id} inv={allocatingInvoice} onClose={() => setAllocatingInvoice(null)}
+        onUpdated={() => void qc.invalidateQueries({ queryKey: ['invoice-allocations', allocatingInvoice.id] })} />}
       {showAddInsurance && <AddPropertyInsuranceModal propertyId={property.id} onClose={() => setShowAddInsurance(false)}
         onCreated={() => void qc.invalidateQueries({ queryKey: ['finance', 'insurance', 'policies', 'property', property.id] })} />}
       {showAddTax       && <AddTaxModal propertyId={property.id} onClose={() => setShowAddTax(false)}

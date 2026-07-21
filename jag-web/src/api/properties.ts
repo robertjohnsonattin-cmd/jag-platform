@@ -1,7 +1,7 @@
 import { api } from './client'
 import type {
   Property, PropertyTenant, PipelineItem,
-  RentPayment, RentReceipt, UtilityBill, VendorInvoice, Lease, Mortgage,
+  RentPayment, RentReceipt, UtilityBill, VendorInvoice, VendorInvoiceAllocation, Lease, Mortgage,
   PropertyTaxRecord, Inspection, ArrearsRecord, LeaseExpiryRecord,
   FinancialSummary, PropertyDocument, UtilityAccount, Unit, UnitPhoto, PropertyValuationHistory,
   TenantDocument, TenantDocType,
@@ -71,6 +71,22 @@ export const propertiesApi = {
 
   payInvoice: (propertyId: string, id: string, body: { paid_date: string; payment_reference?: string }) =>
     api.patch<VendorInvoice>(`/properties/${propertyId}/vendor-invoices/${id}/pay`, body),
+
+  getInvoiceAllocations: (propertyId: string, id: string) =>
+    api.get<VendorInvoiceAllocation[]>(`/properties/${propertyId}/vendor-invoices/${id}/allocations`),
+
+  allocateInvoiceEqual: (propertyId: string, id: string, unitIds: string[]) =>
+    api.post<VendorInvoiceAllocation[]>(`/properties/${propertyId}/vendor-invoices/${id}/allocations`, {
+      method: 'EQUAL', unit_ids: unitIds,
+    }),
+
+  allocateInvoicePct: (propertyId: string, id: string, allocations: { unit_id: string; pct: number }[]) =>
+    api.post<VendorInvoiceAllocation[]>(`/properties/${propertyId}/vendor-invoices/${id}/allocations`, {
+      method: 'PERCENTAGE', allocations,
+    }),
+
+  clearInvoiceAllocations: (propertyId: string, id: string) =>
+    api.delete<{ invoice_id: string; cleared: number }>(`/properties/${propertyId}/vendor-invoices/${id}/allocations`),
 
   createProperty: (body: Record<string, unknown>) =>
     api.post<Property>('/properties', body),

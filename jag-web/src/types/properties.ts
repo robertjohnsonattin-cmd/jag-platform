@@ -116,6 +116,16 @@ export interface VendorInvoice {
   created_at: string
 }
 
+export interface VendorInvoiceAllocation {
+  id: string
+  invoice_id: string
+  unit_id: string
+  unit_number?: string
+  pct: string
+  amount: string
+  created_at: string
+}
+
 export interface Mortgage {
   id: string
   lender_name: string

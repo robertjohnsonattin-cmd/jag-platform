@@ -1,7 +1,10 @@
-// GET   /api/v1/properties/:propertyId/vendor-invoices
-// POST  /api/v1/properties/:propertyId/vendor-invoices
-// PATCH /api/v1/properties/:propertyId/vendor-invoices/:id/approve
-// PATCH /api/v1/properties/:propertyId/vendor-invoices/:id/pay
+// GET    /api/v1/properties/:propertyId/vendor-invoices
+// POST   /api/v1/properties/:propertyId/vendor-invoices
+// PATCH  /api/v1/properties/:propertyId/vendor-invoices/:id/approve
+// PATCH  /api/v1/properties/:propertyId/vendor-invoices/:id/pay
+// GET    /api/v1/properties/:propertyId/vendor-invoices/:id/allocations
+// POST   /api/v1/properties/:propertyId/vendor-invoices/:id/allocations — replaces existing allocations
+// DELETE /api/v1/properties/:propertyId/vendor-invoices/:id/allocations
 
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import { z } from 'zod';
@@ -41,6 +44,39 @@ const PayInvoiceSchema = z.object({
   paid_date:         z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'paid_date must be YYYY-MM-DD'),
   payment_reference: z.string().max(200).optional(),
 }).strict();
+
+const AllocateSchema = z.discriminatedUnion('method', [
+  z.object({
+    method:   z.literal('EQUAL'),
+    unit_ids: z.array(z.string().uuid()).min(1),
+  }).strict(),
+  z.object({
+    method:      z.literal('PERCENTAGE'),
+    allocations: z.array(z.object({
+      unit_id: z.string().uuid(),
+      pct:     z.number().positive().max(100),
+    })).min(1),
+  }).strict(),
+]);
+
+// Splits `total` across `n` shares by percentage without floating-point drift:
+// every share but the last is floor-rounded to cents, the last absorbs the
+// remainder so the shares always sum to exactly `total`.
+function distributeByPct(total: number, pcts: number[]): number[] {
+  const cents = Math.round(total * 100);
+  const shares: number[] = [];
+  let remaining = cents;
+  for (let i = 0; i < pcts.length; i++) {
+    if (i === pcts.length - 1) {
+      shares.push(remaining);
+    } else {
+      const share = Math.round((cents * pcts[i]) / 100);
+      shares.push(share);
+      remaining -= share;
+    }
+  }
+  return shares.map(c => c / 100);
+}
 
 // ── Shared audit helper ───────────────────────────────────────────────────────
 
@@ -233,6 +269,134 @@ vendorInvoicesRouter.patch('/:id/pay', async (req: Request, res: Response, next:
       logger.info({ entity: 'PROPERTIES', action: 'VENDOR_INVOICE_PAID', user_id: ownerId, record_id: id });
       await auditLog(ownerId, 'VendorInvoice', 'PAY', id, { paid_date, payment_reference });
       ok(res, updated);
+    } finally { client.release(); }
+  } catch (e) { next(e); }
+});
+
+// ── GET /:propertyId/vendor-invoices/:id/allocations ──────────────────────────
+
+vendorInvoicesRouter.get('/:id/allocations', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const paramParsed = InvoiceParam.safeParse(req.params);
+    if (!paramParsed.success) { err(res, 422, 'VALIDATION_ERROR', 'Invalid path parameters.'); return; }
+    const { id, propertyId } = paramParsed.data;
+
+    const client = await propertiesPool.connect();
+    try {
+      const rows = await withOwnerRLS(client, req.rlsCtx, (c) =>
+        c.query(
+          `SELECT a.id, a.invoice_id, a.unit_id, a.pct, a.amount, a.created_at, u.unit_number
+           FROM   prop_vendor_invoice_allocations a
+           JOIN   prop_units u ON u.id = a.unit_id
+           JOIN   prop_vendor_invoices i ON i.id = a.invoice_id
+           WHERE  a.invoice_id = $1 AND i.property_id = $2
+           ORDER  BY u.unit_number`,
+          [id, propertyId],
+        ).then(r => r.rows),
+      );
+      ok(res, rows);
+    } finally { client.release(); }
+  } catch (e) { next(e); }
+});
+
+// ── POST /:propertyId/vendor-invoices/:id/allocations — replace allocation set ─
+
+vendorInvoicesRouter.post('/:id/allocations', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const paramParsed = InvoiceParam.safeParse(req.params);
+    if (!paramParsed.success) { err(res, 422, 'VALIDATION_ERROR', 'Invalid path parameters.'); return; }
+    const bodyParsed = AllocateSchema.safeParse(req.body);
+    if (!bodyParsed.success) { err(res, 422, 'VALIDATION_ERROR', 'Request body validation failed.'); return; }
+
+    const { id, propertyId } = paramParsed.data;
+    const body = bodyParsed.data;
+    const { userId: ownerId } = req.rlsCtx;
+
+    let unitIds: string[];
+    let pcts: number[];
+    if (body.method === 'EQUAL') {
+      unitIds = body.unit_ids;
+      pcts = unitIds.map(() => 100 / unitIds.length);
+    } else {
+      unitIds = body.allocations.map(a => a.unit_id);
+      pcts = body.allocations.map(a => a.pct);
+      const pctSum = pcts.reduce((s, p) => s + p, 0);
+      if (Math.abs(pctSum - 100) > 0.5) {
+        err(res, 422, 'VALIDATION_ERROR', `Percentages must sum to 100 (got ${pctSum.toFixed(2)}).`);
+        return;
+      }
+    }
+    if (new Set(unitIds).size !== unitIds.length) {
+      err(res, 422, 'VALIDATION_ERROR', 'Each unit can only appear once in an allocation.'); return;
+    }
+
+    const client = await propertiesPool.connect();
+    try {
+      const result = await withOwnerRLS(client, req.rlsCtx, async (c) => {
+        const invoice = await c.query<{ amount: string }>(
+          `SELECT amount FROM prop_vendor_invoices WHERE id = $1 AND property_id = $2`,
+          [id, propertyId],
+        ).then(r => r.rows[0] ?? null);
+        if (!invoice) throw Object.assign(new Error('INVOICE_NOT_FOUND'), { httpStatus: 404 });
+
+        const unitCheck = await c.query<{ id: string }>(
+          `SELECT id FROM prop_units WHERE id = ANY($1::uuid[]) AND property_id = $2`,
+          [unitIds, propertyId],
+        );
+        if (unitCheck.rows.length !== unitIds.length) {
+          throw Object.assign(new Error('UNIT_NOT_IN_PROPERTY'), { httpStatus: 422 });
+        }
+
+        const amounts = distributeByPct(Number(invoice.amount), pcts);
+
+        await c.query(`DELETE FROM prop_vendor_invoice_allocations WHERE invoice_id = $1`, [id]);
+
+        const inserted = [];
+        for (let i = 0; i < unitIds.length; i++) {
+          const row = await c.query(
+            `INSERT INTO prop_vendor_invoice_allocations (owner_id, invoice_id, unit_id, pct, amount)
+             VALUES ($1,$2,$3,$4,$5) RETURNING id, invoice_id, unit_id, pct, amount, created_at`,
+            [ownerId, id, unitIds[i], pcts[i], amounts[i]],
+          );
+          inserted.push(row.rows[0]);
+        }
+        return inserted;
+      });
+
+      logger.info({ entity: 'PROPERTIES', action: 'VENDOR_INVOICE_ALLOCATED', user_id: ownerId, record_id: id, unit_count: unitIds.length });
+      await auditLog(ownerId, 'VendorInvoice', 'ALLOCATE', id, { method: body.method, unit_ids: unitIds });
+      ok(res, result, 201);
+    } finally { client.release(); }
+  } catch (e: unknown) {
+    const ex = e as { httpStatus?: number; message: string };
+    if (ex.httpStatus === 404) { err(res, 404, 'INVOICE_NOT_FOUND', 'Invoice not found.'); return; }
+    if (ex.httpStatus === 422) { err(res, 422, 'VALIDATION_ERROR', 'One or more units do not belong to this property.'); return; }
+    next(e);
+  }
+});
+
+// ── DELETE /:propertyId/vendor-invoices/:id/allocations ────────────────────────
+
+vendorInvoicesRouter.delete('/:id/allocations', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const paramParsed = InvoiceParam.safeParse(req.params);
+    if (!paramParsed.success) { err(res, 422, 'VALIDATION_ERROR', 'Invalid path parameters.'); return; }
+    const { id, propertyId } = paramParsed.data;
+    const { userId: ownerId } = req.rlsCtx;
+
+    const client = await propertiesPool.connect();
+    try {
+      const deleted = await withOwnerRLS(client, req.rlsCtx, (c) =>
+        c.query(
+          `DELETE FROM prop_vendor_invoice_allocations
+           WHERE invoice_id = $1
+             AND invoice_id IN (SELECT id FROM prop_vendor_invoices WHERE id = $1 AND property_id = $2)
+           RETURNING id`,
+          [id, propertyId],
+        ).then(r => r.rows),
+      );
+      logger.info({ entity: 'PROPERTIES', action: 'VENDOR_INVOICE_ALLOCATIONS_CLEARED', user_id: ownerId, record_id: id, count: deleted.length });
+      ok(res, { invoice_id: id, cleared: deleted.length });
     } finally { client.release(); }
   } catch (e) { next(e); }
 });
