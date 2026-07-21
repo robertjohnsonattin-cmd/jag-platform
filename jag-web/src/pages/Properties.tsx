@@ -10,6 +10,7 @@ import PropertiesApplicationsPanel from '../components/properties/PropertiesAppl
 import PropertiesRentSchedulePanel from '../components/properties/PropertiesRentSchedulePanel'
 import PropertiesDepositsPanel from '../components/properties/PropertiesDepositsPanel'
 import PropertiesMaintenancePanel from '../components/properties/PropertiesMaintenancePanel'
+import PropertiesScheduledMaintenancePanel from '../components/properties/PropertiesScheduledMaintenancePanel'
 import PropertiesContractorsPanel from '../components/properties/PropertiesContractorsPanel'
 import PropertiesHandoverPanel from '../components/properties/PropertiesHandoverPanel'
 import PropertiesRenewalsPanel from '../components/properties/PropertiesRenewalsPanel'
@@ -26,6 +27,7 @@ const TABS = [
   { id: 'deposits',    key: 'tenancy.tabs.deposits' },
   { id: 'rent',        key: 'tenancy.tabs.rent' },
   { id: 'maintenance', key: 'tenancy.tabs.maintenance' },
+  { id: 'sched_maintenance', key: 'tenancy.tabs.schedMaintenance' },
   { id: 'contractors', key: 'tenancy.tabs.contractors' },
   { id: 'handover',    key: 'tenancy.tabs.handover' },
   { id: 'renewals',    key: 'tenancy.tabs.renewals' },
@@ -75,6 +77,7 @@ export default function Properties() {
       {tab === 'deposits'     && <PropertiesDepositsPanel />}
       {tab === 'rent'         && <PropertiesRentSchedulePanel />}
       {tab === 'maintenance'  && <PropertiesMaintenancePanel focusId={focusId} />}
+      {tab === 'sched_maintenance' && <PropertiesScheduledMaintenancePanel />}
       {tab === 'contractors'  && <PropertiesContractorsPanel />}
       {tab === 'handover'     && <PropertiesHandoverPanel />}
       {tab === 'renewals'     && <PropertiesRenewalsPanel />}

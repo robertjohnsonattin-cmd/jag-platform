@@ -138,6 +138,25 @@ export const tenancyApi = {
   patchContractor: (id: string, body: Row) =>
     api.patch<Row>(`/properties/contractors/${id}`, body),
 
+  // ── Scheduled (Preventive) Maintenance ────────────────────
+  getScheduledMaintenance: (params?: { property_id?: string; unit_id?: string; status?: string }) =>
+    api.get<Row[]>(`/properties/scheduled-maintenance${qs(params)}`),
+
+  getScheduledMaintenanceTask: (id: string) =>
+    api.get<Row>(`/properties/scheduled-maintenance/${id}`),
+
+  createScheduledMaintenance: (body: Row) =>
+    api.post<Row>('/properties/scheduled-maintenance', body),
+
+  patchScheduledMaintenance: (id: string, body: Row) =>
+    api.patch<Row>(`/properties/scheduled-maintenance/${id}`, body),
+
+  deleteScheduledMaintenance: (id: string) =>
+    api.delete<{ id: string }>(`/properties/scheduled-maintenance/${id}`),
+
+  completeScheduledMaintenance: (id: string, body: { completed_date: string; actual_cost_ttd?: number; completed_by?: string; notes?: string }) =>
+    api.post<Row>(`/properties/scheduled-maintenance/${id}/complete`, body),
+
   // ── Handover Checklists ───────────────────────────────────
   getHandoverByUnit: (unitId: string) =>
     api.get<Row[]>(`/properties/handover/unit/${unitId}`),
