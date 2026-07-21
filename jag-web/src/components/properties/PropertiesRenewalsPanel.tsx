@@ -55,7 +55,7 @@ export default function PropertiesRenewalsPanel() {
                   <p className={`text-xs mt-1 font-semibold ${daysLeft <= 14 ? 'text-red-400' : daysLeft <= 30 ? 'text-orange-400' : 'text-yellow-400'}`}>
                     {daysLeft} {t('tenancy.daysRemaining','days remaining')}
                   </p>
-                  <p className="text-xs text-slate-500">Rent: TTD ${parseFloat(String(r['rent_amount_ttd'] ?? 0)).toFixed(2)}</p>
+                  <p className="text-xs text-slate-500">Rent: TTD ${parseFloat(String(r['monthly_rent'] ?? 0)).toFixed(2)}</p>
                 </div>
                 <div className="text-right">
                   {r['tenant_response']
@@ -76,7 +76,7 @@ export default function PropertiesRenewalsPanel() {
                     </select>
                   </div>
                   {String(r['tenant_response']) === 'RENEWING' && (
-                    <button onClick={() => { setRenewModal(true); setRenewForm(f => ({ ...f, new_rent_ttd: String(r['rent_amount_ttd']) })) }}
+                    <button onClick={() => { setRenewModal(true); setRenewForm(f => ({ ...f, new_rent_ttd: String(r['monthly_rent']) })) }}
                       className="px-3 py-1.5 text-xs bg-green-700 hover:bg-green-600 text-white rounded self-end">
                       {t('tenancy.processRenewal','Process Renewal')}
                     </button>

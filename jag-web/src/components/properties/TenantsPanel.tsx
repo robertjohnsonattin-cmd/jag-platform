@@ -40,6 +40,13 @@ const TICKET_STATUS_COLORS: Record<string, string> = {
   CANCELLED:       'bg-slate-700 text-slate-400 border-slate-600',
 }
 
+const RENEWAL_RESPONSE_COLORS: Record<string, string> = {
+  RENEWING:    'bg-green-900/50 text-green-300 border-green-700',
+  VACATING:    'bg-red-900/50 text-red-300 border-red-700',
+  DISCUSSING:  'bg-yellow-900/50 text-yellow-300 border-yellow-700',
+  NO_RESPONSE: 'bg-slate-700 text-slate-400 border-slate-600',
+}
+
 const cls = 'w-full bg-slate-700 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500'
 
 const ID_TYPES = ['TT_NIC', 'PASSPORT', 'COMPANY_REG', 'DRIVERS_LICENCE', 'OTHER'] as const
@@ -569,6 +576,66 @@ function TenantMaintenanceModal({ tenant, onClose }: { tenant: PropertyTenant; o
   )
 }
 
+// ── Tenant Renewals Modal ────────────────────────────────────────────────────
+// Unlike deposits/applications/maintenance, prop_renewal_notices already had
+// lease_id NOT NULL (renewal notices can't exist without a lease), so tenant_id
+// was always reachable via the lease -- same class of gap as Leases: missing
+// query + missing UI, not a missing data link.
+
+function TenantRenewalsModal({ tenant, onClose }: { tenant: PropertyTenant; onClose: () => void }) {
+  const { t } = useTranslation()
+
+  const tenantName = tenant.is_company
+    ? (tenant.company_name ?? 'Tenant')
+    : `${tenant.first_name}${tenant.last_name ? ` ${tenant.last_name}` : ''}`
+
+  const { data: renewals = [], isLoading } = useQuery({
+    queryKey: ['tenant-renewals', tenant.id],
+    queryFn: () => tenancyApi.getRenewals({ tenant_id: tenant.id }),
+  })
+
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
+      <div className="bg-slate-800 border border-slate-700 rounded-xl w-full max-w-2xl p-6 shadow-2xl max-h-[90vh] flex flex-col">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h2 className="text-lg font-semibold text-white">{t('tenants.renewals.title', 'Renewals')}</h2>
+            <p className="text-xs text-slate-400 mt-0.5">{tenantName}</p>
+          </div>
+          <button onClick={onClose} className="text-slate-500 hover:text-slate-300 text-xl leading-none">×</button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto space-y-3">
+          {isLoading && <p className="text-slate-400 text-sm">{t('common.loading')}</p>}
+          {!isLoading && renewals.length === 0 && (
+            <p className="text-slate-500 text-sm text-center py-8">{t('tenants.renewals.none', 'No renewal notices on file for this tenant.')}</p>
+          )}
+          {renewals.map((r: Record<string, unknown>) => (
+            <div key={String(r['id'])} className="bg-slate-700/50 rounded-lg border border-slate-700 p-3">
+              <div className="flex items-start justify-between">
+                <div>
+                  <p className="text-sm text-slate-200">{String(r['property_name'] ?? '—')}{r['unit_number'] ? ` · Unit ${String(r['unit_number'])}` : ''}</p>
+                  <p className="text-xs text-slate-400 mt-0.5">{t('tenancy.leaseEnd', 'Lease Ends')}: {r['lease_end_date'] ? fmtDate(String(r['lease_end_date'])) : '—'}</p>
+                  {Boolean(r['monthly_rent']) && (
+                    <p className="text-xs text-slate-400 mt-0.5">TTD ${parseFloat(String(r['monthly_rent'])).toLocaleString('en-TT', { minimumFractionDigits: 2 })}/mo</p>
+                  )}
+                </div>
+                {r['tenant_response']
+                  ? <span className={`text-xs px-2 py-0.5 rounded border ${RENEWAL_RESPONSE_COLORS[String(r['tenant_response'])] ?? ''}`}>{String(r['tenant_response']).replace(/_/g, ' ')}</span>
+                  : <span className="text-xs text-slate-500">{t('tenancy.awaitingResponse', 'Awaiting Response')}</span>}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="mt-4 pt-4 border-t border-slate-700 flex justify-end">
+          <button onClick={onClose} className="px-4 py-2 text-sm text-slate-400 hover:text-white transition-colors">{t('common.close', 'Close')}</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Tenant Leases Modal ────────────────────────────────────────────────────────
 // Unlike deposits, leases already carry tenant_id NOT NULL -- the gap here was
 // purely a missing query (every other lease route is scoped under
@@ -703,6 +770,7 @@ export default function TenantsPanel() {
   const [leasesForTenant, setLeasesForTenant] = useState<PropertyTenant | null>(null)
   const [applicationsForTenant, setApplicationsForTenant] = useState<PropertyTenant | null>(null)
   const [maintenanceForTenant, setMaintenanceForTenant] = useState<PropertyTenant | null>(null)
+  const [renewalsForTenant, setRenewalsForTenant] = useState<PropertyTenant | null>(null)
   const qc = useQueryClient()
 
   const handleSearch = (val: string) => {
@@ -790,6 +858,11 @@ export default function TenantsPanel() {
                       title={t('tenants.maintenance.title', 'Maintenance')}
                     >{t('tenants.maintenance.btn', 'Maintenance')}</button>
                     <button
+                      onClick={() => setRenewalsForTenant(tn)}
+                      className="text-xs text-slate-500 hover:text-green-400 transition-colors"
+                      title={t('tenants.renewals.title', 'Renewals')}
+                    >{t('tenants.renewals.btn', 'Renewals')}</button>
+                    <button
                       onClick={() => setEditingTenant(tn)}
                       className="text-xs text-slate-500 hover:text-blue-400 transition-colors"
                     >{t('tenants.editBtn')}</button>
@@ -812,6 +885,7 @@ export default function TenantsPanel() {
       {leasesForTenant && <TenantLeasesModal tenant={leasesForTenant} onClose={() => setLeasesForTenant(null)} />}
       {applicationsForTenant && <TenantApplicationsModal tenant={applicationsForTenant} onClose={() => setApplicationsForTenant(null)} />}
       {maintenanceForTenant && <TenantMaintenanceModal tenant={maintenanceForTenant} onClose={() => setMaintenanceForTenant(null)} />}
+      {renewalsForTenant && <TenantRenewalsModal tenant={renewalsForTenant} onClose={() => setRenewalsForTenant(null)} />}
       {deletingTenant && (
         <ConfirmDeleteModal
           label={deletingTenant.is_company ? (deletingTenant.company_name ?? 'Tenant') : `${deletingTenant.first_name}${deletingTenant.last_name ? ` ${deletingTenant.last_name}` : ''}`}

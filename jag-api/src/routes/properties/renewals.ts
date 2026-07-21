@@ -46,18 +46,24 @@ renewalsRouter.get('/', async (req: Request, res: Response, next: NextFunction) 
     const ownerId = req.rlsCtx.userId;
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
 
+    const tenantId = req.query['tenant_id'] as string | undefined;
+
     const rows = await withOwnerRLS(propertiesPool, ownerId, async client => {
+      const conds: string[] = [];
+      const vals: unknown[] = [ownerId];
+      if (tenantId) { vals.push(tenantId); conds.push(`l.tenant_id = $${vals.length}`); }
+      const where = conds.length ? ' AND ' + conds.join(' AND ') : '';
       const { rows: r } = await client.query(
-        `SELECT rn.*, l.end_date AS lease_end_date, l.rent_amount_ttd,
+        `SELECT rn.*, l.end_date AS lease_end_date, l.monthly_rent,
                 u.unit_number, p.name AS property_name,
                 (l.end_date - CURRENT_DATE) AS days_remaining
          FROM prop_renewal_notices rn
          JOIN prop_lease_agreements l ON l.id = rn.lease_id
          JOIN prop_units u ON u.id = rn.unit_id
          LEFT JOIN prop_properties p ON p.id = u.property_id
-         WHERE rn.owner_id = $1
+         WHERE rn.owner_id = $1${where}
          ORDER BY l.end_date ASC LIMIT 200`,
-        [ownerId],
+        vals,
       );
       return r;
     });
