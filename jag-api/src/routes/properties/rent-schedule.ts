@@ -146,23 +146,28 @@ rentScheduleRouter.get('/', async (req: Request, res: Response, next: NextFuncti
     const ownerId = req.rlsCtx.userId;
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
 
-    const unitId  = req.query['unit_id'] as string | undefined;
-    const leaseId = req.query['lease_id'] as string | undefined;
-    const status  = req.query['status'] as string | undefined;
-    const year    = req.query['year'] as string | undefined;
+    const unitId   = req.query['unit_id'] as string | undefined;
+    const leaseId  = req.query['lease_id'] as string | undefined;
+    const status   = req.query['status'] as string | undefined;
+    const year     = req.query['year'] as string | undefined;
+    const tenantId = req.query['tenant_id'] as string | undefined;
 
     const rows = await withOwnerRLS(propertiesPool, ownerId, async client => {
       const conds: string[] = [];
       const vals: unknown[] = [ownerId];
-      if (unitId)  { vals.push(unitId);  conds.push(`rs.unit_id = $${vals.length}`); }
-      if (leaseId) { vals.push(leaseId); conds.push(`rs.lease_id = $${vals.length}`); }
-      if (status)  { vals.push(status);  conds.push(`rs.status = $${vals.length}`); }
-      if (year)    { vals.push(parseInt(year, 10)); conds.push(`rs.period_year = $${vals.length}`); }
+      if (unitId)   { vals.push(unitId);   conds.push(`rs.unit_id = $${vals.length}`); }
+      if (leaseId)  { vals.push(leaseId);  conds.push(`rs.lease_id = $${vals.length}`); }
+      if (status)   { vals.push(status);   conds.push(`rs.status = $${vals.length}`); }
+      if (year)     { vals.push(parseInt(year, 10)); conds.push(`rs.period_year = $${vals.length}`); }
+      // rent schedule has no tenant_id of its own -- lease_id is NOT NULL, so
+      // tenant_id is always reachable via the lease (same as leases/renewals).
+      if (tenantId) { vals.push(tenantId); conds.push(`l.tenant_id = $${vals.length}`); }
       const where = conds.length ? ' AND ' + conds.join(' AND ') : '';
       const { rows: r } = await client.query(
         `SELECT rs.*, u.unit_number, p.name AS property_name
          FROM prop_rent_schedule rs
          JOIN prop_units u ON u.id = rs.unit_id
+         JOIN prop_lease_agreements l ON l.id = rs.lease_id
          LEFT JOIN prop_properties p ON p.id = u.property_id
          WHERE rs.owner_id = $1${where}
          ORDER BY rs.due_date DESC LIMIT 500`,

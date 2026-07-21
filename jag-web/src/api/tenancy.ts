@@ -80,7 +80,7 @@ export const tenancyApi = {
     api.post<{ tenant: Record<string, unknown>; docs_copied: number }>(`/properties/applications/${id}/create-tenant`, body),
 
   // ── Rent Schedule ─────────────────────────────────────────
-  getRentSchedule: (params?: { lease_id?: string; status?: string }) =>
+  getRentSchedule: (params?: { lease_id?: string; status?: string; unit_id?: string; year?: string; tenant_id?: string }) =>
     api.get<Row[]>(`/properties/rent-schedule${qs(params)}`),
 
   getRentPeriod: (id: string) =>
