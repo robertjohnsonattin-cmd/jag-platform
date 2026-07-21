@@ -30,6 +30,16 @@ const APPLICATION_STATUS_COLORS: Record<string, string> = {
   WITHDRAWN:     'bg-slate-700 text-slate-400 border-slate-600',
 }
 
+const TICKET_STATUS_COLORS: Record<string, string> = {
+  OPEN:            'bg-red-900/50 text-red-300 border-red-700',
+  ASSIGNED:        'bg-orange-900/50 text-orange-300 border-orange-700',
+  IN_PROGRESS:     'bg-blue-900/50 text-blue-300 border-blue-700',
+  PENDING_PARTS:   'bg-orange-900/50 text-orange-300 border-orange-700',
+  RESOLVED:        'bg-green-900/50 text-green-300 border-green-700',
+  CLOSED:          'bg-slate-700 text-slate-400 border-slate-600',
+  CANCELLED:       'bg-slate-700 text-slate-400 border-slate-600',
+}
+
 const cls = 'w-full bg-slate-700 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500'
 
 const ID_TYPES = ['TT_NIC', 'PASSPORT', 'COMPANY_REG', 'DRIVERS_LICENCE', 'OTHER'] as const
@@ -501,6 +511,64 @@ function TenantApplicationsModal({ tenant, onClose }: { tenant: PropertyTenant; 
   )
 }
 
+// ── Tenant Maintenance Tickets Modal ─────────────────────────────────────────
+// prop_maintenance_tickets had no tenant_id at all -- only a nullable lease_id
+// the frontend never actually populates. tenant_id is resolved from unit_id's
+// active lease at ticket-creation time instead (see migration 054).
+
+function TenantMaintenanceModal({ tenant, onClose }: { tenant: PropertyTenant; onClose: () => void }) {
+  const { t } = useTranslation()
+
+  const tenantName = tenant.is_company
+    ? (tenant.company_name ?? 'Tenant')
+    : `${tenant.first_name}${tenant.last_name ? ` ${tenant.last_name}` : ''}`
+
+  const { data: tickets = [], isLoading } = useQuery({
+    queryKey: ['tenant-maintenance', tenant.id],
+    queryFn: () => tenancyApi.getMaintenanceTickets({ tenant_id: tenant.id }),
+  })
+
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
+      <div className="bg-slate-800 border border-slate-700 rounded-xl w-full max-w-2xl p-6 shadow-2xl max-h-[90vh] flex flex-col">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h2 className="text-lg font-semibold text-white">{t('tenants.maintenance.title', 'Maintenance')}</h2>
+            <p className="text-xs text-slate-400 mt-0.5">{tenantName}</p>
+          </div>
+          <button onClick={onClose} className="text-slate-500 hover:text-slate-300 text-xl leading-none">×</button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto space-y-3">
+          {isLoading && <p className="text-slate-400 text-sm">{t('common.loading')}</p>}
+          {!isLoading && tickets.length === 0 && (
+            <p className="text-slate-500 text-sm text-center py-8">{t('tenants.maintenance.none', 'No maintenance tickets on file for this tenant.')}</p>
+          )}
+          {tickets.map((tk: Record<string, unknown>) => (
+            <div key={String(tk['id'])} className="bg-slate-700/50 rounded-lg border border-slate-700 p-3">
+              <div className="flex items-start justify-between">
+                <div>
+                  <p className="text-sm text-slate-200">{String(tk['ticket_ref'] ?? '—')} · {String(tk['category'] ?? '')}</p>
+                  <p className="text-xs text-slate-400 mt-0.5">{String(tk['property_name'] ?? '—')}{tk['unit_number'] ? ` · Unit ${String(tk['unit_number'])}` : ''} · {fmtDate(String(tk['created_at']))}</p>
+                  <p className="text-xs text-slate-400 mt-1 line-clamp-2">{String(tk['description'] ?? '')}</p>
+                </div>
+                <div className="flex flex-col items-end gap-1 flex-shrink-0 ml-2">
+                  <span className="text-xs px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-600">{String(tk['priority'] ?? '')}</span>
+                  <span className={`text-xs px-2 py-0.5 rounded border ${TICKET_STATUS_COLORS[String(tk['status'])] ?? ''}`}>{String(tk['status'])}</span>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="mt-4 pt-4 border-t border-slate-700 flex justify-end">
+          <button onClick={onClose} className="px-4 py-2 text-sm text-slate-400 hover:text-white transition-colors">{t('common.close', 'Close')}</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Tenant Leases Modal ────────────────────────────────────────────────────────
 // Unlike deposits, leases already carry tenant_id NOT NULL -- the gap here was
 // purely a missing query (every other lease route is scoped under
@@ -634,6 +702,7 @@ export default function TenantsPanel() {
   const [depositsForTenant, setDepositsForTenant] = useState<PropertyTenant | null>(null)
   const [leasesForTenant, setLeasesForTenant] = useState<PropertyTenant | null>(null)
   const [applicationsForTenant, setApplicationsForTenant] = useState<PropertyTenant | null>(null)
+  const [maintenanceForTenant, setMaintenanceForTenant] = useState<PropertyTenant | null>(null)
   const qc = useQueryClient()
 
   const handleSearch = (val: string) => {
@@ -716,6 +785,11 @@ export default function TenantsPanel() {
                       title={t('tenants.applications.title', 'Applications')}
                     >{t('tenants.applications.btn', 'Applications')}</button>
                     <button
+                      onClick={() => setMaintenanceForTenant(tn)}
+                      className="text-xs text-slate-500 hover:text-green-400 transition-colors"
+                      title={t('tenants.maintenance.title', 'Maintenance')}
+                    >{t('tenants.maintenance.btn', 'Maintenance')}</button>
+                    <button
                       onClick={() => setEditingTenant(tn)}
                       className="text-xs text-slate-500 hover:text-blue-400 transition-colors"
                     >{t('tenants.editBtn')}</button>
@@ -737,6 +811,7 @@ export default function TenantsPanel() {
       {depositsForTenant && <TenantDepositsModal tenant={depositsForTenant} onClose={() => setDepositsForTenant(null)} />}
       {leasesForTenant && <TenantLeasesModal tenant={leasesForTenant} onClose={() => setLeasesForTenant(null)} />}
       {applicationsForTenant && <TenantApplicationsModal tenant={applicationsForTenant} onClose={() => setApplicationsForTenant(null)} />}
+      {maintenanceForTenant && <TenantMaintenanceModal tenant={maintenanceForTenant} onClose={() => setMaintenanceForTenant(null)} />}
       {deletingTenant && (
         <ConfirmDeleteModal
           label={deletingTenant.is_company ? (deletingTenant.company_name ?? 'Tenant') : `${deletingTenant.first_name}${deletingTenant.last_name ? ` ${deletingTenant.last_name}` : ''}`}

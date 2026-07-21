@@ -195,6 +195,7 @@ maintenanceTicketsRouter.get('/', async (req: Request, res: Response, next: Next
     const unitId   = req.query['unit_id'] as string | undefined;
     const status   = req.query['status'] as string | undefined;
     const priority = req.query['priority'] as string | undefined;
+    const tenantId = req.query['tenant_id'] as string | undefined;
 
     const rows = await withOwnerRLS(propertiesPool, ownerId, async client => {
       const conds: string[] = [];
@@ -202,6 +203,7 @@ maintenanceTicketsRouter.get('/', async (req: Request, res: Response, next: Next
       if (unitId)   { vals.push(unitId);   conds.push(`t.unit_id = $${vals.length}`); }
       if (status)   { vals.push(status);   conds.push(`t.status = $${vals.length}`); }
       if (priority) { vals.push(priority); conds.push(`t.priority = $${vals.length}`); }
+      if (tenantId) { vals.push(tenantId); conds.push(`t.tenant_id = $${vals.length}`); }
       const where = conds.length ? ' AND ' + conds.join(' AND ') : '';
       const { rows: r } = await client.query(
         `SELECT t.*, u.unit_number, p.name AS property_name, c.name AS contractor_name
@@ -237,14 +239,30 @@ maintenanceTicketsRouter.post('/', async (req: Request, res: Response, next: Nex
       const seq = String(parseInt(cnt.count) + 1).padStart(4, '0');
       const ticketRef = `MNT-${new Date().getFullYear()}-${seq}`;
 
+      // lease_id is accepted but the frontend form never actually collects it, so
+      // relying on it alone would leave tenant_id null for nearly every ticket.
+      // unit_id is the reliable field here (required unless the ticket is
+      // building-wide) -- resolve tenant_id from the unit's active lease.
+      let tenantId: string | null = null;
+      if (body.lease_id) {
+        const { rows: [la] } = await client.query(`SELECT tenant_id FROM prop_lease_agreements WHERE id = $1`, [body.lease_id]);
+        tenantId = la?.tenant_id ?? null;
+      } else if (body.unit_id) {
+        const { rows: [la] } = await client.query(
+          `SELECT tenant_id FROM prop_lease_agreements WHERE unit_id = $1 AND status = 'ACTIVE' LIMIT 1`,
+          [body.unit_id],
+        );
+        tenantId = la?.tenant_id ?? null;
+      }
+
       const { rows } = await client.query(
         `INSERT INTO prop_maintenance_tickets
-           (owner_id, unit_id, property_id, lease_id, ticket_ref,
+           (owner_id, unit_id, property_id, lease_id, tenant_id, ticket_ref,
             reported_by_name, reported_by_phone, report_channel,
             category, description, photo_urls,
             priority, priority_auto_suggested, sla_hours, sla_breach_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING *`,
-        [ownerId, body.unit_id ?? null, body.property_id ?? null, body.lease_id ?? null, ticketRef,
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING *`,
+        [ownerId, body.unit_id ?? null, body.property_id ?? null, body.lease_id ?? null, tenantId, ticketRef,
          body.reported_by_name ?? null, body.reported_by_phone ?? null, body.report_channel ?? null,
          body.category, body.description, JSON.stringify(body.photo_urls ?? []),
          priority, autoSuggested, sla, slaBreachAt],

@@ -663,6 +663,13 @@ propertiesRouter.post('/:propertyId/leases', async (req: Request, res: Response,
              WHERE unit_id = $3 AND owner_id = $4 AND lease_id IS NULL`,
             [result.rows[0].id, b.tenant_id, b.unit_id, ownerId],
           );
+          // Same backfill for maintenance tickets raised on this unit before the
+          // lease was on file (see migration 054) -- e.g. reported during move-in.
+          await c.query(
+            `UPDATE prop_maintenance_tickets SET tenant_id = $1
+             WHERE unit_id = $2 AND owner_id = $3 AND tenant_id IS NULL`,
+            [b.tenant_id, b.unit_id, ownerId],
+          );
         }
         return result.rows[0];
       });

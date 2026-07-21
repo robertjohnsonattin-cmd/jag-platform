@@ -110,7 +110,7 @@ export const tenancyApi = {
     api.patch<Row>(`/properties/deposits/${id}/reconcile`, body),
 
   // ── Maintenance Tickets ───────────────────────────────────
-  getMaintenanceTickets: (params?: { status?: string; priority?: string; unit_id?: string }) =>
+  getMaintenanceTickets: (params?: { status?: string; priority?: string; unit_id?: string; tenant_id?: string }) =>
     api.get<Row[]>(`/properties/maintenance${qs(params)}`),
 
   getMaintenanceTicket: (id: string) =>
