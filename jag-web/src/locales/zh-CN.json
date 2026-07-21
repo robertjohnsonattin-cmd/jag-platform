@@ -2523,6 +2523,7 @@
       "applications": "申请",
       "deposits": "押金",
       "rent": "租金计划",
+      "reconciliation": "对账",
       "maintenance": "维修",
       "schedMaintenance": "预防性维护",
       "contractors": "承包商",
@@ -2530,6 +2531,21 @@
       "renewals": "续约",
       "whatsapp": "WhatsApp",
       "approvals": "待审批"
+    },
+    "recon": {
+      "linkOnlyNote": "仅建立关联：匹配会记录一条对账关联并将该银行交易标记为已对账，不会更改租金状态或通知租户。",
+      "autoMatch": "全部自动匹配",
+      "autoResult": "已自动匹配 {{matched}} 笔 · {{ambiguous}} 笔存在歧义（需手动）· {{failed}} 笔失败",
+      "unmatchedCredits": "未匹配的银行入账",
+      "allReconciled": "没有未对账的银行入账，全部已处理。",
+      "suggested": "{{n}} 条建议",
+      "match": "匹配",
+      "pickPeriod": "— 选择租金周期 —",
+      "link": "关联",
+      "matchFailed": "无法关联。可能已被匹配 — 请刷新后重试。",
+      "confirmedMatches": "已确认的匹配",
+      "noMatches": "暂无匹配。",
+      "unmatch": "取消匹配"
     },
     "sched": {
       "newTask": "新建维护计划",

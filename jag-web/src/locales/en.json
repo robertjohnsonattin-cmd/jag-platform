@@ -2524,6 +2524,7 @@
       "applications": "Applications",
       "deposits": "Deposits",
       "rent": "Rent Schedule",
+      "reconciliation": "Reconciliation",
       "maintenance": "Maintenance",
       "schedMaintenance": "Preventive Maintenance",
       "contractors": "Contractors",
@@ -2531,6 +2532,21 @@
       "renewals": "Renewals",
       "whatsapp": "WhatsApp",
       "approvals": "Approvals"
+    },
+    "recon": {
+      "linkOnlyNote": "Link-only: matching records a reconciliation link and marks the bank line reconciled. It does not change rent status or notify the tenant.",
+      "autoMatch": "Auto-match all",
+      "autoResult": "Auto-matched {{matched}} · {{ambiguous}} ambiguous (need manual) · {{failed}} failed",
+      "unmatchedCredits": "Unmatched bank credits",
+      "allReconciled": "No unreconciled bank credits. All caught up.",
+      "suggested": "{{n}} suggested",
+      "match": "Match",
+      "pickPeriod": "— Pick a rent period —",
+      "link": "Link",
+      "matchFailed": "Could not link. It may already be matched — refresh and retry.",
+      "confirmedMatches": "Confirmed matches",
+      "noMatches": "No matches yet.",
+      "unmatch": "Unmatch"
     },
     "sched": {
       "newTask": "New Scheduled Task",

@@ -157,6 +157,26 @@ export const tenancyApi = {
   completeScheduledMaintenance: (id: string, body: { completed_date: string; actual_cost_ttd?: number; completed_by?: string; notes?: string }) =>
     api.post<Row>(`/properties/scheduled-maintenance/${id}/complete`, body),
 
+  // ── Rent ↔ Bank Reconciliation (Phase 1, link-only) ──────
+  getReconciliationCandidates: () =>
+    api.get<{
+      bank_credits: Row[]
+      rent_periods: Row[]
+      suggestions: { bank_txn_id: string; rent_schedule_id: string; unambiguous: boolean }[]
+    }>('/properties/rent-reconciliation/candidates'),
+
+  getReconciliationMatches: () =>
+    api.get<Row[]>('/properties/rent-reconciliation/matches'),
+
+  matchRentBank: (rentScheduleId: string, bankTxnId: string) =>
+    api.post<Row>('/properties/rent-reconciliation/match', { rent_schedule_id: rentScheduleId, bank_txn_id: bankTxnId }),
+
+  autoMatchRentBank: () =>
+    api.post<{ matched: number; ambiguous: number; failed: number }>('/properties/rent-reconciliation/auto-match', {}),
+
+  unmatchRentBank: (id: string) =>
+    api.delete<{ id: string }>(`/properties/rent-reconciliation/matches/${id}`),
+
   // ── Handover Checklists ───────────────────────────────────
   getHandoverByUnit: (unitId: string) =>
     api.get<Row[]>(`/properties/handover/unit/${unitId}`),
