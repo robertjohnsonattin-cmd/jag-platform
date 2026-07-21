@@ -56,6 +56,9 @@ export interface Lease {
   late_fee_value?: string | null
   grace_days?: number | null
   signature_status?: 'UNSIGNED' | 'SENT' | 'PARTIALLY_SIGNED' | 'SIGNED' | 'DECLINED' | 'EXPIRED'
+  /** Only present on GET /properties/leases?tenant_id= (the property isn't already known from context there) */
+  property_name?: string
+  unit_number?: string | null
 }
 
 export interface RentPayment {

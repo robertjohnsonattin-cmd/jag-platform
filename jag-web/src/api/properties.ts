@@ -28,6 +28,9 @@ export const propertiesApi = {
   getLeases: (propertyId: string) =>
     api.get<Lease[]>(`/properties/${propertyId}/leases`),
 
+  getLeasesForTenant: (tenantId: string) =>
+    api.get<Lease[]>(`/properties/leases${qs({ tenant_id: tenantId })}`),
+
   downloadLeaseAgreement: (propertyId: string, leaseId: string) =>
     api.download(`/properties/${propertyId}/leases/${leaseId}/agreement-pdf`, `lease-agreement-${leaseId}.pdf`),
 
