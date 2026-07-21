@@ -50,7 +50,7 @@ export const tenancyApi = {
     api.patch<Row>(`/properties/viewings/${id}`, body),
 
   // ── Applications ──────────────────────────────────────────
-  getApplications: (params?: { status?: string }) =>
+  getApplications: (params?: { status?: string; unit_id?: string; tenant_id?: string }) =>
     api.get<Row[]>(`/properties/applications${qs(params)}`),
 
   getApplication: (id: string) =>

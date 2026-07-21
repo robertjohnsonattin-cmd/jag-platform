@@ -74,12 +74,14 @@ applicationsRouter.get('/', async (req: Request, res: Response, next: NextFuncti
 
     const unitId = req.query['unit_id'] as string | undefined;
     const status = req.query['status'] as string | undefined;
+    const tenantId = req.query['tenant_id'] as string | undefined;
 
     const rows = await withOwnerRLS(propertiesPool, ownerId, async client => {
       const conds: string[] = [];
       const vals: unknown[] = [ownerId];
       if (unitId) { vals.push(unitId); conds.push(`a.unit_id = $${vals.length}`); }
       if (status) { vals.push(status); conds.push(`a.status = $${vals.length}`); }
+      if (tenantId) { vals.push(tenantId); conds.push(`a.tenant_id = $${vals.length}`); }
       const where = conds.length ? ' AND ' + conds.join(' AND ') : '';
       const { rows: r } = await client.query(
         `SELECT a.*, u.unit_number, p.name AS property_name
@@ -404,6 +406,10 @@ applicationsRouter.post('/:id/create-tenant', async (req: Request, res: Response
         `UPDATE prop_deposits SET tenant_id = $1 WHERE application_id = $2 AND tenant_id IS NULL`,
         [tenant.id, id],
       );
+
+      // Link the application itself back to the tenant it produced -- otherwise
+      // this trail dead-ends the moment the tenant exists (see migration 053).
+      await client.query(`UPDATE prop_applications SET tenant_id = $1 WHERE id = $2`, [tenant.id, id]);
 
       logger.info({ entity: 'PROPERTIES', action: 'TENANT_FROM_APPLICATION', application_id: id, tenant_id: tenant.id, docs_copied: appDocs.length, user_id: ownerId });
       return { tenant, docs_copied: appDocs.length };

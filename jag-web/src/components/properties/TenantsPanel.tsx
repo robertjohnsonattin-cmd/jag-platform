@@ -22,6 +22,14 @@ const LEASE_STATUS_COLORS: Record<string, string> = {
   TERMINATED:  'bg-red-900/50 text-red-300 border-red-700',
 }
 
+const APPLICATION_STATUS_COLORS: Record<string, string> = {
+  PENDING:       'bg-slate-700 text-slate-400 border-slate-600',
+  UNDER_REVIEW:  'bg-blue-900/50 text-blue-300 border-blue-700',
+  APPROVED:      'bg-green-900/50 text-green-300 border-green-700',
+  REJECTED:      'bg-red-900/50 text-red-300 border-red-700',
+  WITHDRAWN:     'bg-slate-700 text-slate-400 border-slate-600',
+}
+
 const cls = 'w-full bg-slate-700 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500'
 
 const ID_TYPES = ['TT_NIC', 'PASSPORT', 'COMPANY_REG', 'DRIVERS_LICENCE', 'OTHER'] as const
@@ -429,6 +437,70 @@ function TenantDocsModal({ tenant, onClose }: { tenant: PropertyTenant; onClose:
   )
 }
 
+// ── Tenant Applications Modal ────────────────────────────────────────────────
+// prop_applications had no tenant_id at all until migration 053 -- create-tenant
+// only ever read FROM the application, never wrote a link back, so the trail
+// from tenant -> originating application dead-ended the moment the tenant
+// existed. Same class of gap as deposits (migration 052).
+
+function TenantApplicationsModal({ tenant, onClose }: { tenant: PropertyTenant; onClose: () => void }) {
+  const { t } = useTranslation()
+
+  const tenantName = tenant.is_company
+    ? (tenant.company_name ?? 'Tenant')
+    : `${tenant.first_name}${tenant.last_name ? ` ${tenant.last_name}` : ''}`
+
+  const { data: applications = [], isLoading } = useQuery({
+    queryKey: ['tenant-applications', tenant.id],
+    queryFn: () => tenancyApi.getApplications({ tenant_id: tenant.id }),
+  })
+
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
+      <div className="bg-slate-800 border border-slate-700 rounded-xl w-full max-w-2xl p-6 shadow-2xl max-h-[90vh] flex flex-col">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h2 className="text-lg font-semibold text-white">{t('tenants.applications.title', 'Applications')}</h2>
+            <p className="text-xs text-slate-400 mt-0.5">{tenantName}</p>
+          </div>
+          <button onClick={onClose} className="text-slate-500 hover:text-slate-300 text-xl leading-none">×</button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto space-y-3">
+          {isLoading && <p className="text-slate-400 text-sm">{t('common.loading')}</p>}
+          {!isLoading && applications.length === 0 && (
+            <p className="text-slate-500 text-sm text-center py-8">{t('tenants.applications.none', 'No application on file for this tenant.')}</p>
+          )}
+          {applications.map((a: Record<string, unknown>) => (
+            <div key={String(a['id'])} className="bg-slate-700/50 rounded-lg border border-slate-700 p-3">
+              <div className="flex items-start justify-between">
+                <div>
+                  <p className="text-sm text-slate-200">{String(a['property_name'] ?? '—')}{a['unit_number'] ? ` · Unit ${String(a['unit_number'])}` : ''}</p>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    {t('tenants.applications.submitted', 'Submitted')} {a['submitted_at'] ? fmtDate(String(a['submitted_at'])) : '—'}
+                    {a['decision_at'] ? ` · ${t('tenants.applications.decided', 'Decided')} ${fmtDate(String(a['decision_at']))}` : ''}
+                  </p>
+                  {Boolean(a['monthly_income_ttd']) && (
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      {t('tenants.applications.income', 'Income')}: TTD ${parseFloat(String(a['monthly_income_ttd'])).toLocaleString('en-TT', { minimumFractionDigits: 2 })}
+                      {a['employer_name'] ? ` · ${String(a['employer_name'])}` : ''}
+                    </p>
+                  )}
+                </div>
+                <span className={`text-xs px-2 py-0.5 rounded border ${APPLICATION_STATUS_COLORS[String(a['status'])] ?? ''}`}>{String(a['status'])}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="mt-4 pt-4 border-t border-slate-700 flex justify-end">
+          <button onClick={onClose} className="px-4 py-2 text-sm text-slate-400 hover:text-white transition-colors">{t('common.close', 'Close')}</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Tenant Leases Modal ────────────────────────────────────────────────────────
 // Unlike deposits, leases already carry tenant_id NOT NULL -- the gap here was
 // purely a missing query (every other lease route is scoped under
@@ -561,6 +633,7 @@ export default function TenantsPanel() {
   const [docsForTenant, setDocsForTenant] = useState<PropertyTenant | null>(null)
   const [depositsForTenant, setDepositsForTenant] = useState<PropertyTenant | null>(null)
   const [leasesForTenant, setLeasesForTenant] = useState<PropertyTenant | null>(null)
+  const [applicationsForTenant, setApplicationsForTenant] = useState<PropertyTenant | null>(null)
   const qc = useQueryClient()
 
   const handleSearch = (val: string) => {
@@ -638,6 +711,11 @@ export default function TenantsPanel() {
                       title={t('tenants.leases.title', 'Leases')}
                     >{t('tenants.leases.btn', 'Leases')}</button>
                     <button
+                      onClick={() => setApplicationsForTenant(tn)}
+                      className="text-xs text-slate-500 hover:text-green-400 transition-colors"
+                      title={t('tenants.applications.title', 'Applications')}
+                    >{t('tenants.applications.btn', 'Applications')}</button>
+                    <button
                       onClick={() => setEditingTenant(tn)}
                       className="text-xs text-slate-500 hover:text-blue-400 transition-colors"
                     >{t('tenants.editBtn')}</button>
@@ -658,6 +736,7 @@ export default function TenantsPanel() {
       {docsForTenant && <TenantDocsModal tenant={docsForTenant} onClose={() => setDocsForTenant(null)} />}
       {depositsForTenant && <TenantDepositsModal tenant={depositsForTenant} onClose={() => setDepositsForTenant(null)} />}
       {leasesForTenant && <TenantLeasesModal tenant={leasesForTenant} onClose={() => setLeasesForTenant(null)} />}
+      {applicationsForTenant && <TenantApplicationsModal tenant={applicationsForTenant} onClose={() => setApplicationsForTenant(null)} />}
       {deletingTenant && (
         <ConfirmDeleteModal
           label={deletingTenant.is_company ? (deletingTenant.company_name ?? 'Tenant') : `${deletingTenant.first_name}${deletingTenant.last_name ? ` ${deletingTenant.last_name}` : ''}`}
