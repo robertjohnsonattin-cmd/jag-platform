@@ -7,18 +7,18 @@
 # Each reminder uses a separate timestamp column so both can fire for the same viewing.
 #
 # ── SETUP (run once) ──────────────────────────────────────────────────────────
-#   (crontab -l 2>/dev/null; echo "0 * * * * KC_PASSWORD=<pw> bash /opt/jag/jag-infra/scripts/viewing-reminders.sh >> /var/log/jag-viewing-reminders.log 2>&1") | crontab -
+#   (crontab -l 2>/dev/null; echo "0 * * * * . /opt/jag/jag-infra/.cron-secrets && bash /opt/jag/jag-infra/scripts/viewing-reminders.sh >> /var/log/jag-viewing-reminders.log 2>&1") | crontab -
 #
 # ── MANUAL RUN ───────────────────────────────────────────────────────────────
-#   KC_PASSWORD=<keycloak-password> bash /opt/jag/jag-infra/scripts/viewing-reminders.sh
+#   KC_CRON_CLIENT_SECRET=<jag-cron-service-client-secret> bash /opt/jag/jag-infra/scripts/viewing-reminders.sh
 
 set -euo pipefail
 
 KC_URL="https://auth.jagcorporate.com/realms/jag/protocol/openid-connect/token"
-KC_CLIENT_ID="jag-api"
-KC_CLIENT_SECRET="${KC_CLIENT_SECRET:-FIjMqEPT35gr3TRvh6FDdCTnMAX2FAGMjTVHuljqcBU}"
-KC_USERNAME="${KC_USERNAME:-robertjohnsonattin@gmail.com}"
-KC_PASSWORD="${KC_PASSWORD:?KC_PASSWORD is required}"
+# Uses the jag-cron-service Keycloak client (client_credentials grant) rather than
+# ROPC against Robert's real human account — see project_cron_ropc_auth_failures.
+KC_CLIENT_ID="jag-cron-service"
+KC_CLIENT_SECRET="${KC_CRON_CLIENT_SECRET:?KC_CRON_CLIENT_SECRET is required}"
 API_BASE="${JAG_API_URL:-https://api.jagcorporate.com/api/v1}"
 
 log() {
@@ -30,7 +30,7 @@ log() {
 command -v jq &>/dev/null || { log "preflight_fail" "ERROR" '"reason":"jq not found"'; exit 1; }
 
 TOKEN=$(curl -sf --max-time 15 -X POST "$KC_URL" \
-  -d "grant_type=password&client_id=$KC_CLIENT_ID&client_secret=$KC_CLIENT_SECRET&username=$KC_USERNAME&password=$KC_PASSWORD" \
+  -d "grant_type=client_credentials&client_id=$KC_CLIENT_ID&client_secret=$KC_CLIENT_SECRET" \
   | jq -r '.access_token') || true
 
 if [[ -z "$TOKEN" || "$TOKEN" == "null" ]]; then

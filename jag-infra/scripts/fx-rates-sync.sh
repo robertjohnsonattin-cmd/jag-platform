@@ -13,15 +13,13 @@
 #      sudo apt-get install -y jq
 #
 # 2. Add to crontab (runs at 06:00 TT time = 10:00 UTC):
-#      (crontab -l 2>/dev/null; echo "0 10 * * * KC_PASSWORD=<password> bash /opt/jag/jag-infra/scripts/fx-rates-sync.sh >> /var/log/jag-fx-sync.log 2>&1") | crontab -
+#      (crontab -l 2>/dev/null; echo "0 10 * * * . /opt/jag/jag-infra/.cron-secrets && bash /opt/jag/jag-infra/scripts/fx-rates-sync.sh >> /var/log/jag-fx-sync.log 2>&1") | crontab -
 #
 # ── MANUAL RUN ─────────────────────────────────────────────────────────────────
-#   KC_PASSWORD=<keycloak-password> bash /opt/jag/jag-infra/scripts/fx-rates-sync.sh
+#   KC_CRON_CLIENT_SECRET=<jag-cron-service-client-secret> bash /opt/jag/jag-infra/scripts/fx-rates-sync.sh
 #
 # ── ENV VARS ───────────────────────────────────────────────────────────────────
-#   KC_PASSWORD   — required; Keycloak password for KC_USERNAME
-#   KC_USERNAME   — optional; defaults to robertjohnsonattin@gmail.com
-#   KC_CLIENT_SECRET — optional; defaults to the jag-api client secret
+#   KC_CRON_CLIENT_SECRET — required; secret for the jag-cron-service Keycloak client
 #   JAG_API_URL   — optional; defaults to https://api.jagcorporate.com/api/v1
 #   CURRENCIES    — optional; space-separated ISO codes; defaults to "USD CNY"
 
@@ -29,10 +27,10 @@ set -euo pipefail
 
 # ── Config ─────────────────────────────────────────────────────────────────────
 KC_URL="https://auth.jagcorporate.com/realms/jag/protocol/openid-connect/token"
-KC_CLIENT_ID="jag-api"
-KC_CLIENT_SECRET="${KC_CLIENT_SECRET:-FIjMqEPT35gr3TRvh6FDdCTnMAX2FAGMjTVHuljqcBU}"
-KC_USERNAME="${KC_USERNAME:-robertjohnsonattin@gmail.com}"
-KC_PASSWORD="${KC_PASSWORD:?KC_PASSWORD env var is required}"
+# Uses the jag-cron-service Keycloak client (client_credentials grant) rather than
+# ROPC against Robert's real human account — see project_cron_ropc_auth_failures.
+KC_CLIENT_ID="jag-cron-service"
+KC_CLIENT_SECRET="${KC_CRON_CLIENT_SECRET:?KC_CRON_CLIENT_SECRET env var is required}"
 
 API_BASE="${JAG_API_URL:-https://api.jagcorporate.com/api/v1}"
 ER_BASE="https://open.er-api.com/v6/latest"
@@ -66,11 +64,9 @@ log "sync_start" "INFO" "\"date\":\"$TODAY\",\"currencies\":\"${CURRENCIES[*]}\"
 
 # ── Obtain Keycloak token ──────────────────────────────────────────────────────
 TOKEN=$(curl -sf --max-time 15 -X POST "$KC_URL" \
-  -d "grant_type=password" \
+  -d "grant_type=client_credentials" \
   -d "client_id=$KC_CLIENT_ID" \
   -d "client_secret=$KC_CLIENT_SECRET" \
-  -d "username=$KC_USERNAME" \
-  -d "password=$KC_PASSWORD" \
   | jq -r '.access_token') || true
 
 if [[ -z "$TOKEN" || "$TOKEN" == "null" ]]; then

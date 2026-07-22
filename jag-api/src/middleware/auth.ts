@@ -257,6 +257,7 @@ export function requireAuth() {
       const realmRoles       = payload.realm_access?.roles ?? [];
       const isBrianPortal    = realmRoles.includes('brian_portal');
       const isAuditorPortal  = realmRoles.includes('jag_auditor');
+      const isCronService    = realmRoles.includes('jag_cron_service');
 
       // X-Act-As: brian — Owner only. Substitutes Brian's user/owner context into RLS
       // so Robert can create, read, and update on Brian's behalf using existing endpoints.
@@ -281,6 +282,24 @@ export function requireAuth() {
           isOwner:  false,           // never elevate auditor to owner privilege
           ownerId:  ownerCtx.userId, // Owner's UUID — satisfies jag_family RLS policies
           isAuditorPortal: true,
+        };
+      } else if (isCronService) {
+        // Cron service account (client_credentials grant, no human login) — used by
+        // VM-scheduled automation scripts instead of authenticating as Robert's real
+        // account via ROPC. jag_properties/jag_family RLS is owner-scoped keyed on
+        // req.rlsCtx.userId itself (not a separate tenant-role lookup), so this must
+        // resolve to Robert's actual users.id for these endpoints to see real data —
+        // same resolveOwnerContext() already used for the auditor-portal branch above.
+        // The service account's own userId (resolved via its own jag_core.users row)
+        // is preserved as operatorId for audit-trail purposes only.
+        const ownerCtx = await resolveOwnerContext();
+        req.rlsCtx = {
+          userId:   ownerCtx.userId,
+          tenantId: ownerCtx.tenantId,
+          isOwner:  true,
+          ownerId:  ownerCtx.userId,
+          operatorId: userId,
+          isCronService: true,
         };
       } else {
         req.rlsCtx = {

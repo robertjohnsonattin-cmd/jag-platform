@@ -7,7 +7,9 @@ export interface RLSContext {
   ownerId: string;         // jag_core.users.id — same as userId for owner-scoped DBs
   isBrianPortal?: boolean;   // true when JWT carries the brian_portal Keycloak role
   isAuditorPortal?: boolean; // true when JWT carries the jag_auditor Keycloak role
-  operatorId?: string;       // Robert's userId when he is acting as Brian (X-Act-As: brian)
+  isCronService?: boolean;   // true when JWT carries the jag_cron_service Keycloak role (service account)
+  operatorId?: string;       // Robert's userId when he is acting as Brian (X-Act-As: brian),
+                             // or the cron service account's own userId when isCronService
 }
 
 // PostgreSQL does not allow parameterised SET statements (SET x = $1 is invalid).

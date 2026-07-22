@@ -139,7 +139,7 @@ viewingsRouter.post('/send-reminders', async (req: Request, res: Response, next:
          WHERE v.owner_id = $1
            AND v.status IN ('SCHEDULED','CONFIRMED')
            AND v.scheduled_at BETWEEN NOW() + INTERVAL '23 hours' AND NOW() + INTERVAL '25 hours'
-           AND v.reminder_sent_at IS NULL`,
+           AND v.reminder_24h_sent_at IS NULL`,
         [ownerId],
       );
       return r;
@@ -163,7 +163,7 @@ viewingsRouter.post('/send-reminders', async (req: Request, res: Response, next:
           ]}],
         });
         await withOwnerRLS(propertiesPool, ownerId, async client => {
-          await client.query(`UPDATE prop_viewings SET reminder_sent_at = NOW() WHERE id = $1`, [row['id']]);
+          await client.query(`UPDATE prop_viewings SET reminder_24h_sent_at = NOW() WHERE id = $1`, [row['id']]);
         });
         sent.push(String(row['id']));
       } catch { /* skip on WA error */ }

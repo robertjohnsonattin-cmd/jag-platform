@@ -83,13 +83,15 @@ renewalsRouter.post('/send-notices', async (req: Request, res: Response, next: N
     for (const [days, col] of Object.entries(MILESTONES)) {
       const rows = await withOwnerRLS(propertiesPool, ownerId, async client => {
         const { rows } = await client.query<Record<string, unknown>>(
-          `SELECT rn.id, rn.tenant_phone, rn.tenant_name,
-                  EXTRACT(DAY FROM (l.end_date - CURRENT_DATE))::int AS days_remaining
+          `SELECT rn.id, pt.phone AS tenant_phone,
+                  COALESCE(pt.company_name, CONCAT(pt.first_name, ' ', COALESCE(pt.last_name, ''))) AS tenant_name,
+                  (l.end_date - CURRENT_DATE)::int AS days_remaining
            FROM prop_renewal_notices rn
            JOIN prop_lease_agreements l ON l.id = rn.lease_id
+           JOIN prop_property_tenants pt ON pt.id = l.tenant_id
            WHERE rn.owner_id = $1
              AND rn.${col} IS NULL
-             AND EXTRACT(DAY FROM (l.end_date - CURRENT_DATE)) BETWEEN $2 - 1 AND $2 + 1`,
+             AND (l.end_date - CURRENT_DATE) BETWEEN $2 - 1 AND $2 + 1`,
           [ownerId, days],
         );
         return rows;
@@ -179,7 +181,7 @@ renewalsRouter.post('/:id/renew', async (req: Request, res: Response, next: Next
 
     const result = await withOwnerRLS(propertiesPool, ownerId, async client => {
       const { rows: [notice] } = await client.query(
-        `SELECT rn.*, l.unit_id, l.tenant_name, l.tenant_email, l.tenant_phone
+        `SELECT rn.*, l.unit_id, l.tenant_id
          FROM prop_renewal_notices rn
          JOIN prop_lease_agreements l ON l.id = rn.lease_id
          WHERE rn.id = $1 AND rn.owner_id = $2`,
@@ -189,9 +191,9 @@ renewalsRouter.post('/:id/renew', async (req: Request, res: Response, next: Next
 
       const { rows: [newLease] } = await client.query(
         `INSERT INTO prop_lease_agreements
-           (owner_id, unit_id, property_id, tenant_name, tenant_email, tenant_phone,
-            start_date, end_date, rent_amount_ttd, status)
-         SELECT owner_id, unit_id, property_id, tenant_name, tenant_email, tenant_phone,
+           (owner_id, unit_id, property_id, tenant_id,
+            start_date, end_date, monthly_rent, status)
+         SELECT owner_id, unit_id, property_id, tenant_id,
                 $1, $2, $3, 'ACTIVE'
          FROM prop_lease_agreements WHERE id = $4
          RETURNING *`,
@@ -236,8 +238,11 @@ renewalsRouter.post('/:id/vacate', async (req: Request, res: Response, next: Nex
     // JAG_REN_003 — vacating confirmation to tenant
     const tenantRow = await withOwnerRLS(propertiesPool, ownerId, async client => {
       const { rows: [la] } = await client.query(
-        `SELECT la.tenant_phone, la.tenant_name, u.unit_number, p.name AS property_name
+        `SELECT pt.phone AS tenant_phone,
+                COALESCE(pt.company_name, CONCAT(pt.first_name, ' ', COALESCE(pt.last_name, ''))) AS tenant_name,
+                u.unit_number, p.name AS property_name
          FROM prop_lease_agreements la
+         JOIN prop_property_tenants pt ON pt.id = la.tenant_id
          JOIN prop_units u ON u.id = la.unit_id
          LEFT JOIN prop_properties p ON p.id = u.property_id
          WHERE la.id = $1 AND la.owner_id = $2`,
