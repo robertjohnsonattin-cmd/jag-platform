@@ -89,18 +89,20 @@ const CATEGORIES = [
 
 const PAYMENT_METHODS = ['CASH','BANK_TRANSFER','CREDIT_CARD','DEBIT_CARD','CHEQUE','DIRECT_DEBIT','OTHER'] as const;
 
-const ExpenseQuerySchema = z.object({
-  owner_entity_id: z.string().uuid().optional(),
-  status:          z.enum(['DRAFT','SUBMITTED','APPROVED','REJECTED']).optional(),
-  category:        z.enum(CATEGORIES).optional(),
-  date_from:       z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-  date_to:         z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-  limit:           z.coerce.number().int().min(1).max(500).default(100),
-  offset:          z.coerce.number().int().min(0).default(0),
-}).strict();
-
 const LINKED_RECORD_TYPES = ['VEHICLE','INSURANCE_POLICY','PROPERTY','FAMILY_MEMBER'] as const;
 const FUEL_TYPES = ['PETROL','DIESEL','CNG','ELECTRIC'] as const;
+
+const ExpenseQuerySchema = z.object({
+  owner_entity_id:    z.string().uuid().optional(),
+  status:             z.enum(['DRAFT','SUBMITTED','APPROVED','REJECTED']).optional(),
+  category:           z.enum(CATEGORIES).optional(),
+  date_from:          z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  date_to:            z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  linked_record_type: z.enum(LINKED_RECORD_TYPES).optional(),
+  linked_record_id:   z.string().uuid().optional(),
+  limit:              z.coerce.number().int().min(1).max(500).default(100),
+  offset:             z.coerce.number().int().min(0).default(0),
+}).strict();
 
 const CreateExpenseSchema = z.object({
   owner_entity_id:      z.string().uuid(),
@@ -162,7 +164,8 @@ expensesRouter.get('/', async (req: Request, res: Response, next: NextFunction):
   try {
     const parsed = ExpenseQuerySchema.safeParse(req.query);
     if (!parsed.success) { err(res, 422, 'VALIDATION_ERROR', 'Invalid query parameters.'); return; }
-    const { owner_entity_id, status, category, date_from, date_to, limit, offset } = parsed.data;
+    const { owner_entity_id, status, category, date_from, date_to,
+            linked_record_type, linked_record_id, limit, offset } = parsed.data;
 
     const client = await familyPool.connect();
     try {
@@ -175,6 +178,8 @@ expensesRouter.get('/', async (req: Request, res: Response, next: NextFunction):
         if (category)        where.push(`category = ${push(category)}`);
         if (date_from)       where.push(`expense_date >= ${push(date_from)}`);
         if (date_to)         where.push(`expense_date <= ${push(date_to)}`);
+        if (linked_record_type) where.push(`linked_record_type = ${push(linked_record_type)}`);
+        if (linked_record_id)   where.push(`linked_record_id = ${push(linked_record_id)}`);
         const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
         return c.query(
           `SELECT id, owner_entity_id, submitted_by, expense_date, description, payee_name,

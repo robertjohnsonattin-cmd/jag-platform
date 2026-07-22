@@ -113,6 +113,7 @@ export interface VendorInvoice {
   paid_date: string | null
   payment_reference: string | null
   notes: string | null
+  linked_expense_id: string | null
   created_at: string
 }
 

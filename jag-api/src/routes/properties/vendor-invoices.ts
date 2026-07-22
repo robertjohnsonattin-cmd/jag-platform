@@ -9,11 +9,18 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import { z } from 'zod';
 import { withOwnerRLS } from '../../middleware/rls';
-import { propertiesPool, corePool } from '../../db/index';
+import { propertiesPool, corePool, familyPool } from '../../db/index';
 import { logger } from '../../lib/logger';
 import { ok, err } from '../../lib/response';
 
 export const vendorInvoicesRouter = Router({ mergeParams: true });
+
+// JAG Properties entity (jag_core.tenants.id) — owner_entity_id for bridged Finance expenses.
+const PROPERTIES_ENTITY_ID = '00000000-0000-0000-0001-000000000003';
+// Default Finance expense account for bridged vendor invoices: 5100 Maintenance & Repairs
+// (a postable leaf; the 5000 header is not directly postable). The finance reviewer can
+// change it on the DRAFT before posting.
+const DEFAULT_EXPENSE_ACCOUNT_CODE = '5100';
 
 // ── Schemas ───────────────────────────────────────────────────────────────────
 
@@ -127,7 +134,7 @@ vendorInvoicesRouter.get('/', async (req: Request, res: Response, next: NextFunc
           `SELECT id, property_id, maintenance_request_id, vendor_name, invoice_ref,
                   invoice_date, due_date, amount, vat_code, vat_amount, status,
                   approved_by, approved_at, paid_date, payment_reference,
-                  notes, idempotency_key, created_at, updated_at
+                  notes, idempotency_key, linked_expense_id, created_at, updated_at
            FROM   prop_vendor_invoices
            WHERE  ${where}
            ORDER  BY invoice_date DESC
@@ -207,30 +214,120 @@ vendorInvoicesRouter.patch('/:id/approve', async (req: Request, res: Response, n
     if (!paramParsed.success) { err(res, 422, 'VALIDATION_ERROR', 'Invalid path parameters.'); return; }
 
     const { id, propertyId } = paramParsed.data;
-    const { userId: ownerId } = req.rlsCtx;
+    const { ownerId, userId } = req.rlsCtx;
 
-    const client = await propertiesPool.connect();
+    // ── Step 1 — Load the invoice (must be RECEIVED) + its property name ─────────
+    const propClient = await propertiesPool.connect();
+    let invoice: {
+      property_id: string; vendor_name: string; invoice_ref: string | null;
+      invoice_date: string; amount: string; vat_amount: string; property_name: string;
+    } | null;
     try {
-      const updated = await withOwnerRLS(client, req.rlsCtx, (c) =>
+      invoice = await withOwnerRLS(propClient, req.rlsCtx, (c) =>
         c.query(
-          `UPDATE prop_vendor_invoices
-           SET    status      = 'APPROVED',
-                  approved_by = $1,
-                  approved_at = now(),
-                  updated_at  = now()
-           WHERE  id = $2
-             AND  property_id = $3
-             AND  status = 'RECEIVED'
-           RETURNING *`,
-          [ownerId, id, propertyId],
+          `SELECT vi.property_id, vi.vendor_name, vi.invoice_ref,
+                  vi.invoice_date::text AS invoice_date, vi.amount, vi.vat_amount,
+                  COALESCE(p.name, p.address_line1, 'Property') AS property_name
+           FROM   prop_vendor_invoices vi
+           JOIN   prop_properties p ON p.id = vi.property_id
+           WHERE  vi.id = $1 AND vi.property_id = $2 AND vi.status = 'RECEIVED'`,
+          [id, propertyId],
         ).then(r => r.rows[0] ?? null),
       );
+    } finally { propClient.release(); }
 
-      if (!updated) { err(res, 404, 'INVOICE_NOT_FOUND', 'Invoice not found or not in RECEIVED status.'); return; }
-      logger.info({ entity: 'PROPERTIES', action: 'VENDOR_INVOICE_APPROVED', user_id: ownerId, record_id: id });
-      await auditLog(ownerId, 'VendorInvoice', 'APPROVE', id, { status: 'APPROVED' });
-      ok(res, updated);
-    } finally { client.release(); }
+    if (!invoice) { err(res, 404, 'INVOICE_NOT_FOUND', 'Invoice not found or not in RECEIVED status.'); return; }
+
+    const total = Number(invoice.amount) + Number(invoice.vat_amount);
+    const idemKey = `prop-invoice-${id}`;
+    const description = `Vendor invoice — ${invoice.vendor_name}${invoice.invoice_ref ? ' #' + invoice.invoice_ref : ''}`;
+
+    // ── Step 2 — Cross-DB: create (idempotently) a linked DRAFT Finance expense ──
+    // jag_family.fin_expenses lives in a separate database; this is a compensating
+    // cross-DB write (no distributed transaction). The DRAFT is NOT posted to the GL
+    // (Phase 1) — the finance reviewer submits/approves it there. linked_record_type
+    // 'PROPERTY' ties it to the property; the property portal reads it back by that link.
+    const famClient = await familyPool.connect();
+    let expenseId: string;
+    let wasCreated: boolean;
+    try {
+      ({ expenseId, wasCreated } = await withOwnerRLS(famClient, req.rlsCtx, async (c) => {
+        const acct = await c.query<{ id: string }>(
+          `SELECT id FROM fin_gl_accounts
+           WHERE owner_entity_id = $1 AND account_code = $2 AND is_active = true`,
+          [PROPERTIES_ENTITY_ID, DEFAULT_EXPENSE_ACCOUNT_CODE],
+        );
+        const debitAccountId = acct.rows[0]?.id ?? null;
+
+        const ins = await c.query<{ id: string }>(
+          `INSERT INTO fin_expenses
+             (owner_id, owner_entity_id, submitted_by, expense_date, description, payee_name,
+              amount, currency, amount_ttd, payment_method, category,
+              gl_debit_account_id, notes, idempotency_key,
+              linked_record_type, linked_record_id, linked_record_label)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,'TTD',$7,'BANK_TRANSFER','MAINTENANCE',
+                   $8,$9,$10,'PROPERTY',$11,$12)
+           ON CONFLICT (idempotency_key) DO NOTHING
+           RETURNING id`,
+          [ownerId, PROPERTIES_ENTITY_ID, userId, invoice.invoice_date, description,
+           invoice.vendor_name, total, debitAccountId,
+           `Bridged from property vendor invoice ${id} (${invoice.property_name}).`,
+           idemKey, invoice.property_id, invoice.property_name],
+        );
+        if (ins.rows[0]) return { expenseId: ins.rows[0].id, wasCreated: true };
+        // Idempotency-key already used (a prior partial run) — reuse that expense.
+        const existing = await c.query<{ id: string }>(
+          `SELECT id FROM fin_expenses WHERE idempotency_key = $1`, [idemKey],
+        );
+        return { expenseId: existing.rows[0].id, wasCreated: false };
+      }));
+    } catch (e) {
+      logger.error({ entity: 'PROPERTIES', action: 'VENDOR_INVOICE_BRIDGE_FAILED', record_id: id, error: String(e) });
+      err(res, 502, 'FINANCE_BRIDGE_FAILED', 'Could not create the linked Finance expense; invoice left unapproved.');
+      return;
+    } finally { famClient.release(); }
+
+    // ── Step 3 — Approve the invoice + record the link (atomic, guarded) ─────────
+    const propClient2 = await propertiesPool.connect();
+    let updated: Record<string, unknown> | null;
+    try {
+      updated = await withOwnerRLS(propClient2, req.rlsCtx, (c) =>
+        c.query(
+          `UPDATE prop_vendor_invoices
+           SET    status            = 'APPROVED',
+                  approved_by        = $1,
+                  approved_at        = now(),
+                  linked_expense_id  = $2,
+                  updated_at         = now()
+           WHERE  id = $3
+             AND  property_id = $4
+             AND  status = 'RECEIVED'
+           RETURNING *`,
+          [userId, expenseId, id, propertyId],
+        ).then(r => r.rows[0] ?? null),
+      );
+    } finally { propClient2.release(); }
+
+    // Race: invoice left RECEIVED status between step 1 and step 3. Compensate by
+    // deleting the orphan DRAFT we just created (only if we created it).
+    if (!updated) {
+      if (wasCreated) {
+        const cleanup = await familyPool.connect();
+        try {
+          await withOwnerRLS(cleanup, req.rlsCtx, (c) =>
+            c.query(`DELETE FROM fin_expenses WHERE id = $1 AND status = 'DRAFT'`, [expenseId]),
+          );
+        } catch (e) {
+          logger.warn({ entity: 'PROPERTIES', action: 'VENDOR_INVOICE_BRIDGE_CLEANUP_FAILED', record_id: id, expense_id: expenseId, error: String(e) });
+        } finally { cleanup.release(); }
+      }
+      err(res, 409, 'INVOICE_STATE_CHANGED', 'Invoice was modified concurrently; please retry.');
+      return;
+    }
+
+    logger.info({ entity: 'PROPERTIES', action: 'VENDOR_INVOICE_APPROVED', user_id: userId, record_id: id, linked_expense_id: expenseId });
+    await auditLog(userId, 'VendorInvoice', 'APPROVE', id, { status: 'APPROVED', linked_expense_id: expenseId });
+    ok(res, updated);
   } catch (e) { next(e); }
 });
 

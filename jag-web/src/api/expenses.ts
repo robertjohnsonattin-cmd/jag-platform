@@ -17,6 +17,8 @@ export const expensesApi = {
     category?: string
     date_from?: string
     date_to?: string
+    linked_record_type?: string
+    linked_record_id?: string
     limit?: number
     offset?: number
   }) => api.get<Expense[]>(`/finance/expenses${qs(params)}`),

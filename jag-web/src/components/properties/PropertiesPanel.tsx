@@ -4,12 +4,14 @@ import { useTranslation } from 'react-i18next'
 import type { TFunction } from 'i18next'
 import { propertiesApi } from '../../api/properties'
 import { financeApi } from '../../api/finance'
+import { expensesApi } from '../../api/expenses'
 import { filesApi } from '../../api/files'
 import { useAuth } from '../../auth/AuthProvider'
 import { fmtTTD, fmtDate } from '../../lib/entities'
 import FileUpload from '../ui/FileUpload'
 import ConfirmDeleteModal from '../ui/ConfirmDeleteModal'
 import type { InsurancePolicy } from '../../types/finance'
+import type { Expense } from '../../types/expenses'
 import type {
   Property, VendorInvoice,
   PropertyTaxRecord, Inspection,
@@ -51,6 +53,13 @@ const INVOICE_STATUS_STYLES: Record<string, string> = {
   RECEIVED: 'bg-yellow-900/50 text-yellow-300 border-yellow-700',
   APPROVED: 'bg-blue-900/50 text-blue-300 border-blue-700',
   PAID:     'bg-green-900/50 text-green-300 border-green-700',
+}
+
+const EXPENSE_STATUS_STYLES: Record<string, string> = {
+  DRAFT:     'bg-slate-700/50 text-slate-300 border-slate-600',
+  SUBMITTED: 'bg-yellow-900/50 text-yellow-300 border-yellow-700',
+  APPROVED:  'bg-green-900/50 text-green-300 border-green-700',
+  REJECTED:  'bg-red-900/50 text-red-300 border-red-700',
 }
 
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
@@ -2161,7 +2170,7 @@ function EditPropertyModal({ property, onClose, onSaved }: { property: Property;
   )
 }
 
-type DetailTab = 'overview' | 'leases' | 'payments' | 'utilities' | 'invoices' | 'insurance' | 'tax' | 'inspections' | 'financials' | 'documents' | 'units'
+type DetailTab = 'overview' | 'leases' | 'payments' | 'utilities' | 'invoices' | 'insurance' | 'tax' | 'inspections' | 'financials' | 'finance' | 'documents' | 'units'
 
 function ValuationHistoryModal({ id, name, onClose }: { id: string; name: string; onClose: () => void }) {
   const { t } = useTranslation()
@@ -2339,6 +2348,13 @@ function PropertyDetail({ property, onDeleted }: { property: Property; onDeleted
     queryFn: () => propertiesApi.getFinancialSummary(property.id),
     enabled: detailTab === 'financials',
   })
+  // Finance-portal expenses linked to this property (both invoice-bridged DRAFTs and
+  // expenses entered directly in Finance and tagged to this property) — the two-way view.
+  const { data: linkedExpenses = [] } = useQuery({
+    queryKey: ['finance', 'expenses', 'property', property.id],
+    queryFn: () => expensesApi.getExpenses({ linked_record_type: 'PROPERTY', linked_record_id: property.id, limit: 500 }),
+    enabled: detailTab === 'finance',
+  })
   const { data: documents = [] } = useQuery({
     queryKey: ['properties', property.id, 'documents'],
     queryFn: () => propertiesApi.getDocuments(property.id),
@@ -2374,6 +2390,7 @@ function PropertyDetail({ property, onDeleted }: { property: Property; onDeleted
     { id: 'inspections', label: t('propertiesPanel.detailTabs.inspections') },
     { id: 'units',       label: t('propertiesPanel.detailTabs.units') },
     { id: 'financials',  label: t('propertiesPanel.detailTabs.financials') },
+    { id: 'finance',     label: t('propertiesPanel.detailTabs.finance') },
     { id: 'documents',   label: t('propertiesPanel.detailTabs.documents') },
   ]
 
@@ -2749,6 +2766,13 @@ function PropertyDetail({ property, onDeleted }: { property: Property; onDeleted
                         <td className="px-3 py-2 text-right font-mono text-xs text-slate-100">{fmtTTD(inv.amount)}</td>
                         <td className="px-3 py-2 text-center">
                           <span className={`text-xs px-1.5 py-0.5 rounded border ${INVOICE_STATUS_STYLES[inv.status]}`}>{inv.status}</span>
+                          {inv.linked_expense_id && (
+                            <span
+                              title={t('propertiesPanel.linkedToFinanceHint')}
+                              className="ml-1 text-[10px] px-1.5 py-0.5 rounded border border-emerald-700 bg-emerald-900/30 text-emerald-300 whitespace-nowrap">
+                              {t('propertiesPanel.linkedToFinance')}
+                            </span>
+                          )}
                         </td>
                         <td className="px-3 py-2 text-right">
                           {inv.status === 'RECEIVED' && (
@@ -3033,6 +3057,44 @@ function PropertyDetail({ property, onDeleted }: { property: Property; onDeleted
                   </div>
                 )}
                 <p className="text-xs text-slate-600">{t('propertiesPanel.finNote')}</p>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Finance Ledger Tab — expenses in the Finance portal linked to this property */}
+        {detailTab === 'finance' && (
+          <div className="space-y-3">
+            <p className="text-xs text-slate-500">{t('propertiesPanel.financeLinkedNote')}</p>
+            {(linkedExpenses as Expense[]).length === 0 ? <Empty /> : (
+              <div className="overflow-x-auto rounded-lg border border-slate-700">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-slate-700/50 text-slate-400 text-xs uppercase tracking-wide">
+                      <th className="text-left px-3 py-2">{t('propertiesPanel.colDate')}</th>
+                      <th className="text-left px-3 py-2">{t('propertiesPanel.colDescription')}</th>
+                      <th className="text-left px-3 py-2">{t('propertiesPanel.colCategory')}</th>
+                      <th className="text-right px-3 py-2">{t('common.amount')}</th>
+                      <th className="text-center px-3 py-2">{t('propertiesPanel.colStatus')}</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-700">
+                    {(linkedExpenses as Expense[]).map(ex => (
+                      <tr key={ex.id} className="hover:bg-slate-700/20">
+                        <td className="px-3 py-2 text-xs text-slate-400">{fmtDate(ex.expense_date)}</td>
+                        <td className="px-3 py-2 text-xs text-slate-100">
+                          {ex.description}
+                          {ex.payee_name && <span className="text-slate-500"> · {ex.payee_name}</span>}
+                        </td>
+                        <td className="px-3 py-2 text-xs text-slate-400">{ex.category.replace(/_/g,' ')}</td>
+                        <td className="px-3 py-2 text-right font-mono text-xs text-slate-100">{fmtTTD(ex.amount_ttd)}</td>
+                        <td className="px-3 py-2 text-center">
+                          <span className={`text-xs px-1.5 py-0.5 rounded border ${EXPENSE_STATUS_STYLES[ex.status] ?? 'border-slate-600 text-slate-300'}`}>{ex.status}</span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             )}
           </div>
