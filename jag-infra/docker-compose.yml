@@ -371,6 +371,7 @@ services:
       - /var/lib/docker/containers:/var/lib/docker/containers:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - /var/log/postgresql:/var/log/postgresql:ro   # PostgreSQL 17 on Ubuntu logs here
+      - /var/log:/var/log/host:ro                     # jag-*.log cron scripts (backup, restore-test)
     depends_on:
       loki:
         condition: service_healthy

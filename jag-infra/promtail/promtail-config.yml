@@ -1,8 +1,16 @@
 # Promtail configuration — JAG Holdings
-# Scrapes two log sources:
+# Scrapes three log sources:
 #   1. Docker container logs  (/var/lib/docker/containers/*/*.log)
 #   2. PostgreSQL 16 server logs  (/var/lib/pgsql/16/data/log/*.log)
 #      (PostgreSQL runs natively on the host — not in Docker)
+#   3. jag-*.log cron script logs  (/var/log/host/jag-*.log)
+#      (backup-databases.sh, backup-minio-buckets.sh, backup-secrets.sh,
+#      restore-test.sh — all structured JSON with an "entity"/"severity"
+#      field. These previously wrote to /var/log/jag-*.log with NO scrape
+#      config covering them at all, i.e. a failure would sit in a file
+#      nobody was watching — the exact blind spot that caused the original
+#      month-long silent backup failure. Fixed 2026-07-22 alongside adding
+#      the weekly restore test.)
 
 server:
   http_listen_port: 9080
@@ -98,3 +106,26 @@ scrape_configs:
 
       - labels:
           pg_severity:
+
+  # ── jag-*.log cron script logs (backup + restore-test) ─────────────────────
+  # All 4 scripts emit one structured JSON object per line:
+  #   {"timestamp":"...","entity":"BACKUP","action":"...","severity":"INFO|WARN|ERROR",...}
+  - job_name: jag-cron-scripts
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job:  jag-cron-scripts
+          host: jag-primary
+          __path__: /var/log/host/jag-*.log
+
+    pipeline_stages:
+      - json:
+          expressions:
+            entity:   entity
+            action:   action
+            severity: severity
+      - labels:
+          entity:
+          action:
+          severity:
