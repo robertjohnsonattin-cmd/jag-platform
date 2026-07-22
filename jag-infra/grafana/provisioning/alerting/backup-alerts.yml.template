@@ -1,0 +1,95 @@
+# Grafana alert provisioning — backup pipeline failures.
+#
+# TEMPLATE — do not deploy this file directly. The real file (with the
+# actual webhook bearer token substituted in) lives at
+# /opt/jag/jag-infra/grafana/provisioning/alerting/backup-alerts.yml on the
+# VM only, generated from this template — never committed to git (same
+# convention as .env.example vs .env). See jag-infra/scripts/
+# render-grafana-alerts.sh for the substitution step.
+#
+# Watches the jag-cron-scripts Loki stream (see promtail-config.yml) for
+# severity="ERROR" lines from backup-databases.sh / backup-minio-buckets.sh /
+# backup-secrets.sh / restore-test.sh, and fires a webhook to jag-api's
+# /internal/grafana-alert-webhook, which raises a JAG bell notification.
+# This closes the loop that was open until 2026-07-22: those 4 scripts'
+# logs had zero alerting on top of them, so a real failure would sit
+# silently in a log file — the exact blind spot that caused the original
+# month-long DB backup failure.
+
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: jag-backup-alerts
+    folder: Backup Alerts
+    interval: 15m
+    rules:
+      - uid: jag-backup-pipeline-failure
+        title: Backup pipeline failure
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 900
+              to: 0
+            datasourceUid: P8E80F9AEF21F6940
+            model:
+              refId: A
+              queryType: range
+              # Scoped to only the 4 backup/restore scripts (entity label) --
+              # job="jag-cron-scripts" alone covers every cron script on the
+              # VM (rent reminders, viewing reminders, GPS battery sync,
+              # etc.), which would make this "backup failure" alert fire on
+              # unrelated cron errors too. Confirmed this matters in
+              # practice: a pre-existing unrelated auth_fail error in
+              # jag-post-viewing.log was caught by the unscoped query during
+              # testing (2026-07-22) -- see project_backup_pipeline_fix.md.
+              expr: 'count_over_time({job="jag-cron-scripts", severity="ERROR", entity=~"BACKUP|MINIO_BACKUP|SECRETS_BACKUP|RESTORE_TEST"}[15m])'
+          - refId: B
+            relativeTimeRange:
+              from: 900
+              to: 0
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              reducer: sum
+              expression: A
+          - refId: C
+            relativeTimeRange:
+              from: 900
+              to: 0
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+        noDataState: OK
+        execErrState: Alerting
+        for: 0m
+        annotations:
+          summary: 'One or more of backup-databases.sh / backup-minio-buckets.sh / backup-secrets.sh / restore-test.sh logged an ERROR in the last 15 minutes. Check Grafana Explore ({job="jag-cron-scripts",severity="ERROR"}) or /var/log/jag-*.log on the VM.'
+        labels:
+          severity: critical
+        # Attach the contact point directly to this rule (Grafana's
+        # "simplified routing") rather than editing the global notification
+        # policy tree — keeps this addition isolated and non-destructive to
+        # any other alerts added later.
+        notification_settings:
+          receiver: jag-bell-webhook
+
+contactPoints:
+  - orgId: 1
+    name: jag-bell-webhook
+    receivers:
+      - uid: jag-bell-webhook-receiver
+        type: webhook
+        settings:
+          url: http://api:3000/internal/grafana-alert-webhook
+          httpMethod: POST
+          authorization_scheme: Bearer
+          authorization_credentials: __GRAFANA_ALERT_WEBHOOK_TOKEN__

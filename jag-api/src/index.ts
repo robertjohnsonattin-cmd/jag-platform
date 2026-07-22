@@ -139,6 +139,9 @@ app.use('/internal/gps/battery-sync', batterySyncRouter);
 import { documensoReconcileRouter } from './routes/internal/documenso-reconcile';
 app.use('/internal/documenso-reconcile', express.json(), documensoReconcileRouter);
 
+import { grafanaAlertWebhookRouter } from './routes/internal/grafana-alert-webhook';
+app.use('/internal/grafana-alert-webhook', grafanaAlertWebhookRouter);
+
 // documensoWebhookRouter is mounted above, before the global express.json()
 // (its payload exceeds the default 100kb limit — see the comment there).
 

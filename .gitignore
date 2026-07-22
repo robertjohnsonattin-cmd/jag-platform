@@ -37,3 +37,6 @@ JAG_Master_Architecture_generator*.js
 
 # Any .env.* variant in any subdir (e.g. .env.stmt-watcher) — secrets, never track
 **/.env.*
+
+# Rendered Grafana alert provisioning file (contains the real webhook token) — only the .template is tracked
+jag-infra/grafana/provisioning/alerting/backup-alerts.yml
