@@ -114,6 +114,7 @@ export interface VendorInvoice {
   payment_reference: string | null
   notes: string | null
   linked_expense_id: string | null
+  settlement_journal_entry_id: string | null
   created_at: string
 }
 

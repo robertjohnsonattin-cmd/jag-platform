@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # JAG Holdings — PostgreSQL nightly backup
 #
-# Dumps all 5 logical databases using pg_dump (custom format, level-9 compression).
+# Dumps all 5 logical app databases plus Traccar and Documenso using pg_dump
+# (custom format, level-9 compression).
 # Stores dumps locally under /opt/jag/backups/YYYY-MM-DD/, then uploads to MinIO
 # bucket jag-backups. Prunes local backups older than LOCAL_RETAIN_DAYS (7) and
 # MinIO backups older than MINIO_RETAIN_DAYS (30).
@@ -41,7 +42,9 @@
 set -euo pipefail
 
 # ── Config ─────────────────────────────────────────────────────────────────────
-DATABASES=(jag_core jag_commercial jag_entertainment jag_family jag_properties)
+DATABASES=(jag_core jag_commercial jag_entertainment jag_family jag_properties traccar documenso)
+PG_HOST="/var/run/postgresql"   # Unix socket — peer auth, no password required
+PG_PORT="5432"
 PG_USER="postgres"
 BACKUP_ROOT="/opt/jag/backups"
 MINIO_ALIAS="jag"
@@ -88,7 +91,7 @@ if ! mc alias ls "$MINIO_ALIAS" &>/dev/null; then
 fi
 
 mkdir -p "$BACKUP_DIR"
-log "backup_start" "INFO" '"databases":5,"backup_dir":"'"$BACKUP_DIR"'"'
+log "backup_start" "INFO" '"databases":'"${#DATABASES[@]}"',"backup_dir":"'"$BACKUP_DIR"'"'
 
 # ── Dump each database ─────────────────────────────────────────────────────────
 declare -A DUMP_FILES
@@ -100,6 +103,8 @@ for DB in "${DATABASES[@]}"; do
   log_db "dump_start" "INFO" "$DB"
 
   if sudo -u postgres pg_dump \
+      --host="$PG_HOST" \
+      --port="$PG_PORT" \
       --username="$PG_USER" \
       --format=custom \
       --compress=9 \
@@ -156,6 +161,6 @@ log "prune_minio_done" "INFO" '"pruned":'"$PRUNED_MINIO"',"retain_days":'"$MINIO
 # ── Summary ───────────────────────────────────────────────────────────────────
 DUMPED=${#DUMP_FILES[@]}
 log "backup_complete" "$([ $EXIT_CODE -eq 0 ] && echo INFO || echo WARN)" \
-  '"databases_dumped":'"$DUMPED"',"databases_total":5,"exit_code":'"$EXIT_CODE"
+  '"databases_dumped":'"$DUMPED"',"databases_total":'"${#DATABASES[@]}"',"exit_code":'"$EXIT_CODE"
 
 exit $EXIT_CODE

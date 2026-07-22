@@ -1025,6 +1025,9 @@ function PayInvoiceModal({ propertyId, inv, onClose, onUpdated }: {
             <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.paidRef')}</label>
             <input value={payRef} onChange={e => setPayRef(e.target.value)} className={cls} placeholder="Cheque no., transfer ref…" />
           </div>
+          {inv.linked_expense_id && (
+            <p className="text-[11px] text-sky-300/80">{t('propertiesPanel.payAccrualNote')}</p>
+          )}
           {error && <p className="text-red-400 text-xs">{error instanceof Error ? error.message : 'Failed.'}</p>}
         </div>
         <div className="flex gap-3 mt-5">
@@ -2771,6 +2774,13 @@ function PropertyDetail({ property, onDeleted }: { property: Property; onDeleted
                               title={t('propertiesPanel.linkedToFinanceHint')}
                               className="ml-1 text-[10px] px-1.5 py-0.5 rounded border border-emerald-700 bg-emerald-900/30 text-emerald-300 whitespace-nowrap">
                               {t('propertiesPanel.linkedToFinance')}
+                            </span>
+                          )}
+                          {inv.settlement_journal_entry_id && (
+                            <span
+                              title={t('propertiesPanel.settledToGlHint')}
+                              className="ml-1 text-[10px] px-1.5 py-0.5 rounded border border-sky-700 bg-sky-900/30 text-sky-300 whitespace-nowrap">
+                              {t('propertiesPanel.settledToGl')}
                             </span>
                           )}
                         </td>

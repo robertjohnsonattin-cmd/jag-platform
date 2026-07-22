@@ -21,6 +21,11 @@ const PROPERTIES_ENTITY_ID = '00000000-0000-0000-0001-000000000003';
 // (a postable leaf; the 5000 header is not directly postable). The finance reviewer can
 // change it on the DRAFT before posting.
 const DEFAULT_EXPENSE_ACCOUNT_CODE = '5100';
+// Phase 2 (accrual) settlement accounts for the Properties entity's GL.
+// Paying an invoice posts Dr 2100 Accounts Payable / Cr 1100 FCB Bank (…3082),
+// clearing the payable raised at finance-approval (Dr 5100 / Cr 2100).
+const AP_ACCOUNT_CODE   = '2100';
+const BANK_ACCOUNT_CODE = '1100';
 
 // ── Schemas ───────────────────────────────────────────────────────────────────
 
@@ -134,7 +139,8 @@ vendorInvoicesRouter.get('/', async (req: Request, res: Response, next: NextFunc
           `SELECT id, property_id, maintenance_request_id, vendor_name, invoice_ref,
                   invoice_date, due_date, amount, vat_code, vat_amount, status,
                   approved_by, approved_at, paid_date, payment_reference,
-                  notes, idempotency_key, linked_expense_id, created_at, updated_at
+                  notes, idempotency_key, linked_expense_id, settlement_journal_entry_id,
+                  created_at, updated_at
            FROM   prop_vendor_invoices
            WHERE  ${where}
            ORDER  BY invoice_date DESC
@@ -332,6 +338,16 @@ vendorInvoicesRouter.patch('/:id/approve', async (req: Request, res: Response, n
 });
 
 // ── PATCH /:propertyId/vendor-invoices/:id/pay ────────────────────────────────
+// Marks an APPROVED invoice PAID and, on accrual basis, posts the settlement leg to
+// the GL: Dr 2100 Accounts Payable / Cr 1100 FCB Bank (…3082) — clearing the payable
+// recognised when the linked Finance expense was approved (Dr 5100 / Cr 2100).
+// Cross-DB (jag_properties ↔ jag_family); compensating writes, no distributed txn.
+//
+// The settlement JE is posted ONLY when the linked expense is finance-APPROVED and was
+// credited to Accounts Payable. If the expense credited a bank/asset directly (cash
+// basis — already settled at approval) or there is no linked expense, the invoice is
+// still marked PAID with no second leg. If the linked expense is not yet finance-
+// approved, paying is blocked (there is no recognised payable to settle against).
 
 vendorInvoicesRouter.patch('/:id/pay', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
@@ -343,30 +359,158 @@ vendorInvoicesRouter.patch('/:id/pay', async (req: Request, res: Response, next:
 
     const { id, propertyId } = paramParsed.data;
     const { paid_date, payment_reference } = bodyParsed.data;
-    const { userId: ownerId } = req.rlsCtx;
+    const { ownerId, userId } = req.rlsCtx;
 
-    const client = await propertiesPool.connect();
+    // ── Step 1 — Load the invoice (must be APPROVED) + its property name ──────────
+    const propClient = await propertiesPool.connect();
+    let invoice: {
+      linked_expense_id: string | null; vendor_name: string;
+      invoice_ref: string | null; property_name: string;
+    } | null;
     try {
-      const updated = await withOwnerRLS(client, req.rlsCtx, (c) =>
+      invoice = await withOwnerRLS(propClient, req.rlsCtx, (c) =>
         c.query(
-          `UPDATE prop_vendor_invoices
-           SET    status            = 'PAID',
-                  paid_date         = $1,
-                  payment_reference = $2,
-                  updated_at        = now()
-           WHERE  id = $3
-             AND  property_id = $4
-             AND  status = 'APPROVED'
-           RETURNING *`,
-          [paid_date, payment_reference ?? null, id, propertyId],
+          `SELECT vi.linked_expense_id, vi.vendor_name, vi.invoice_ref,
+                  COALESCE(p.name, p.address_line1, 'Property') AS property_name
+           FROM   prop_vendor_invoices vi
+           JOIN   prop_properties p ON p.id = vi.property_id
+           WHERE  vi.id = $1 AND vi.property_id = $2 AND vi.status = 'APPROVED'`,
+          [id, propertyId],
         ).then(r => r.rows[0] ?? null),
       );
+    } finally { propClient.release(); }
 
-      if (!updated) { err(res, 404, 'INVOICE_NOT_FOUND', 'Invoice not found or not in APPROVED status.'); return; }
-      logger.info({ entity: 'PROPERTIES', action: 'VENDOR_INVOICE_PAID', user_id: ownerId, record_id: id });
-      await auditLog(ownerId, 'VendorInvoice', 'PAY', id, { paid_date, payment_reference });
-      ok(res, updated);
-    } finally { client.release(); }
+    if (!invoice) { err(res, 404, 'INVOICE_NOT_FOUND', 'Invoice not found or not in APPROVED status.'); return; }
+
+    // ── Step 2 — Cross-DB: post the settlement leg if a payable is outstanding ────
+    const idemKey = `prop-invoice-pay-${id}`;
+    let settlementJeId: string | null = null;
+    let settlementCreated = false;
+
+    if (invoice.linked_expense_id) {
+      const famClient = await familyPool.connect();
+      try {
+        const outcome = await withOwnerRLS(famClient, req.rlsCtx, async (c) => {
+          const exp = await c.query<{
+            id: string; status: string; amount_ttd: string;
+            gl_credit_account_id: string | null; owner_entity_id: string;
+          }>(
+            `SELECT id, status, amount_ttd, gl_credit_account_id, owner_entity_id
+             FROM   fin_expenses WHERE id = $1`,
+            [invoice!.linked_expense_id],
+          ).then(r => r.rows[0] ?? null);
+
+          // Linked expense missing (deleted) — nothing to settle; allow a plain pay.
+          if (!exp) return { blocked: false as const, je: null as string | null, created: false };
+
+          // Not yet finance-approved → no payable was recognised; block paying.
+          if (exp.status !== 'APPROVED') return { blocked: true as const, je: null, created: false };
+
+          // Resolve the Properties entity's A/P (2100) and Bank (1100) accounts.
+          const accts = await c.query<{ account_code: string; id: string }>(
+            `SELECT account_code, id FROM fin_gl_accounts
+             WHERE owner_entity_id = $1 AND account_code = ANY($2::text[]) AND is_active = true`,
+            [exp.owner_entity_id, [AP_ACCOUNT_CODE, BANK_ACCOUNT_CODE]],
+          );
+          const apId   = accts.rows.find(a => a.account_code === AP_ACCOUNT_CODE)?.id ?? null;
+          const bankId = accts.rows.find(a => a.account_code === BANK_ACCOUNT_CODE)?.id ?? null;
+
+          // Only settle when the expense was credited to A/P (accrual). If it was
+          // credited to a bank/asset directly (cash basis) the payable was never
+          // raised — it is already settled — so skip the second leg.
+          if (!apId || !bankId || exp.gl_credit_account_id !== apId) {
+            return { blocked: false as const, je: null, created: false };
+          }
+
+          // Settle the exact amount that was accrued (guarantees A/P nets to zero).
+          const amountTtd = Number(exp.amount_ttd).toFixed(2);
+          const desc = `Vendor payment — ${invoice!.vendor_name}`
+            + `${invoice!.invoice_ref ? ' #' + invoice!.invoice_ref : ''} (${invoice!.property_name})`;
+
+          const je = await c.query<{ id: string }>(
+            `INSERT INTO fin_journal_entries
+               (owner_id, owner_entity_id, entry_date, description, status, source, source_id,
+                currency, total_debit_ttd, total_credit_ttd, posted_at, posted_by, idempotency_key)
+             VALUES ($1,$2,$3,$4,'POSTED','MANUAL',$5,'TTD',$6,$6,now(),$1,$7)
+             ON CONFLICT (idempotency_key) DO NOTHING
+             RETURNING id`,
+            [ownerId, exp.owner_entity_id, paid_date, desc, exp.id, amountTtd, idemKey],
+          );
+
+          // Settlement JE already exists from a prior partial run — reuse it.
+          if (!je.rows[0]) {
+            const existing = await c.query<{ id: string }>(
+              `SELECT id FROM fin_journal_entries WHERE idempotency_key = $1`, [idemKey],
+            );
+            return { blocked: false as const, je: existing.rows[0].id, created: false };
+          }
+
+          // Dr Accounts Payable, Cr Bank.
+          await c.query(
+            `INSERT INTO fin_journal_entry_lines
+               (owner_id, journal_entry_id, gl_account_id, line_number, description, debit_ttd, credit_ttd)
+             VALUES ($1,$2,$3,1,$4,$5,0), ($1,$2,$6,2,$4,0,$5)`,
+            [ownerId, je.rows[0].id, apId, desc, amountTtd, bankId],
+          );
+          return { blocked: false as const, je: je.rows[0].id, created: true };
+        });
+
+        if (outcome.blocked) {
+          err(res, 409, 'EXPENSE_NOT_APPROVED',
+            'The linked Finance expense must be approved before this invoice can be paid.');
+          return;
+        }
+        settlementJeId    = outcome.je;
+        settlementCreated = outcome.created;
+      } catch (e) {
+        logger.error({ entity: 'PROPERTIES', action: 'VENDOR_INVOICE_SETTLEMENT_FAILED', record_id: id, error: String(e) });
+        err(res, 502, 'FINANCE_SETTLEMENT_FAILED', 'Could not post the payment to the ledger; invoice left unpaid.');
+        return;
+      } finally { famClient.release(); }
+    }
+
+    // ── Step 3 — Mark the invoice PAID + record the settlement link (guarded) ─────
+    const propClient2 = await propertiesPool.connect();
+    let updated: Record<string, unknown> | null;
+    try {
+      updated = await withOwnerRLS(propClient2, req.rlsCtx, (c) =>
+        c.query(
+          `UPDATE prop_vendor_invoices
+           SET    status                      = 'PAID',
+                  paid_date                   = $1,
+                  payment_reference           = $2,
+                  settlement_journal_entry_id = $3,
+                  updated_at                  = now()
+           WHERE  id = $4
+             AND  property_id = $5
+             AND  status = 'APPROVED'
+           RETURNING *`,
+          [paid_date, payment_reference ?? null, settlementJeId, id, propertyId],
+        ).then(r => r.rows[0] ?? null),
+      );
+    } finally { propClient2.release(); }
+
+    // Race: invoice left APPROVED between step 1 and step 3. Compensate by removing the
+    // settlement JE we just created (only if this call created it — never a prior one).
+    if (!updated) {
+      if (settlementCreated && settlementJeId) {
+        const cleanup = await familyPool.connect();
+        try {
+          await withOwnerRLS(cleanup, req.rlsCtx, async (c) => {
+            await c.query(`DELETE FROM fin_journal_entry_lines WHERE journal_entry_id = $1`, [settlementJeId]);
+            await c.query(`DELETE FROM fin_journal_entries WHERE id = $1 AND status = 'POSTED'`, [settlementJeId]);
+          });
+        } catch (e) {
+          logger.warn({ entity: 'PROPERTIES', action: 'VENDOR_INVOICE_SETTLEMENT_CLEANUP_FAILED', record_id: id, je_id: settlementJeId, error: String(e) });
+        } finally { cleanup.release(); }
+      }
+      err(res, 409, 'INVOICE_STATE_CHANGED', 'Invoice was modified concurrently; please retry.');
+      return;
+    }
+
+    logger.info({ entity: 'PROPERTIES', action: 'VENDOR_INVOICE_PAID', user_id: userId, record_id: id, settlement_journal_entry_id: settlementJeId });
+    await auditLog(userId, 'VendorInvoice', 'PAY', id, { paid_date, payment_reference, settlement_journal_entry_id: settlementJeId });
+    ok(res, updated);
   } catch (e) { next(e); }
 });
 

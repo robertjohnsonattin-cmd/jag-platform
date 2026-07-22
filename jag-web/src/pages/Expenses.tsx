@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { expensesApi } from '../api/expenses'
@@ -371,6 +371,16 @@ function ApproveModal({ expense, onClose, onDone }: { expense: Expense; onClose:
   const expenseAccounts = entityAccounts.filter(a => ['EXPENSE','OTHER_EXPENSE'].includes(a.account_type) && a.allow_direct_posting)
   const paymentAccounts = entityAccounts.filter(a => ['ASSET','LIABILITY'].includes(a.account_type) && a.allow_direct_posting)
 
+  // Accrual default: for property-linked expenses, pre-select Accounts Payable (2100)
+  // as the credit. Approving then posts Dr expense / Cr A/P (the payable); marking the
+  // linked vendor invoice paid later posts Dr A/P / Cr Bank to settle it. The user can
+  // still override to a bank/asset account for immediate (cash-basis) settlement.
+  const apAccount = paymentAccounts.find(a => a.account_code === '2100')
+  const isPropertyExpense = expense.linked_record_type === 'PROPERTY'
+  useEffect(() => {
+    if (!creditId && isPropertyExpense && apAccount) setCreditId(apAccount.id)
+  }, [apAccount?.id, isPropertyExpense]) // eslint-disable-line react-hooks/exhaustive-deps
+
   const { mutate: approve, isPending, error } = useMutation({
     mutationFn: () => expensesApi.approve(expense.id, {
       gl_debit_account_id: debitId,
@@ -406,6 +416,9 @@ function ApproveModal({ expense, onClose, onDone }: { expense: Expense; onClose:
               ))}
             </select>
           </Field>
+          {isPropertyExpense && apAccount && creditId === apAccount.id && (
+            <p className="text-[11px] text-emerald-300/80 -mt-1">{t('expenses.propertyAccrualHint')}</p>
+          )}
         </div>
 
         {error && <p className="text-red-400 text-xs mt-3">{(error as Error).message}</p>}
