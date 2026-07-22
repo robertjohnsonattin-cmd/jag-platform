@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # JAG Holdings — PostgreSQL nightly backup
 #
-# Dumps all 5 logical app databases plus Traccar and Documenso using pg_dump
-# (custom format, level-9 compression).
+# Dumps all 5 logical app databases plus Traccar, Documenso, and Keycloak
+# using pg_dump (custom format, level-9 compression).
 # Stores dumps locally under /opt/jag/backups/YYYY-MM-DD/, then uploads to MinIO
 # bucket jag-backups. Prunes local backups older than LOCAL_RETAIN_DAYS (7) and
 # MinIO backups older than MINIO_RETAIN_DAYS (30).
@@ -42,7 +42,7 @@
 set -euo pipefail
 
 # ── Config ─────────────────────────────────────────────────────────────────────
-DATABASES=(jag_core jag_commercial jag_entertainment jag_family jag_properties traccar documenso)
+DATABASES=(jag_core jag_commercial jag_entertainment jag_family jag_properties traccar documenso keycloak)
 PG_HOST="/var/run/postgresql"   # Unix socket — peer auth, no password required
 PG_PORT="5432"
 PG_USER="postgres"

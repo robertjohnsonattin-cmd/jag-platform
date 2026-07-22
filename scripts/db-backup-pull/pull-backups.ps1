@@ -1,11 +1,21 @@
-# JAG Holdings - pull latest DB dumps from the Oracle VM down to this machine.
+# JAG Holdings - pull latest DB dumps + MinIO bucket mirrors from the Oracle VM
+# down to this machine.
 #
-# The VM's own nightly backup-databases.sh (02:00 UTC) writes dumps to
-# /opt/jag/backups/<today>/ and uploads a copy to the jag-backups MinIO bucket,
-# but both live on the same Oracle instance, so a total instance loss takes both
-# out together. This script gives a third copy, off-instance entirely, on the
-# local workstation. Run daily via Windows Task Scheduler after the VM backup
-# has had time to complete.
+# The VM's own nightly backup scripts write everything under
+# /opt/jag/backups/<today>/:
+#   - backup-databases.sh      (02:00 UTC) -- 8 DB dumps, also uploaded to MinIO
+#   - backup-minio-buckets.sh  (02:15 UTC) -- mirrors of the 5 file buckets
+#   - backup-secrets.sh        (02:30 UTC) -- .env files + Keycloak realm
+#                                              export, bundled as secrets.tar.gz
+# All of this lives on the same Oracle instance, so a total instance loss
+# takes it all out together. This script gives a third copy, off-instance
+# entirely, on the local workstation. Run daily via Windows Task Scheduler
+# after all three VM backups have had time to complete.
+#
+# secrets.tar.gz is left as a compressed tar, not auto-extracted -- it holds
+# every credential the platform runs on, so it should not sit around as
+# loose plaintext .env files in this pull directory. Extract manually only
+# when actually needed for a restore.
 #
 # Manual run:  powershell -File pull-backups.ps1
 
@@ -57,6 +67,53 @@ foreach ($dateDir in $remoteDirs) {
         Log "WARNING: scp exited $LASTEXITCODE for $dateDir"
     } else {
         $pulled++
+    }
+
+    # MinIO bucket mirrors (jag-photos, jag-documents, etc.) live in a
+    # minio-buckets/ subdir with many small files -- tar on the remote side
+    # first rather than scp -r, which has silently stalled on directories
+    # with hundreds of files in this project before (see CLAUDE.md deploy
+    # notes on scp -r reliability).
+    $remoteTar = "/tmp/minio-buckets-$dateDir.tar.gz"
+    $checkCmd = "test -d '$remotePath/minio-buckets' && echo yes || echo no"
+    $hasMinio = (& ssh -i $SshKey -o ConnectTimeout=10 -o BatchMode=yes $VmHost $checkCmd).Trim()
+    if ($hasMinio -eq "yes") {
+        $tarCmd = "tar -czf '$remoteTar' -C '$remotePath' minio-buckets"
+        & ssh -i $SshKey -o ConnectTimeout=10 -o BatchMode=yes $VmHost $tarCmd
+        if ($LASTEXITCODE -eq 0) {
+            $localTar = Join-Path $localPath "minio-buckets.tar.gz"
+            & scp -i $SshKey -o ConnectTimeout=10 -o BatchMode=yes -q "${VmHost}:${remoteTar}" $localTar
+            if ($LASTEXITCODE -eq 0) {
+                # cd into the target dir and use relative names only -- tar
+                # (the git-bash /usr/bin/tar that's first on PATH here)
+                # misparses any "C:\..." argument, even under -C, as a remote
+                # host:path tape spec. Even --force-local didn't fully avoid
+                # it for -C, so side-step colons entirely instead.
+                Push-Location $localPath
+                & tar --force-local -xzf "minio-buckets.tar.gz"
+                Pop-Location
+                Remove-Item $localTar -Force -ErrorAction SilentlyContinue
+                Log "Pulled minio-buckets mirror for $dateDir"
+            } else {
+                Log "WARNING: scp of minio-buckets tar failed for $dateDir"
+            }
+            & ssh -i $SshKey -o ConnectTimeout=10 -o BatchMode=yes $VmHost "rm -f '$remoteTar'"
+        } else {
+            Log "WARNING: remote tar of minio-buckets failed for $dateDir"
+        }
+    }
+
+    # Secrets bundle (.env files + Keycloak realm export) -- single small
+    # file already, plain scp is fine, no tar-then-scp needed.
+    $checkSecretsCmd = "test -f '$remotePath/secrets.tar.gz' && echo yes || echo no"
+    $hasSecrets = (& ssh -i $SshKey -o ConnectTimeout=10 -o BatchMode=yes $VmHost $checkSecretsCmd).Trim()
+    if ($hasSecrets -eq "yes") {
+        & scp -i $SshKey -o ConnectTimeout=10 -o BatchMode=yes -q "${VmHost}:${remotePath}/secrets.tar.gz" "$localPath\"
+        if ($LASTEXITCODE -eq 0) {
+            Log "Pulled secrets.tar.gz for $dateDir"
+        } else {
+            Log "WARNING: scp of secrets.tar.gz failed for $dateDir"
+        }
     }
 }
 
