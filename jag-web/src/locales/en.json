@@ -2519,6 +2519,7 @@
   },
   "tenancy": {
     "tabs": {
+      "docExpiry": "Doc Expiry",
       "enquiries": "Enquiries",
       "viewings": "Viewings",
       "applications": "Applications",
@@ -2532,6 +2533,22 @@
       "renewals": "Renewals",
       "whatsapp": "WhatsApp",
       "approvals": "Approvals"
+    },
+    "docExpiry": {
+      "showing": "Expiring within",
+      "days": "{{n}} days",
+      "expiredCount": "{{n}} expired",
+      "soonCount": "{{n}} within 30 days",
+      "editHint": "Read-only overview. To update an expiry date, open the tenant under the Tenants tab → Docs.",
+      "none": "No documents expiring in this window.",
+      "tenant": "Tenant",
+      "location": "Unit / Property",
+      "docType": "Document",
+      "expiry": "Expiry",
+      "status": "Status",
+      "expiredBy": "Expired {{n}}d ago",
+      "today": "Today",
+      "inDays": "In {{n}}d"
     },
     "recon": {
       "linkOnlyNote": "Link-only: matching records a reconciliation link and marks the bank line reconciled. It does not change rent status or notify the tenant.",

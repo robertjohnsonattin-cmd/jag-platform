@@ -116,6 +116,21 @@ export interface VendorInvoice {
   created_at: string
 }
 
+export interface ExpiringDocument {
+  id: string
+  tenant_id: string
+  doc_type: string
+  label: string
+  file_name: string
+  expiry_date: string
+  first_name: string | null
+  last_name: string | null
+  company_name: string | null
+  is_company: boolean
+  unit_number: string | null
+  property_name: string | null
+}
+
 export interface VendorInvoiceAllocation {
   id: string
   invoice_id: string

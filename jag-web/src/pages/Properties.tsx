@@ -12,6 +12,7 @@ import PropertiesDepositsPanel from '../components/properties/PropertiesDeposits
 import PropertiesMaintenancePanel from '../components/properties/PropertiesMaintenancePanel'
 import PropertiesScheduledMaintenancePanel from '../components/properties/PropertiesScheduledMaintenancePanel'
 import PropertiesReconciliationPanel from '../components/properties/PropertiesReconciliationPanel'
+import PropertiesDocExpiryPanel from '../components/properties/PropertiesDocExpiryPanel'
 import PropertiesContractorsPanel from '../components/properties/PropertiesContractorsPanel'
 import PropertiesHandoverPanel from '../components/properties/PropertiesHandoverPanel'
 import PropertiesRenewalsPanel from '../components/properties/PropertiesRenewalsPanel'
@@ -21,6 +22,7 @@ import PropertiesWaApprovalsPanel from '../components/properties/PropertiesWaApp
 const TABS = [
   { id: 'properties',  key: 'properties.tabs.properties' },
   { id: 'tenants',     key: 'properties.tabs.tenants' },
+  { id: 'doc_expiry',  key: 'tenancy.tabs.docExpiry' },
   { id: 'pipeline',    key: 'properties.tabs.pipeline' },
   { id: 'enquiries',   key: 'tenancy.tabs.enquiries' },
   { id: 'viewings',    key: 'tenancy.tabs.viewings' },
@@ -72,6 +74,7 @@ export default function Properties() {
 
       {tab === 'properties'   && <PropertiesPanel />}
       {tab === 'tenants'      && <TenantsPanel />}
+      {tab === 'doc_expiry'   && <PropertiesDocExpiryPanel />}
       {tab === 'pipeline'     && <PipelinePanel />}
       {tab === 'enquiries'    && <PropertiesEnquiriesPanel focusId={focusId} />}
       {tab === 'viewings'     && <PropertiesViewingsPanel />}

@@ -2518,6 +2518,7 @@
   },
   "tenancy": {
     "tabs": {
+      "docExpiry": "证件到期",
       "enquiries": "询盘",
       "viewings": "看房",
       "applications": "申请",
@@ -2531,6 +2532,22 @@
       "renewals": "续约",
       "whatsapp": "WhatsApp",
       "approvals": "待审批"
+    },
+    "docExpiry": {
+      "showing": "到期范围",
+      "days": "{{n}} 天内",
+      "expiredCount": "{{n}} 份已过期",
+      "soonCount": "{{n}} 份 30 天内到期",
+      "editHint": "只读概览。如需修改到期日期，请在“租户”标签页中打开该租户 → 证件。",
+      "none": "此范围内没有即将到期的证件。",
+      "tenant": "租户",
+      "location": "单元 / 物业",
+      "docType": "证件",
+      "expiry": "到期日",
+      "status": "状态",
+      "expiredBy": "已过期 {{n}} 天",
+      "today": "今天",
+      "inDays": "{{n}} 天后"
     },
     "recon": {
       "linkOnlyNote": "仅建立关联：匹配会记录一条对账关联并将该银行交易标记为已对账，不会更改租金状态或通知租户。",

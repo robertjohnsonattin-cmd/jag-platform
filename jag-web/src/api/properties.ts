@@ -1,7 +1,7 @@
 import { api } from './client'
 import type {
   Property, PropertyTenant, PipelineItem,
-  RentPayment, RentReceipt, UtilityBill, VendorInvoice, VendorInvoiceAllocation, Lease, Mortgage,
+  RentPayment, RentReceipt, UtilityBill, VendorInvoice, VendorInvoiceAllocation, ExpiringDocument, Lease, Mortgage,
   PropertyTaxRecord, Inspection, ArrearsRecord, LeaseExpiryRecord,
   FinancialSummary, PropertyDocument, UtilityAccount, Unit, UnitPhoto, PropertyValuationHistory,
   TenantDocument, TenantDocType,
@@ -134,6 +134,9 @@ export const propertiesApi = {
 
   getTenantDocuments: (tenantId: string) =>
     api.get<TenantDocument[]>(`/properties/tenants/${tenantId}/documents`),
+
+  getExpiringDocuments: (withinDays = 90) =>
+    api.get<ExpiringDocument[]>(`/properties/document-expiry?within_days=${withinDays}`),
 
   uploadTenantDocument: (tenantId: string, docType: TenantDocType, file: File, notes?: string, expiryDate?: string) => {
     const form = new FormData()
