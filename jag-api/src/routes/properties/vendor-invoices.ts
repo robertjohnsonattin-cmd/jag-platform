@@ -2,6 +2,7 @@
 // POST   /api/v1/properties/:propertyId/vendor-invoices
 // PATCH  /api/v1/properties/:propertyId/vendor-invoices/:id/approve
 // PATCH  /api/v1/properties/:propertyId/vendor-invoices/:id/pay
+// PATCH  /api/v1/properties/:propertyId/vendor-invoices/:id/unpay
 // GET    /api/v1/properties/:propertyId/vendor-invoices/:id/allocations
 // POST   /api/v1/properties/:propertyId/vendor-invoices/:id/allocations — replaces existing allocations
 // DELETE /api/v1/properties/:propertyId/vendor-invoices/:id/allocations
@@ -55,6 +56,10 @@ const CreateInvoiceSchema = z.object({
 const PayInvoiceSchema = z.object({
   paid_date:         z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'paid_date must be YYYY-MM-DD'),
   payment_reference: z.string().max(200).optional(),
+}).strict();
+
+const UnpayInvoiceSchema = z.object({
+  reason: z.string().min(1).max(500),
 }).strict();
 
 const AllocateSchema = z.discriminatedUnion('method', [
@@ -510,6 +515,159 @@ vendorInvoicesRouter.patch('/:id/pay', async (req: Request, res: Response, next:
 
     logger.info({ entity: 'PROPERTIES', action: 'VENDOR_INVOICE_PAID', user_id: userId, record_id: id, settlement_journal_entry_id: settlementJeId });
     await auditLog(userId, 'VendorInvoice', 'PAY', id, { paid_date, payment_reference, settlement_journal_entry_id: settlementJeId });
+    ok(res, updated);
+  } catch (e) { next(e); }
+});
+
+// ── PATCH /:propertyId/vendor-invoices/:id/unpay ──────────────────────────────
+// Undoes a payment made in error: reverts PAID → APPROVED and, if a settlement leg
+// was posted, reverses it on the GL with a fresh entry — Dr 1100 FCB Bank / Cr 2100
+// Accounts Payable (the exact opposite of the original settlement). The original
+// settlement entry is left POSTED (untouched) — the cash movement it recorded really
+// happened; the reversing entry is what restores the payable and the bank balance,
+// preserving full history of both the payment and its later reversal. Owner only.
+// Cross-DB (jag_properties ↔ jag_family); compensating writes, no distributed txn.
+
+vendorInvoicesRouter.patch('/:id/unpay', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    if (!req.rlsCtx.isOwner) { err(res, 403, 'FORBIDDEN', 'Only the Owner can unpay an invoice.'); return; }
+
+    const paramParsed = InvoiceParam.safeParse(req.params);
+    if (!paramParsed.success) { err(res, 422, 'VALIDATION_ERROR', 'Invalid path parameters.'); return; }
+
+    const bodyParsed = UnpayInvoiceSchema.safeParse(req.body);
+    if (!bodyParsed.success) { err(res, 422, 'VALIDATION_ERROR', 'reason is required.'); return; }
+
+    const { id, propertyId } = paramParsed.data;
+    const { reason } = bodyParsed.data;
+    const { ownerId, userId } = req.rlsCtx;
+
+    // ── Step 1 — Load the invoice (must be PAID) + its property name ──────────────
+    const propClient = await propertiesPool.connect();
+    let invoice: {
+      settlement_journal_entry_id: string | null; vendor_name: string;
+      invoice_ref: string | null; property_name: string;
+    } | null;
+    try {
+      invoice = await withOwnerRLS(propClient, req.rlsCtx, (c) =>
+        c.query(
+          `SELECT vi.settlement_journal_entry_id, vi.vendor_name, vi.invoice_ref,
+                  COALESCE(p.name, p.address_line1, 'Property') AS property_name
+           FROM   prop_vendor_invoices vi
+           JOIN   prop_properties p ON p.id = vi.property_id
+           WHERE  vi.id = $1 AND vi.property_id = $2 AND vi.status = 'PAID'`,
+          [id, propertyId],
+        ).then(r => r.rows[0] ?? null),
+      );
+    } finally { propClient.release(); }
+
+    if (!invoice) { err(res, 404, 'INVOICE_NOT_FOUND', 'Invoice not found or not in PAID status.'); return; }
+
+    // ── Step 2 — Cross-DB: reverse the settlement leg, if one was posted ──────────
+    const idemKey = `prop-invoice-unpay-${id}`;
+    let reversalJeId: string | null = null;
+    let reversalCreated = false;
+
+    if (invoice.settlement_journal_entry_id) {
+      const famClient = await familyPool.connect();
+      try {
+        ({ reversalJeId, reversalCreated } = await withOwnerRLS(famClient, req.rlsCtx, async (c) => {
+          const original = await c.query<{
+            id: string; owner_entity_id: string; entry_date: string;
+          }>(
+            `SELECT id, owner_entity_id, entry_date::text FROM fin_journal_entries WHERE id = $1 AND status = 'POSTED'`,
+            [invoice!.settlement_journal_entry_id],
+          ).then(r => r.rows[0] ?? null);
+
+          // Original settlement JE missing or already voided — nothing to reverse.
+          if (!original) return { reversalJeId: null, reversalCreated: false };
+
+          const lines = await c.query<{ gl_account_id: string; debit_ttd: string; credit_ttd: string }>(
+            `SELECT gl_account_id, debit_ttd, credit_ttd FROM fin_journal_entry_lines
+             WHERE journal_entry_id = $1 ORDER BY line_number`,
+            [original.id],
+          ).then(r => r.rows);
+
+          const totalTtd = lines.reduce((s, l) => s + Number(l.debit_ttd), 0).toFixed(2);
+          const desc = `Vendor payment reversal — ${invoice!.vendor_name}`
+            + `${invoice!.invoice_ref ? ' #' + invoice!.invoice_ref : ''} (${invoice!.property_name}): ${reason}`;
+
+          const je = await c.query<{ id: string }>(
+            `INSERT INTO fin_journal_entries
+               (owner_id, owner_entity_id, entry_date, description, status, source, source_id,
+                currency, total_debit_ttd, total_credit_ttd, posted_at, posted_by, idempotency_key)
+             VALUES ($1,$2,CURRENT_DATE,$3,'POSTED','REVERSAL',$4,'TTD',$5,$5,now(),$1,$6)
+             ON CONFLICT (idempotency_key) DO NOTHING
+             RETURNING id`,
+            [ownerId, original.owner_entity_id, desc, original.id, totalTtd, idemKey],
+          );
+
+          if (!je.rows[0]) {
+            const existing = await c.query<{ id: string }>(
+              `SELECT id FROM fin_journal_entries WHERE idempotency_key = $1`, [idemKey],
+            );
+            return { reversalJeId: existing.rows[0].id, reversalCreated: false };
+          }
+
+          // Swap debit/credit of every original line.
+          for (let i = 0; i < lines.length; i++) {
+            await c.query(
+              `INSERT INTO fin_journal_entry_lines
+                 (owner_id, journal_entry_id, gl_account_id, line_number, description, debit_ttd, credit_ttd)
+               VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+              [ownerId, je.rows[0].id, lines[i].gl_account_id, i + 1, desc, lines[i].credit_ttd, lines[i].debit_ttd],
+            );
+          }
+          return { reversalJeId: je.rows[0].id, reversalCreated: true };
+        }));
+      } catch (e) {
+        logger.error({ entity: 'PROPERTIES', action: 'VENDOR_INVOICE_UNPAY_FAILED', record_id: id, error: String(e) });
+        err(res, 502, 'FINANCE_REVERSAL_FAILED', 'Could not reverse the payment on the ledger; invoice left paid.');
+        return;
+      } finally { famClient.release(); }
+    }
+
+    // ── Step 3 — Revert the invoice to APPROVED (guarded) ─────────────────────────
+    const propClient2 = await propertiesPool.connect();
+    let updated: Record<string, unknown> | null;
+    try {
+      updated = await withOwnerRLS(propClient2, req.rlsCtx, (c) =>
+        c.query(
+          `UPDATE prop_vendor_invoices
+           SET    status                      = 'APPROVED',
+                  paid_date                   = NULL,
+                  payment_reference           = NULL,
+                  settlement_journal_entry_id = NULL,
+                  updated_at                  = now()
+           WHERE  id = $1
+             AND  property_id = $2
+             AND  status = 'PAID'
+           RETURNING *`,
+          [id, propertyId],
+        ).then(r => r.rows[0] ?? null),
+      );
+    } finally { propClient2.release(); }
+
+    // Race: invoice left PAID between step 1 and step 3. Compensate by removing the
+    // reversal JE we just created (only if this call created it).
+    if (!updated) {
+      if (reversalCreated && reversalJeId) {
+        const cleanup = await familyPool.connect();
+        try {
+          await withOwnerRLS(cleanup, req.rlsCtx, async (c) => {
+            await c.query(`DELETE FROM fin_journal_entry_lines WHERE journal_entry_id = $1`, [reversalJeId]);
+            await c.query(`DELETE FROM fin_journal_entries WHERE id = $1 AND status = 'POSTED'`, [reversalJeId]);
+          });
+        } catch (e) {
+          logger.warn({ entity: 'PROPERTIES', action: 'VENDOR_INVOICE_UNPAY_CLEANUP_FAILED', record_id: id, je_id: reversalJeId, error: String(e) });
+        } finally { cleanup.release(); }
+      }
+      err(res, 409, 'INVOICE_STATE_CHANGED', 'Invoice was modified concurrently; please retry.');
+      return;
+    }
+
+    logger.info({ entity: 'PROPERTIES', action: 'VENDOR_INVOICE_UNPAID', user_id: userId, record_id: id, reversal_journal_entry_id: reversalJeId });
+    await auditLog(userId, 'VendorInvoice', 'UNPAY', id, { reason, reversal_journal_entry_id: reversalJeId });
     ok(res, updated);
   } catch (e) { next(e); }
 });

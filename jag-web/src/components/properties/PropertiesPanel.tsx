@@ -1042,6 +1042,47 @@ function PayInvoiceModal({ propertyId, inv, onClose, onUpdated }: {
   )
 }
 
+// ─── Unpay Invoice Modal ──────────────────────────────────────────────────────
+// Undoes a payment made in error — reverts the invoice to APPROVED and, if a
+// settlement was posted, reverses it on the GL (Dr Bank / Cr Accounts Payable).
+function UnpayInvoiceModal({ propertyId, inv, onClose, onUpdated }: {
+  propertyId: string; inv: VendorInvoice; onClose: () => void; onUpdated: () => void
+}) {
+  const { t } = useTranslation()
+  const [reason, setReason] = useState('')
+
+  const { mutate, isPending, error } = useMutation({
+    mutationFn: () => propertiesApi.unpayInvoice(propertyId, inv.id, { reason }),
+    onSuccess: () => { onUpdated(); onClose() },
+  })
+
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
+      <div className="bg-slate-800 border border-slate-700 rounded-xl w-full max-w-sm p-6 shadow-2xl">
+        <h2 className="text-base font-semibold mb-1 text-white">{t('propertiesPanel.unpayInvoiceTitle')} {inv.vendor_name}</h2>
+        {inv.settlement_journal_entry_id && (
+          <p className="text-[11px] text-amber-300/80 mb-3">{t('propertiesPanel.unpayReversalNote')}</p>
+        )}
+        <div className="space-y-3">
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">{t('propertiesPanel.unpayReason')}</label>
+            <textarea value={reason} onChange={e => setReason(e.target.value)} rows={2} className={cls}
+              placeholder={t('propertiesPanel.unpayReasonPlaceholder')} />
+          </div>
+          {error && <p className="text-red-400 text-xs">{error instanceof Error ? error.message : 'Failed.'}</p>}
+        </div>
+        <div className="flex gap-3 mt-5">
+          <button onClick={() => mutate()} disabled={isPending || !reason.trim()}
+            className="flex-1 py-2 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white text-sm rounded-lg transition-colors">
+            {isPending ? t('common.saving') : t('propertiesPanel.unpayBtn')}
+          </button>
+          <button onClick={onClose} className="px-4 py-2 text-slate-400 hover:text-white text-sm transition-colors">{t('common.cancel')}</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ─── Allocate Vendor Invoice Modal ────────────────────────────────────────────
 function AllocateInvoiceModal({ propertyId, inv, onClose, onUpdated }: {
   propertyId: string; inv: VendorInvoice; onClose: () => void; onUpdated: () => void
@@ -2287,6 +2328,7 @@ function PropertyDetail({ property, onDeleted }: { property: Property; onDeleted
   const [showAddUtility, setShowAddUtility] = useState(false)
   const [showAddInvoice, setShowAddInvoice] = useState(false)
   const [payingInvoice, setPayingInvoice] = useState<VendorInvoice | null>(null)
+  const [unpayingInvoice, setUnpayingInvoice] = useState<VendorInvoice | null>(null)
   const [allocatingInvoice, setAllocatingInvoice] = useState<VendorInvoice | null>(null)
   const [showAddInsurance, setShowAddInsurance] = useState(false)
   const [showAddTax, setShowAddTax] = useState(false)
@@ -2793,6 +2835,10 @@ function PropertyDetail({ property, onDeleted }: { property: Property; onDeleted
                             <button onClick={() => setPayingInvoice(inv)}
                               className="text-xs text-green-400 hover:text-green-300 transition-colors mr-2">{t('propertiesPanel.payBtn')}</button>
                           )}
+                          {inv.status === 'PAID' && (
+                            <button onClick={() => setUnpayingInvoice(inv)}
+                              className="text-xs text-amber-400 hover:text-amber-300 transition-colors mr-2">{t('propertiesPanel.unpayBtn')}</button>
+                          )}
                           <button onClick={() => setAllocatingInvoice(inv)}
                             className="text-xs text-slate-400 hover:text-slate-200 transition-colors">{t('propertiesPanel.allocateBtn', 'Allocate')}</button>
                         </td>
@@ -3197,6 +3243,8 @@ function PropertyDetail({ property, onDeleted }: { property: Property; onDeleted
       {showAddInvoice   && <AddInvoiceModal propertyId={property.id} onClose={() => setShowAddInvoice(false)}
         onCreated={() => void qc.invalidateQueries({ queryKey: ['properties', property.id, 'invoices'] })} />}
       {payingInvoice    && <PayInvoiceModal propertyId={property.id} inv={payingInvoice} onClose={() => setPayingInvoice(null)}
+        onUpdated={() => void qc.invalidateQueries({ queryKey: ['properties', property.id, 'invoices'] })} />}
+      {unpayingInvoice  && <UnpayInvoiceModal propertyId={property.id} inv={unpayingInvoice} onClose={() => setUnpayingInvoice(null)}
         onUpdated={() => void qc.invalidateQueries({ queryKey: ['properties', property.id, 'invoices'] })} />}
       {allocatingInvoice && <AllocateInvoiceModal propertyId={property.id} inv={allocatingInvoice} onClose={() => setAllocatingInvoice(null)}
         onUpdated={() => void qc.invalidateQueries({ queryKey: ['invoice-allocations', allocatingInvoice.id] })} />}

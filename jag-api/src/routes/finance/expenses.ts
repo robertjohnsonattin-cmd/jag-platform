@@ -13,7 +13,7 @@ import { Router, type Request, type Response, type NextFunction } from 'express'
 import { z } from 'zod';
 import multer from 'multer';
 import { withOwnerRLS, withTenantRLS } from '../../middleware/rls';
-import { familyPool, corePool, commercialPool } from '../../db/index';
+import { familyPool, corePool, commercialPool, propertiesPool } from '../../db/index';
 import { logger } from '../../lib/logger';
 import { ok, err } from '../../lib/response';
 import { enqueueNotification } from '../../lib/notifications';
@@ -611,6 +611,28 @@ expensesRouter.post('/:id/reverse', async (req: Request, res: Response, next: Ne
         if (!expense) throw Object.assign(new Error('Expense not found.'), { status: 404, code: 'EXPENSE_NOT_FOUND' });
         if (expense.status !== 'APPROVED') throw Object.assign(new Error('Only APPROVED expenses can be reversed.'), { status: 409, code: 'EXPENSE_NOT_APPROVED' });
         if (!expense.journal_entry_id) throw Object.assign(new Error('No GL entry linked to this expense.'), { status: 409, code: 'NO_JOURNAL_ENTRY' });
+
+        // A property-bridged expense may have a linked vendor invoice already marked
+        // PAID (its settlement leg posted against this expense's GL credit account).
+        // Reversing leg 1 here without first unwinding leg 2 would leave a stray A/P
+        // balance — block it and point the user at the invoice's "Unpay" action instead.
+        if (expense.linked_record_type === 'PROPERTY') {
+          const propClient = await propertiesPool.connect();
+          try {
+            const paidInvoice = await withOwnerRLS(propClient, req.rlsCtx, (pc) =>
+              pc.query<{ id: string }>(
+                `SELECT id FROM prop_vendor_invoices WHERE linked_expense_id = $1 AND status = 'PAID'`,
+                [id],
+              ),
+            );
+            if (paidInvoice.rows.length > 0) {
+              throw Object.assign(
+                new Error('This expense’s linked vendor invoice has already been paid. Unpay the invoice in the property portal before reversing this expense.'),
+                { status: 409, code: 'INVOICE_ALREADY_PAID' },
+              );
+            }
+          } finally { propClient.release(); }
+        }
 
         // Fetch original GL lines
         const lines = await c.query(

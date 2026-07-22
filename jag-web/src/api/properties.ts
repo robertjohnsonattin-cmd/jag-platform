@@ -72,6 +72,9 @@ export const propertiesApi = {
   payInvoice: (propertyId: string, id: string, body: { paid_date: string; payment_reference?: string }) =>
     api.patch<VendorInvoice>(`/properties/${propertyId}/vendor-invoices/${id}/pay`, body),
 
+  unpayInvoice: (propertyId: string, id: string, body: { reason: string }) =>
+    api.patch<VendorInvoice>(`/properties/${propertyId}/vendor-invoices/${id}/unpay`, body),
+
   getInvoiceAllocations: (propertyId: string, id: string) =>
     api.get<VendorInvoiceAllocation[]>(`/properties/${propertyId}/vendor-invoices/${id}/allocations`),
 
