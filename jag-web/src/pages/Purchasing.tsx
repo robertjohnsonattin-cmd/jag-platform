@@ -391,6 +391,7 @@ function PODetailPanel({ po, onClose }: { po: PurchaseOrder; onClose: () => void
 
           {lines.length === 0 && <p className="text-slate-500 text-sm text-center py-8">{t('common.loading')}</p>}
 
+          <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="text-slate-400 text-xs border-b border-slate-700">
@@ -424,6 +425,7 @@ function PODetailPanel({ po, onClose }: { po: PurchaseOrder; onClose: () => void
               })}
             </tbody>
           </table>
+          </div>
         </div>
       </div>
 
@@ -457,6 +459,7 @@ function SuppliersTab() {
           <div className="flex items-center justify-center h-32 text-slate-500 text-sm">{t('purchasing.noSuppliers')}</div>
         )}
         {suppliers.length > 0 && (
+          <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="text-slate-400 text-xs uppercase tracking-wide border-b border-slate-700 sticky top-0 bg-slate-800">
               <tr>
@@ -477,6 +480,7 @@ function SuppliersTab() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
 
@@ -507,7 +511,7 @@ function PurchaseOrdersTab() {
   return (
     <div className="flex h-full gap-0">
       {/* List */}
-      <div className={`flex flex-col ${selected ? 'hidden lg:flex lg:w-96 lg:shrink-0' : 'flex-1'}`}>
+      <div className={`flex flex-col min-w-0 ${selected ? 'hidden lg:flex lg:w-96 lg:shrink-0' : 'flex-1'}`}>
         <div className="px-4 py-3 border-b border-slate-700 flex items-center gap-2">
           <select
             value={statusFilter}
@@ -582,7 +586,7 @@ export default function Purchasing() {
         <p className="text-slate-400 text-sm mt-0.5">{t('purchasing.subtitle')}</p>
       </div>
 
-      <div className="flex border-b border-slate-700 px-6">
+      <div className="flex border-b border-slate-700 px-6 overflow-x-auto">
         {([
           { key: 'purchase-orders', label: t('purchasing.tabPOs') },
           { key: 'suppliers',       label: t('purchasing.tabSuppliers') },
@@ -590,7 +594,7 @@ export default function Purchasing() {
           <button
             key={key}
             onClick={() => setTab(key)}
-            className={`py-3 px-4 text-sm font-medium border-b-2 -mb-px transition-colors ${
+            className={`py-3 px-4 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap ${
               tab === key ? 'border-orange-500 text-orange-400' : 'border-transparent text-slate-400 hover:text-white'
             }`}
           >{label}</button>

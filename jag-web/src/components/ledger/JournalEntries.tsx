@@ -311,6 +311,7 @@ export default function JournalEntries() {
           </div>
 
           {detail?.lines && detail.lines.length > 0 && (
+            <div className="overflow-x-auto">
             <table className="w-full text-xs mb-4">
               <thead>
                 <tr className="text-slate-500 border-b border-slate-700">
@@ -343,6 +344,7 @@ export default function JournalEntries() {
                 </tr>
               </tfoot>
             </table>
+            </div>
           )}
 
           {/* Actions */}

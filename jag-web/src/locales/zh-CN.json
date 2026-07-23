@@ -258,12 +258,19 @@
       "colBalance": "余额",
       "failedLoad": "账户加载失败。",
       "accountTypes": {
-        "CHEQUING": "支票账户", "SAVINGS": "储蓄账户", "CURRENT": "往来账户",
-        "CALL_DEPOSIT": "活期存款", "CREDIT_CARD": "信用卡",
-        "LINE_OF_CREDIT": "信用额度", "BROKERAGE": "证券账户",
-        "RETIREMENT": "退休账户", "MUTUAL_FUND": "基金账户",
-        "MORTGAGE": "按揭贷款", "TERM_LOAN": "定期贷款",
-        "PERSONAL_LOAN": "个人贷款", "OTHER": "其他"
+        "CHEQUING": "支票账户",
+        "SAVINGS": "储蓄账户",
+        "CURRENT": "往来账户",
+        "CALL_DEPOSIT": "活期存款",
+        "CREDIT_CARD": "信用卡",
+        "LINE_OF_CREDIT": "信用额度",
+        "BROKERAGE": "证券账户",
+        "RETIREMENT": "退休账户",
+        "MUTUAL_FUND": "基金账户",
+        "MORTGAGE": "按揭贷款",
+        "TERM_LOAN": "定期贷款",
+        "PERSONAL_LOAN": "个人贷款",
+        "OTHER": "其他"
       }
     },
     "netWorth": {
@@ -323,10 +330,16 @@
       "colGainLoss": "盈亏",
       "update": "更新",
       "investmentTypes": {
-        "EQUITY": "股票", "BOND": "债券", "MUTUAL_FUND": "基金",
-        "ETF": "ETF", "UNIT_TRUST": "单位信托", "REAL_ESTATE": "房地产",
-        "PRIVATE_EQUITY": "私募股权", "CASH_EQUIVALENT": "现金等价物",
-        "ANNUITY": "年金", "OTHER": "其他"
+        "EQUITY": "股票",
+        "BOND": "债券",
+        "MUTUAL_FUND": "基金",
+        "ETF": "ETF",
+        "UNIT_TRUST": "单位信托",
+        "REAL_ESTATE": "房地产",
+        "PRIVATE_EQUITY": "私募股权",
+        "CASH_EQUIVALENT": "现金等价物",
+        "ANNUITY": "年金",
+        "OTHER": "其他"
       }
     },
     "loans": {
@@ -354,8 +367,12 @@
       "colMaturity": "到期日",
       "update": "更新",
       "loanTypes": {
-        "MORTGAGE": "按揭", "CAR_LOAN": "车贷", "PERSONAL_LOAN": "个人贷款",
-        "BUSINESS_LOAN": "商业贷款", "OVERDRAFT": "透支", "OTHER": "其他"
+        "MORTGAGE": "按揭",
+        "CAR_LOAN": "车贷",
+        "PERSONAL_LOAN": "个人贷款",
+        "BUSINESS_LOAN": "商业贷款",
+        "OVERDRAFT": "透支",
+        "OTHER": "其他"
       }
     },
     "fxRates": {
@@ -367,6 +384,11 @@
       "colRateToTTD": "兑TTD汇率",
       "colDate": "日期",
       "colSource": "来源"
+    },
+    "groups": {
+      "banking": "银行业务",
+      "assetsLiabilities": "资产与负债",
+      "other": "其他"
     }
   },
   "properties": {
@@ -375,6 +397,13 @@
       "properties": "房产列表",
       "tenants": "租户",
       "pipeline": "收购管道"
+    },
+    "groups": {
+      "overview": "概览",
+      "leasing": "租赁",
+      "tenancyOps": "租务管理",
+      "maintenance": "维护",
+      "comms": "通讯"
     }
   },
   "ledger": {
@@ -921,9 +950,18 @@
     "filterMonth": "月份（可选）",
     "fullYear": "全年",
     "months": {
-      "1": "1月", "2": "2月", "3": "3月", "4": "4月",
-      "5": "5月", "6": "6月", "7": "7月", "8": "8月",
-      "9": "9月", "10": "10月", "11": "11月", "12": "12月"
+      "1": "1月",
+      "2": "2月",
+      "3": "3月",
+      "4": "4月",
+      "5": "5月",
+      "6": "6月",
+      "7": "7月",
+      "8": "8月",
+      "9": "9月",
+      "10": "10月",
+      "11": "11月",
+      "12": "12月"
     },
     "fdwWarning": "FDW未配置 — 仅显示JAG Holdings总账数据。运行005b_fdw_setup.sql以启用跨实体视图。",
     "noGlData": "本期无总账数据。",
@@ -2182,19 +2220,33 @@
     "viaSource": "来自 {{source}}",
     "logEntryBtn": "记录",
     "progTypes": {
-      "AIRLINE": "航空", "HOTEL": "酒店", "CRUISE": "邮轮",
-      "CREDIT_CARD": "信用卡", "RETAIL": "零售", "DINING": "餐饮", "OTHER": "其他"
+      "AIRLINE": "航空",
+      "HOTEL": "酒店",
+      "CRUISE": "邮轮",
+      "CREDIT_CARD": "信用卡",
+      "RETAIL": "零售",
+      "DINING": "餐饮",
+      "OTHER": "其他"
     },
     "txTypes": {
-      "EARN": "获得", "REDEEM": "兑换", "EXPIRE": "过期",
-      "TRANSFER_IN": "转入", "TRANSFER_OUT": "转出",
-      "BONUS": "奖励", "REINSTATEMENT": "恢复"
+      "EARN": "获得",
+      "REDEEM": "兑换",
+      "EXPIRE": "过期",
+      "TRANSFER_IN": "转入",
+      "TRANSFER_OUT": "转出",
+      "BONUS": "奖励",
+      "REINSTATEMENT": "恢复"
     },
     "metricTypes": {
-      "WEIGHT_KG": "体重 (kg)", "STEPS": "步数", "SLEEP_HOURS": "睡眠 (小时)",
-      "CALORIES": "卡路里", "EXERCISE_MINUTES": "运动 (分钟)",
-      "BLOOD_PRESSURE_SYSTOLIC": "收缩压", "BLOOD_PRESSURE_DIASTOLIC": "舒张压",
-      "RESTING_HEART_RATE": "静息心率", "OTHER": "其他"
+      "WEIGHT_KG": "体重 (kg)",
+      "STEPS": "步数",
+      "SLEEP_HOURS": "睡眠 (小时)",
+      "CALORIES": "卡路里",
+      "EXERCISE_MINUTES": "运动 (分钟)",
+      "BLOOD_PRESSURE_SYSTOLIC": "收缩压",
+      "BLOOD_PRESSURE_DIASTOLIC": "舒张压",
+      "RESTING_HEART_RATE": "静息心率",
+      "OTHER": "其他"
     }
   },
   "purchasing": {
@@ -2983,6 +3035,10 @@
     "clockedInAt": "已于 {{time}} 打卡上班",
     "workedSummary": "工作 {{hours}} 小时（{{in}} – {{out}}）",
     "breakMinutes": "休息（分钟）",
-    "outsideWeek": "今天不在此工时表所属的周内——请选择本周的工时表再打卡。"
+    "outsideWeek": "今天不在此工时表所属的周内——请选择本周的工时表再打卡。",
+    "group_people": "人员",
+    "group_timePay": "考勤与薪酬",
+    "group_growth": "发展",
+    "group_conduct": "纪律"
   }
 }

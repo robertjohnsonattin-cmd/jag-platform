@@ -136,6 +136,7 @@ function SuppliersTab() {
         {isLoading && <div className="flex items-center justify-center h-32 text-slate-400 text-sm">{t('common.loading')}</div>}
         {!isLoading && suppliers.length === 0 && <div className="flex items-center justify-center h-32 text-slate-500 text-sm">{t('db.noSuppliers')}</div>}
         {suppliers.length > 0 && (
+          <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="text-slate-400 text-xs uppercase tracking-wide border-b border-slate-700 sticky top-0 bg-slate-800">
               <tr>
@@ -165,6 +166,7 @@ function SuppliersTab() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
       {showAdd && <AddSupplierModal onClose={() => setShowAdd(false)} />}
@@ -296,6 +298,7 @@ function ProductsTab() {
       <div className="flex-1 overflow-y-auto">
         {isLoading && <div className="flex items-center justify-center h-32 text-slate-400 text-sm">{t('common.loading')}</div>}
         {products.length > 0 && (
+          <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="text-slate-400 text-xs uppercase tracking-wide border-b border-slate-700 sticky top-0 bg-slate-800">
               <tr>
@@ -320,6 +323,7 @@ function ProductsTab() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
       {showAdd && <AddProductModal onClose={() => setShowAdd(false)} />}
@@ -437,6 +441,7 @@ function ClientsTab() {
       <div className="flex-1 overflow-y-auto">
         {isLoading && <div className="flex items-center justify-center h-32 text-slate-400 text-sm">{t('common.loading')}</div>}
         {clients.length > 0 && (
+          <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="text-slate-400 text-xs uppercase tracking-wide border-b border-slate-700 sticky top-0 bg-slate-800">
               <tr>
@@ -472,6 +477,7 @@ function ClientsTab() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
       {showAdd && <AddClientModal onClose={() => setShowAdd(false)} />}
@@ -777,7 +783,7 @@ function QuoteDetailPanel({ quoteId, onClose }: { quoteId: string; onClose: () =
       </div>
 
       {/* FX + Cost Summary */}
-      <div className="px-5 py-3 border-b border-slate-700 grid grid-cols-4 gap-3 text-center">
+      <div className="px-5 py-3 border-b border-slate-700 grid grid-cols-2 sm:grid-cols-4 gap-3 text-center">
         <div>
           <p className="text-orange-400 font-semibold">{fmtM(quote.total_ttd)}</p>
           <p className="text-slate-500 text-xs">{t('db.totalTtd')}</p>
@@ -807,6 +813,7 @@ function QuoteDetailPanel({ quoteId, onClose }: { quoteId: string; onClose: () =
           </div>
         )}
         {quote.items.length > 0 && (
+          <div className="overflow-x-auto">
           <table className="w-full text-xs">
             <thead className="text-slate-400 uppercase tracking-wide border-b border-slate-700 sticky top-0 bg-slate-800">
               <tr>
@@ -836,6 +843,7 @@ function QuoteDetailPanel({ quoteId, onClose }: { quoteId: string; onClose: () =
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
 
@@ -861,7 +869,7 @@ function QuotesTab() {
 
   return (
     <div className="flex h-full gap-0">
-      <div className={`flex flex-col ${selected ? 'hidden lg:flex lg:w-80 lg:shrink-0' : 'flex-1'}`}>
+      <div className={`flex flex-col min-w-0 ${selected ? 'hidden lg:flex lg:w-80 lg:shrink-0' : 'flex-1'}`}>
         <div className="px-4 py-3 border-b border-slate-700 flex items-center gap-2 flex-wrap">
           <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}
             className="bg-slate-700 border border-slate-600 rounded-lg px-3 py-1.5 text-white text-xs">
@@ -1071,7 +1079,7 @@ function OrdersTab() {
 
   return (
     <div className="flex h-full gap-0">
-      <div className={`flex flex-col ${selected ? 'hidden lg:flex lg:w-80 lg:shrink-0' : 'flex-1'}`}>
+      <div className={`flex flex-col min-w-0 ${selected ? 'hidden lg:flex lg:w-80 lg:shrink-0' : 'flex-1'}`}>
         <div className="px-4 py-3 border-b border-slate-700 flex items-center gap-2">
           <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}
             className="bg-slate-700 border border-slate-600 rounded-lg px-3 py-1.5 text-white text-xs">
@@ -1218,6 +1226,7 @@ function ShipmentsTab() {
         {isLoading && <div className="flex items-center justify-center h-32 text-slate-400 text-sm">{t('common.loading')}</div>}
         {!isLoading && shipments.length === 0 && <div className="flex items-center justify-center h-32 text-slate-500 text-sm">{t('db.noShipments')}</div>}
         {shipments.length > 0 && (
+          <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="text-slate-400 text-xs uppercase tracking-wide border-b border-slate-700 sticky top-0 bg-slate-800">
               <tr>
@@ -1247,6 +1256,7 @@ function ShipmentsTab() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
       {showCreate && <CreateShipmentModal onClose={() => setShowCreate(false)} />}
@@ -1292,6 +1302,7 @@ function ReconciliationsTab() {
         {isLoading && <div className="flex items-center justify-center h-32 text-slate-400 text-sm">{t('common.loading')}</div>}
         {!isLoading && recons.length === 0 && <div className="flex items-center justify-center h-32 text-slate-500 text-sm">{t('db.noReconciliations')}</div>}
         {recons.length > 0 && (
+          <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="text-slate-400 text-xs uppercase tracking-wide border-b border-slate-700 sticky top-0 bg-slate-800">
               <tr>
@@ -1329,6 +1340,7 @@ function ReconciliationsTab() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
     </div>

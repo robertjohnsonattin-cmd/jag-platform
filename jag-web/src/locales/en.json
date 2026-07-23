@@ -259,12 +259,19 @@
       "colBalance": "Balance",
       "failedLoad": "Failed to load accounts.",
       "accountTypes": {
-        "CHEQUING": "Chequing", "SAVINGS": "Savings", "CURRENT": "Current",
-        "CALL_DEPOSIT": "Call Deposit", "CREDIT_CARD": "Credit Card",
-        "LINE_OF_CREDIT": "Line of Credit", "BROKERAGE": "Brokerage",
-        "RETIREMENT": "Retirement", "MUTUAL_FUND": "Mutual Fund",
-        "MORTGAGE": "Mortgage", "TERM_LOAN": "Term Loan",
-        "PERSONAL_LOAN": "Personal Loan", "OTHER": "Other"
+        "CHEQUING": "Chequing",
+        "SAVINGS": "Savings",
+        "CURRENT": "Current",
+        "CALL_DEPOSIT": "Call Deposit",
+        "CREDIT_CARD": "Credit Card",
+        "LINE_OF_CREDIT": "Line of Credit",
+        "BROKERAGE": "Brokerage",
+        "RETIREMENT": "Retirement",
+        "MUTUAL_FUND": "Mutual Fund",
+        "MORTGAGE": "Mortgage",
+        "TERM_LOAN": "Term Loan",
+        "PERSONAL_LOAN": "Personal Loan",
+        "OTHER": "Other"
       }
     },
     "netWorth": {
@@ -324,10 +331,16 @@
       "colGainLoss": "Gain/Loss",
       "update": "Update",
       "investmentTypes": {
-        "EQUITY": "Equity", "BOND": "Bond", "MUTUAL_FUND": "Mutual Fund",
-        "ETF": "ETF", "UNIT_TRUST": "Unit Trust", "REAL_ESTATE": "Real Estate",
-        "PRIVATE_EQUITY": "Private Equity", "CASH_EQUIVALENT": "Cash Equiv.",
-        "ANNUITY": "Annuity", "OTHER": "Other"
+        "EQUITY": "Equity",
+        "BOND": "Bond",
+        "MUTUAL_FUND": "Mutual Fund",
+        "ETF": "ETF",
+        "UNIT_TRUST": "Unit Trust",
+        "REAL_ESTATE": "Real Estate",
+        "PRIVATE_EQUITY": "Private Equity",
+        "CASH_EQUIVALENT": "Cash Equiv.",
+        "ANNUITY": "Annuity",
+        "OTHER": "Other"
       }
     },
     "loans": {
@@ -355,8 +368,12 @@
       "colMaturity": "Maturity",
       "update": "Update",
       "loanTypes": {
-        "MORTGAGE": "Mortgage", "CAR_LOAN": "Car Loan", "PERSONAL_LOAN": "Personal Loan",
-        "BUSINESS_LOAN": "Business Loan", "OVERDRAFT": "Overdraft", "OTHER": "Other"
+        "MORTGAGE": "Mortgage",
+        "CAR_LOAN": "Car Loan",
+        "PERSONAL_LOAN": "Personal Loan",
+        "BUSINESS_LOAN": "Business Loan",
+        "OVERDRAFT": "Overdraft",
+        "OTHER": "Other"
       }
     },
     "fxRates": {
@@ -368,6 +385,11 @@
       "colRateToTTD": "Rate to TTD",
       "colDate": "Date",
       "colSource": "Source"
+    },
+    "groups": {
+      "banking": "Banking",
+      "assetsLiabilities": "Assets & Liabilities",
+      "other": "Other"
     }
   },
   "properties": {
@@ -376,6 +398,13 @@
       "properties": "Properties",
       "tenants": "Tenants",
       "pipeline": "Acquisition Pipeline"
+    },
+    "groups": {
+      "overview": "Overview",
+      "leasing": "Leasing",
+      "tenancyOps": "Tenancy Ops",
+      "maintenance": "Maintenance",
+      "comms": "Comms"
     }
   },
   "ledger": {
@@ -922,9 +951,18 @@
     "filterMonth": "Month (optional)",
     "fullYear": "Full Year",
     "months": {
-      "1": "Jan", "2": "Feb", "3": "Mar", "4": "Apr",
-      "5": "May", "6": "Jun", "7": "Jul", "8": "Aug",
-      "9": "Sep", "10": "Oct", "11": "Nov", "12": "Dec"
+      "1": "Jan",
+      "2": "Feb",
+      "3": "Mar",
+      "4": "Apr",
+      "5": "May",
+      "6": "Jun",
+      "7": "Jul",
+      "8": "Aug",
+      "9": "Sep",
+      "10": "Oct",
+      "11": "Nov",
+      "12": "Dec"
     },
     "fdwWarning": "FDW not configured — showing JAG Holdings GL data only. Run 005b_fdw_setup.sql to enable cross-entity view.",
     "noGlData": "No GL data for this period.",
@@ -2183,19 +2221,33 @@
     "viaSource": "via {{source}}",
     "logEntryBtn": "Log Entry",
     "progTypes": {
-      "AIRLINE": "Airline", "HOTEL": "Hotel", "CRUISE": "Cruise",
-      "CREDIT_CARD": "Credit Card", "RETAIL": "Retail", "DINING": "Dining", "OTHER": "Other"
+      "AIRLINE": "Airline",
+      "HOTEL": "Hotel",
+      "CRUISE": "Cruise",
+      "CREDIT_CARD": "Credit Card",
+      "RETAIL": "Retail",
+      "DINING": "Dining",
+      "OTHER": "Other"
     },
     "txTypes": {
-      "EARN": "Earn", "REDEEM": "Redeem", "EXPIRE": "Expire",
-      "TRANSFER_IN": "Transfer In", "TRANSFER_OUT": "Transfer Out",
-      "BONUS": "Bonus", "REINSTATEMENT": "Reinstatement"
+      "EARN": "Earn",
+      "REDEEM": "Redeem",
+      "EXPIRE": "Expire",
+      "TRANSFER_IN": "Transfer In",
+      "TRANSFER_OUT": "Transfer Out",
+      "BONUS": "Bonus",
+      "REINSTATEMENT": "Reinstatement"
     },
     "metricTypes": {
-      "WEIGHT_KG": "Weight (kg)", "STEPS": "Steps", "SLEEP_HOURS": "Sleep (hrs)",
-      "CALORIES": "Calories", "EXERCISE_MINUTES": "Exercise (min)",
-      "BLOOD_PRESSURE_SYSTOLIC": "BP Systolic", "BLOOD_PRESSURE_DIASTOLIC": "BP Diastolic",
-      "RESTING_HEART_RATE": "Resting HR", "OTHER": "Other"
+      "WEIGHT_KG": "Weight (kg)",
+      "STEPS": "Steps",
+      "SLEEP_HOURS": "Sleep (hrs)",
+      "CALORIES": "Calories",
+      "EXERCISE_MINUTES": "Exercise (min)",
+      "BLOOD_PRESSURE_SYSTOLIC": "BP Systolic",
+      "BLOOD_PRESSURE_DIASTOLIC": "BP Diastolic",
+      "RESTING_HEART_RATE": "Resting HR",
+      "OTHER": "Other"
     }
   },
   "purchasing": {
@@ -2984,6 +3036,10 @@
     "clockedInAt": "Clocked in at {{time}}",
     "workedSummary": "Worked {{hours}}h ({{in}} – {{out}})",
     "breakMinutes": "Break (min)",
-    "outsideWeek": "Today is outside this timesheet's week — select the current week's timesheet to clock in."
+    "outsideWeek": "Today is outside this timesheet's week — select the current week's timesheet to clock in.",
+    "group_people": "People",
+    "group_timePay": "Time & Pay",
+    "group_growth": "Growth",
+    "group_conduct": "Conduct"
   }
 }

@@ -353,7 +353,7 @@ function BarTabs({ defaultVenue }: { defaultVenue: Venue }) {
   return (
     <div className="flex h-full">
       {/* List */}
-      <div className={`flex flex-col ${selectedId ? 'hidden lg:flex lg:w-80 lg:shrink-0' : 'flex-1'}`}>
+      <div className={`flex flex-col min-w-0 ${selectedId ? 'hidden lg:flex lg:w-80 lg:shrink-0' : 'flex-1'}`}>
         <div className="px-3 py-2 border-b border-slate-700 flex gap-1 flex-wrap">
           {(['OPEN', 'CLOSED', 'SETTLED', 'VOIDED', 'ALL'] as const).map(s => (
             <button key={s} onClick={() => setStatusFilter(s)} className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${statusFilter === s ? 'bg-orange-700 text-white' : 'bg-slate-700 text-slate-300 hover:text-white'}`}>{s}</button>
@@ -561,9 +561,9 @@ function BarSection() {
   ]
   return (
     <div className="flex flex-col h-full">
-      <div className="flex border-b border-slate-700/60 px-4">
+      <div className="flex border-b border-slate-700/60 px-4 overflow-x-auto">
         {BAR_TABS.map(({ key, label }) => (
-          <button key={key} onClick={() => setSub(key)} className={`py-2 px-3 text-sm font-medium border-b-2 -mb-px transition-colors ${sub === key ? 'border-orange-500 text-orange-400' : 'border-transparent text-slate-400 hover:text-white'}`}>{label}</button>
+          <button key={key} onClick={() => setSub(key)} className={`py-2 px-3 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap ${sub === key ? 'border-orange-500 text-orange-400' : 'border-transparent text-slate-400 hover:text-white'}`}>{label}</button>
         ))}
       </div>
       <div className="flex-1 overflow-hidden">
@@ -635,7 +635,7 @@ function ClubMembers() {
   return (
     <div className="flex h-full">
       {/* List */}
-      <div className={`flex flex-col ${selected ? 'hidden lg:flex lg:w-80 lg:shrink-0' : 'flex-1'}`}>
+      <div className={`flex flex-col min-w-0 ${selected ? 'hidden lg:flex lg:w-80 lg:shrink-0' : 'flex-1'}`}>
         <div className="px-3 py-2 border-b border-slate-700 space-y-2">
           <div className="flex gap-2">
             <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search…" className="flex-1 bg-slate-700 border border-slate-600 rounded px-3 py-1.5 text-white text-sm" />
@@ -784,7 +784,7 @@ function ClubEvents() {
 
   return (
     <div className="flex h-full">
-      <div className={`flex flex-col ${selected ? 'hidden lg:flex lg:w-80 lg:shrink-0' : 'flex-1'}`}>
+      <div className={`flex flex-col min-w-0 ${selected ? 'hidden lg:flex lg:w-80 lg:shrink-0' : 'flex-1'}`}>
         <div className="px-3 py-2 border-b border-slate-700 flex justify-between">
           <p className="text-slate-300 text-sm font-medium">{t('ent.upcomingEvents')}</p>
           <button onClick={() => setShowAdd(s => !s)} className="px-3 py-1 rounded text-xs bg-orange-600 hover:bg-orange-500 text-white transition-colors">+ {t('common.add')}</button>
@@ -1163,13 +1163,13 @@ export default function Entertainment() {
         <p className="text-slate-400 text-sm mt-0.5">{t('ent.subtitle')}</p>
       </div>
 
-      <div className="flex border-b border-slate-700 px-6">
+      <div className="flex border-b border-slate-700 px-6 overflow-x-auto">
         {([
           { key: 'bar', label: t('ent.tabBar') },
           { key: 'club', label: t('ent.tabClub') },
           { key: 'pl', label: t('ent.tabPL') },
         ] as { key: TopTab; label: string }[]).map(({ key, label }) => (
-          <button key={key} onClick={() => setTab(key)} className={`py-3 px-4 text-sm font-medium border-b-2 -mb-px transition-colors ${tab === key ? 'border-orange-500 text-orange-400' : 'border-transparent text-slate-400 hover:text-white'}`}>{label}</button>
+          <button key={key} onClick={() => setTab(key)} className={`py-3 px-4 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap ${tab === key ? 'border-orange-500 text-orange-400' : 'border-transparent text-slate-400 hover:text-white'}`}>{label}</button>
         ))}
       </div>
 

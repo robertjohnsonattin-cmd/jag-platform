@@ -549,7 +549,7 @@ export default function DocVault() {
       {/* Content */}
       <div className="flex flex-1 overflow-hidden">
         {/* File list */}
-        <div className={`flex flex-col overflow-y-auto ${selected ? 'hidden lg:flex lg:w-1/2 lg:border-r lg:border-slate-700' : 'flex-1'}`}>
+        <div className={`flex flex-col min-w-0 overflow-y-auto ${selected ? 'hidden lg:flex lg:w-1/2 lg:border-r lg:border-slate-700' : 'flex-1'}`}>
           {isLoading && <div className="flex items-center justify-center h-32 text-slate-400 text-sm">{t('common.loading')}</div>}
           {!isLoading && displayed.length === 0 && (
             <div className="flex flex-col items-center justify-center h-64 text-slate-500">

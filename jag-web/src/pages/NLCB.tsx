@@ -408,7 +408,7 @@ function SessionDetailPanel({ session, onClose }: { session: SessionSummary; onC
 
       {/* Summary cards */}
       {detail && (
-        <div className="px-5 py-3 border-b border-slate-700 grid grid-cols-5 gap-2 text-center">
+        <div className="px-5 py-3 border-b border-slate-700 grid grid-cols-2 sm:grid-cols-5 gap-2 text-center">
           {[
             { label: t('nlcb.drawSales'), value: fmtM(detail.total_sales), cls: 'text-blue-300' },
             { label: t('nlcb.drawPayouts'), value: fmtM(detail.total_payouts), cls: 'text-red-400' },
@@ -566,7 +566,7 @@ function SessionsTab() {
 
   return (
     <div className="flex h-full gap-0">
-      <div className={`flex flex-col ${selected ? 'hidden lg:flex lg:w-80 lg:shrink-0' : 'flex-1'}`}>
+      <div className={`flex flex-col min-w-0 ${selected ? 'hidden lg:flex lg:w-80 lg:shrink-0' : 'flex-1'}`}>
         <div className="px-4 py-3 border-b border-slate-700 flex items-center justify-between">
           <span className="text-slate-400 text-sm">
             {openSession ? <span className="text-green-400">{t('nlcb.sessionOpenToday')}</span> : t('nlcb.noOpenSession')}
@@ -729,6 +729,7 @@ function SettlementsTab() {
       <div className="flex-1 overflow-y-auto">
         {isLoading && <div className="flex items-center justify-center h-32 text-slate-400 text-sm">{t('common.loading')}</div>}
         {settlements.length > 0 && (
+          <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="text-slate-400 text-xs uppercase tracking-wide border-b border-slate-700 sticky top-0 bg-slate-800">
               <tr>
@@ -768,6 +769,7 @@ function SettlementsTab() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
       {showCreate && <CreateSettlementModal onClose={() => setShowCreate(false)} />}
@@ -809,6 +811,7 @@ function GamesTab() {
       )}
       <div className="flex-1 overflow-y-auto">
         {isLoading && <div className="flex items-center justify-center h-32 text-slate-400 text-sm">{t('common.loading')}</div>}
+        <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="text-slate-400 text-xs uppercase tracking-wide border-b border-slate-700 sticky top-0 bg-slate-800">
             <tr>{[t('common.name'), t('nlcb.colFrequency'), t('nlcb.colCommission'), t('common.status')].map(h => <th key={h} className="px-4 py-2.5 text-left font-medium">{h}</th>)}</tr>
@@ -824,6 +827,7 @@ function GamesTab() {
             ))}
           </tbody>
         </table>
+        </div>
       </div>
     </div>
   )
@@ -860,6 +864,7 @@ function ScratchGamesTab() {
       )}
       <div className="flex-1 overflow-y-auto">
         {isLoading && <div className="flex items-center justify-center h-32 text-slate-400 text-sm">{t('common.loading')}</div>}
+        <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="text-slate-400 text-xs uppercase tracking-wide border-b border-slate-700 sticky top-0 bg-slate-800">
             <tr>{[t('common.name'), t('nlcb.denominationLabel'), t('nlcb.colCommission'), t('common.status')].map(h => <th key={h} className="px-4 py-2.5 text-left font-medium">{h}</th>)}</tr>
@@ -875,6 +880,7 @@ function ScratchGamesTab() {
             ))}
           </tbody>
         </table>
+        </div>
       </div>
     </div>
   )
@@ -910,6 +916,7 @@ function BillersTab() {
       )}
       <div className="flex-1 overflow-y-auto">
         {isLoading && <div className="flex items-center justify-center h-32 text-slate-400 text-sm">{t('common.loading')}</div>}
+        <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="text-slate-400 text-xs uppercase tracking-wide border-b border-slate-700 sticky top-0 bg-slate-800">
             <tr>{[t('nlcb.colBiller'), t('nlcb.colFlatFee'), t('common.status')].map(h => <th key={h} className="px-4 py-2.5 text-left font-medium">{h}</th>)}</tr>
@@ -924,6 +931,7 @@ function BillersTab() {
             ))}
           </tbody>
         </table>
+        </div>
       </div>
     </div>
   )
@@ -943,7 +951,7 @@ export default function NLCB() {
         <h1 className="text-xl font-semibold text-white">{t('nlcb.title')}</h1>
         <p className="text-slate-400 text-sm mt-0.5">{t('nlcb.subtitle')}</p>
       </div>
-      <div className="flex border-b border-slate-700 px-6">
+      <div className="flex border-b border-slate-700 px-6 overflow-x-auto">
         {([
           { key: 'sessions',     label: t('nlcb.tabSessions') },
           { key: 'settlements',  label: t('nlcb.tabSettlements') },
@@ -952,7 +960,7 @@ export default function NLCB() {
           { key: 'billers',      label: t('nlcb.tabBillers') },
         ] as { key: NLCBTab; label: string }[]).map(({ key, label }) => (
           <button key={key} onClick={() => setTab(key)}
-            className={`py-3 px-4 text-sm font-medium border-b-2 -mb-px transition-colors ${
+            className={`py-3 px-4 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap ${
               tab === key ? 'border-orange-500 text-orange-400' : 'border-transparent text-slate-400 hover:text-white'
             }`}>{label}</button>
         ))}

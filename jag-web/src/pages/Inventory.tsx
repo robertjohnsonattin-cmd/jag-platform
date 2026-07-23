@@ -1234,7 +1234,7 @@ function ItemDetailPanel({
         </div>
 
         {/* Tabs */}
-        <div className="flex border-b border-slate-700 px-5">
+        <div className="flex border-b border-slate-700 px-5 overflow-x-auto">
           {(['info', 'movements', 'barcodes', 'photos'] as const).map(dtab => {
             const tabLabels = {
               info:      t('inv.detailTabInfo'),
@@ -1246,7 +1246,7 @@ function ItemDetailPanel({
               <button
                 key={dtab}
                 onClick={() => setDetailTab(dtab)}
-                className={`py-2 px-3 text-sm capitalize font-medium border-b-2 -mb-px transition-colors ${
+                className={`py-2 px-3 text-sm capitalize font-medium border-b-2 -mb-px transition-colors whitespace-nowrap ${
                   detailTab === dtab
                     ? 'border-orange-500 text-orange-400'
                     : 'border-transparent text-slate-400 hover:text-white'
@@ -1578,7 +1578,7 @@ function ItemsTab() {
   return (
     <div className="flex h-full gap-0">
       {/* List panel */}
-      <div className={`flex flex-col ${selected ? 'hidden lg:flex lg:w-96 lg:shrink-0' : 'flex-1'}`}>
+      <div className={`flex flex-col min-w-0 ${selected ? 'hidden lg:flex lg:w-96 lg:shrink-0' : 'flex-1'}`}>
         {/* Filters */}
         <div className="px-4 py-3 border-b border-slate-700 space-y-2">
           <div className="flex gap-2">
@@ -1594,11 +1594,11 @@ function ItemsTab() {
               className="px-3 py-1.5 bg-orange-600 hover:bg-orange-500 text-white text-xs rounded-lg transition-colors whitespace-nowrap"
             >{t('inv.addItemBtn')}</button>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <select
               value={locationId}
               onChange={e => { setLocationId(e.target.value); setPage(1) }}
-              className="flex-1 bg-slate-700 border border-slate-600 rounded px-2 py-1.5 text-white text-xs"
+              className="flex-1 min-w-[140px] bg-slate-700 border border-slate-600 rounded px-2 py-1.5 text-white text-xs"
             >
               <option value="">{t('inv.allLocations')}</option>
               {(locData ?? []).map(l => <option key={l.id} value={l.id}>[{l.code}] {l.name}</option>)}
@@ -1606,7 +1606,7 @@ function ItemsTab() {
             <select
               value={categoryId}
               onChange={e => { setCategoryId(e.target.value); setPage(1) }}
-              className="flex-1 bg-slate-700 border border-slate-600 rounded px-2 py-1.5 text-white text-xs"
+              className="flex-1 min-w-[140px] bg-slate-700 border border-slate-600 rounded px-2 py-1.5 text-white text-xs"
             >
               <option value="">{t('inv.allCategories')}</option>
               {(catData ?? []).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
@@ -1883,6 +1883,7 @@ function VehiclesTab({ focusVehicleId, focusTab }: { focusVehicleId?: string | n
           <div className="flex items-center justify-center h-32 text-slate-500 text-sm">{t('inv.noVehiclesFound')}</div>
         )}
         {vehicles.length > 0 && (
+          <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="text-slate-400 text-xs uppercase tracking-wide border-b border-slate-700 sticky top-0 bg-slate-800">
               <tr>
@@ -1964,6 +1965,7 @@ function VehiclesTab({ focusVehicleId, focusTab }: { focusVehicleId?: string | n
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
 
@@ -2304,6 +2306,7 @@ function VehicleMaintenanceTab({ vehicleId }: { vehicleId: string }) {
                         qc.invalidateQueries({ queryKey: ['vms-work-orders', vehicleId] })
                       }} />
                     {(woItems[wo.id] ?? []).length > 0 && (
+                      <div className="overflow-x-auto">
                       <table className="w-full text-xs mt-3">
                         <thead>
                           <tr className="text-slate-400 border-b border-slate-700">
@@ -2326,6 +2329,7 @@ function VehicleMaintenanceTab({ vehicleId }: { vehicleId: string }) {
                           ))}
                         </tbody>
                       </table>
+                      </div>
                     )}
                     {wo.notes && <p className="text-slate-500 text-xs mt-2 italic">{wo.notes}</p>}
                   </div>
@@ -3516,6 +3520,7 @@ function ValuationTab() {
         {/* By location */}
         <div>
           <h3 className="text-sm font-medium text-slate-300 mb-3">{t('inv.valueByLocation')}</h3>
+          <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="text-slate-400 text-xs border-b border-slate-700">
@@ -3534,11 +3539,13 @@ function ValuationTab() {
               ))}
             </tbody>
           </table>
+          </div>
         </div>
 
         {/* By category */}
         <div>
           <h3 className="text-sm font-medium text-slate-300 mb-3">{t('inv.valueByCategory')}</h3>
+          <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="text-slate-400 text-xs border-b border-slate-700">
@@ -3557,6 +3564,7 @@ function ValuationTab() {
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       </div>
     </div>
@@ -3585,6 +3593,7 @@ function LowStockTab() {
           <div className="flex items-center justify-center h-32 text-slate-500 text-sm">{t('inv.allSufficient')}</div>
         )}
         {items.length > 0 && (
+          <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="text-slate-400 text-xs uppercase tracking-wide border-b border-slate-700 sticky top-0 bg-slate-800">
               <tr>
@@ -3622,6 +3631,7 @@ function LowStockTab() {
               })}
             </tbody>
           </table>
+          </div>
         )}
       </div>
     </div>
@@ -3718,6 +3728,7 @@ function StockTakeDetail({ st, onClose }: { st: StockTakeSummary; onClose: () =>
           </div>
         )}
 
+        <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="text-slate-400 text-xs border-b border-slate-700 sticky top-0 bg-slate-800">
             <tr>
@@ -3770,6 +3781,7 @@ function StockTakeDetail({ st, onClose }: { st: StockTakeSummary; onClose: () =>
             })}
           </tbody>
         </table>
+        </div>
       </div>
     </div>
   )
@@ -3795,7 +3807,7 @@ function StockTakesTab() {
 
   return (
     <div className="flex h-full gap-0">
-      <div className={`flex flex-col ${selected ? 'hidden lg:flex lg:w-80 lg:shrink-0' : 'flex-1'}`}>
+      <div className={`flex flex-col min-w-0 ${selected ? 'hidden lg:flex lg:w-80 lg:shrink-0' : 'flex-1'}`}>
         <div className="px-4 py-3 border-b border-slate-700 flex items-center justify-between">
           <span className="text-slate-400 text-sm">{t('inv.stockTakeCount', { count: takes.length })}</span>
           <button onClick={() => createTake()} disabled={creating}
@@ -4020,9 +4032,9 @@ function ScheduleDetail({ sched, onClose }: { sched: DepreciationSchedule; onClo
       </div>
 
       {/* Summary */}
-      <div className="px-5 py-3 border-b border-slate-700 grid grid-cols-4 gap-3">
+      <div className="px-5 py-3 border-b border-slate-700 grid grid-cols-2 sm:grid-cols-4 gap-3">
         {([
-          { key: 'cost',        label: t('inv.cost'),        value: fmtMon(sched.cost_at_start) },
+          { key: 'cost',       label: t('inv.cost'),        value: fmtMon(sched.cost_at_start) },
           { key: 'accumulated', label: t('inv.accumulated'), value: fmtMon(sched.accumulated_depreciation) },
           { key: 'netBookVal',  label: t('inv.netBookVal'),  value: fmtMon(sched.net_book_value) },
           { key: 'residual',    label: t('inv.residual'),    value: fmtMon(sched.residual_value) },
@@ -4127,6 +4139,7 @@ function ScheduleDetail({ sched, onClose }: { sched: DepreciationSchedule; onClo
         {isLoading && <div className="flex items-center justify-center h-32 text-slate-400 text-sm">{t('common.loading')}</div>}
         {!isLoading && entries.length === 0 && <div className="flex items-center justify-center h-32 text-slate-500 text-sm">{t('inv.noEntries')}</div>}
         {entries.length > 0 && (
+          <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="text-slate-400 text-xs border-b border-slate-700 sticky top-0 bg-slate-800">
               <tr>
@@ -4155,6 +4168,7 @@ function ScheduleDetail({ sched, onClose }: { sched: DepreciationSchedule; onClo
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
     </div>
@@ -4176,7 +4190,7 @@ function DepreciationTab() {
 
   return (
     <div className="flex h-full gap-0">
-      <div className={`flex flex-col ${selected ? 'hidden lg:flex lg:w-96 lg:shrink-0' : 'flex-1'}`}>
+      <div className={`flex flex-col min-w-0 ${selected ? 'hidden lg:flex lg:w-96 lg:shrink-0' : 'flex-1'}`}>
         <div className="px-4 py-3 border-b border-slate-700 flex items-center justify-between">
           <span className="text-slate-400 text-sm">{t('inv.assetCount', { count: schedules.length })}</span>
           <button onClick={() => setShowAdd(true)} className="px-3 py-1.5 bg-orange-600 hover:bg-orange-500 text-white text-xs rounded-lg transition-colors">{t('inv.addScheduleBtn')}</button>
@@ -4185,6 +4199,7 @@ function DepreciationTab() {
           {isLoading && <div className="flex items-center justify-center h-32 text-slate-400 text-sm">{t('common.loading')}</div>}
           {!isLoading && schedules.length === 0 && <div className="flex items-center justify-center h-32 text-slate-500 text-sm">{t('inv.noSchedules')}</div>}
           {schedules.length > 0 && (
+            <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="text-slate-400 text-xs uppercase tracking-wide border-b border-slate-700 sticky top-0 bg-slate-800">
                 <tr>
@@ -4219,6 +4234,7 @@ function DepreciationTab() {
                 ))}
               </tbody>
             </table>
+            </div>
           )}
         </div>
       </div>
@@ -4253,7 +4269,7 @@ export default function Inventory() {
       </div>
 
       {/* Tab bar */}
-      <div className="flex border-b border-slate-700 px-6">
+      <div className="flex border-b border-slate-700 px-6 overflow-x-auto">
         {([
           { key: 'items',        label: t('inv.tabItemsAssets') },
           { key: 'vehicles',     label: t('inv.tabVehicles') },
@@ -4266,7 +4282,7 @@ export default function Inventory() {
           <button
             key={key}
             onClick={() => setTab(key)}
-            className={`py-3 px-4 text-sm font-medium border-b-2 -mb-px transition-colors ${
+            className={`py-3 px-4 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap ${
               tab === key
                 ? 'border-orange-500 text-orange-400'
                 : 'border-transparent text-slate-400 hover:text-white'

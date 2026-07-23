@@ -108,6 +108,16 @@ function fmtTime(iso: string) {
 
 // ── TABS ──────────────────────────────────────────────────────────────────────
 const TABS = ['employees','payroll','advances_loans','leave','performance','recruitment','training','disciplinary','attendance'] as const
+
+// Tabs grouped into short sections for the nav — a single 9-wide strip was
+// cramped on mobile, this splits it into a section row + a shorter tab row.
+const TAB_GROUPS: { id: string; labelKey: string; tabs: readonly (typeof TABS)[number][] }[] = [
+  { id: 'people',      labelKey: 'hr.group_people',      tabs: ['employees', 'recruitment'] },
+  { id: 'time_pay',     labelKey: 'hr.group_timePay',     tabs: ['payroll', 'advances_loans', 'attendance'] },
+  { id: 'growth',       labelKey: 'hr.group_growth',      tabs: ['leave', 'performance', 'training'] },
+  { id: 'conduct',      labelKey: 'hr.group_conduct',     tabs: ['disciplinary'] },
+]
+const TAB_TO_GROUP = new Map(TAB_GROUPS.flatMap(g => g.tabs.map(tb => [tb, g.id] as const)))
 type Tab = typeof TABS[number]
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -199,10 +209,10 @@ function EmployeesTab({ entityId }: { entityId: string }) {
   return (
     <div className="flex flex-col gap-3">
       {/* Sub-tab bar */}
-      <div className="flex gap-1 border-b border-slate-700">
+      <div className="flex gap-1 border-b border-slate-700 overflow-x-auto">
         {(['employees','departments','positions'] as const).map(st => (
           <button key={st} onClick={() => setEmpSubTab(st)}
-            className={`pb-2 px-3 text-sm border-b-2 capitalize ${empSubTab === st ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400 hover:text-slate-200'}`}>
+            className={`pb-2 px-3 text-sm border-b-2 capitalize whitespace-nowrap ${empSubTab === st ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400 hover:text-slate-200'}`}>
             {t(`hr.sub_${st}`)}
           </button>
         ))}
@@ -364,10 +374,10 @@ function EmployeesTab({ entityId }: { entityId: string }) {
             </div>
           </div>
 
-          <div className="flex gap-2 border-b border-slate-700 mb-3">
+          <div className="flex gap-2 border-b border-slate-700 mb-3 overflow-x-auto">
             {(['info','contacts','history'] as const).map(tab => (
               <button key={tab} onClick={() => setDetailTab(tab)}
-                className={`pb-2 px-1 text-sm capitalize border-b-2 ${detailTab === tab ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400 hover:text-slate-200'}`}>
+                className={`pb-2 px-1 text-sm capitalize border-b-2 whitespace-nowrap ${detailTab === tab ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400 hover:text-slate-200'}`}>
                 {t(`hr.${tab}`)}
               </button>
             ))}
@@ -1013,10 +1023,10 @@ function AdvancesLoansTab({ entityId }: { entityId: string }) {
   return (
     <div>
       {/* Sub-tab switcher */}
-      <div className="flex gap-1 mb-4 border-b border-slate-700 pb-2">
+      <div className="flex gap-1 mb-4 border-b border-slate-700 pb-2 overflow-x-auto">
         {(['advances','loans'] as const).map(st => (
           <button key={st} onClick={() => setSubTab(st)}
-            className={`px-3 py-1 rounded text-sm font-medium ${subTab===st ? 'bg-blue-700 text-white' : 'text-slate-400 hover:text-white'}`}>
+            className={`px-3 py-1 rounded text-sm font-medium whitespace-nowrap ${subTab===st ? 'bg-blue-700 text-white' : 'text-slate-400 hover:text-white'}`}>
             {st === 'advances' ? t('hr.salaryAdvances') : t('hr.staffLoans')}
           </button>
         ))}
@@ -1258,10 +1268,10 @@ function LeaveTab({ entityId }: { entityId: string }) {
 
   return (
     <div>
-      <div className="flex gap-2 border-b border-slate-700 mb-4">
+      <div className="flex gap-2 border-b border-slate-700 mb-4 overflow-x-auto">
         {(['requests','balances','types'] as const).map(st => (
           <button key={st} onClick={() => setLeaveSubTab(st)}
-            className={`pb-2 px-3 text-sm capitalize border-b-2 ${leaveSubTab === st ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400 hover:text-slate-200'}`}>
+            className={`pb-2 px-3 text-sm capitalize border-b-2 whitespace-nowrap ${leaveSubTab === st ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400 hover:text-slate-200'}`}>
             {t(`hr.${st}`)}
           </button>
         ))}
@@ -2115,7 +2125,13 @@ function AttendanceTab({ entityId }: { entityId: string }) {
 export default function HR() {
   const { t } = useTranslation()
   const [activeTab, setActiveTab] = useState<Tab>('employees')
+  const [activeGroup, setActiveGroup] = useState(TAB_TO_GROUP.get('employees')!)
   const [selectedEntityId, setSelectedEntityId] = useState(HR_ENTITIES[0].id)
+
+  const selectGroup = (groupId: string) => {
+    setActiveGroup(groupId)
+    setActiveTab(TAB_GROUPS.find(g => g.id === groupId)!.tabs[0])
+  }
 
   return (
     <div className="p-4 md:p-6 max-w-full">
@@ -2136,10 +2152,20 @@ export default function HR() {
         </div>
       </div>
 
-      <div className="flex overflow-x-auto border-b border-slate-700 mb-5 gap-1">
-        {TABS.map(tab => (
+      <div className="flex gap-1 mb-1 overflow-x-auto">
+        {TAB_GROUPS.map(g => (
+          <button key={g.id} onClick={() => selectGroup(g.id)}
+            className={`px-3 py-1.5 text-xs font-semibold uppercase tracking-wide rounded-t-md whitespace-nowrap transition-colors ${
+              activeGroup === g.id ? 'bg-slate-800 text-white' : 'bg-slate-900 text-slate-500 hover:text-slate-300'
+            }`}>
+            {t(g.labelKey, g.id)}
+          </button>
+        ))}
+      </div>
+      <div className="flex overflow-x-auto border-b border-slate-700 mb-5 gap-1 bg-slate-800/50 rounded-t-md">
+        {TAB_GROUPS.find(g => g.id === activeGroup)!.tabs.map(tab => (
           <button key={tab} onClick={() => setActiveTab(tab)}
-            className={`whitespace-nowrap pb-2 px-3 text-sm border-b-2 ${activeTab === tab ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400 hover:text-slate-200'}`}>
+            className={`whitespace-nowrap pb-2 px-3 pt-2 text-sm border-b-2 ${activeTab === tab ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400 hover:text-slate-200'}`}>
             {t(`hr.tab_${tab}`)}
           </button>
         ))}

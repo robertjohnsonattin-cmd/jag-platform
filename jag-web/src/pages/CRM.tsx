@@ -503,7 +503,7 @@ function CompaniesTab() {
   return (
     <div className="flex h-full">
       {/* List */}
-      <div className={`flex flex-col ${selected ? 'hidden lg:flex lg:w-96 lg:shrink-0' : 'flex-1'}`}>
+      <div className={`flex flex-col min-w-0 ${selected ? 'hidden lg:flex lg:w-96 lg:shrink-0' : 'flex-1'}`}>
         <div className="px-4 py-3 border-b border-slate-700 flex gap-2">
           <input
             type="text"
@@ -1067,7 +1067,7 @@ function ContactsTab() {
   return (
     <div className="flex h-full">
       {/* List */}
-      <div className={`flex flex-col ${selectedId ? 'hidden md:flex md:w-80 md:shrink-0' : 'flex-1'} border-r border-slate-700`}>
+      <div className={`flex flex-col min-w-0 ${selectedId ? 'hidden md:flex md:w-80 md:shrink-0' : 'flex-1'} border-r border-slate-700`}>
         <div className="px-4 py-3 border-b border-slate-700 flex gap-2 shrink-0">
           <input
             type="text"
@@ -2166,7 +2166,7 @@ export default function CRM() {
         <p className="text-slate-400 text-sm mt-0.5">{t('crm.subtitle')}</p>
       </div>
 
-      <div className="flex border-b border-slate-700 px-6">
+      <div className="flex border-b border-slate-700 px-6 overflow-x-auto">
         {([
           { key: 'companies', label: t('crm.tabCompanies') },
           { key: 'contacts',  label: t('crm.tabContacts') },
@@ -2175,7 +2175,7 @@ export default function CRM() {
           <button
             key={key}
             onClick={() => setTab(key)}
-            className={`py-3 px-4 text-sm font-medium border-b-2 -mb-px transition-colors ${
+            className={`py-3 px-4 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap ${
               tab === key
                 ? 'border-orange-500 text-orange-400'
                 : 'border-transparent text-slate-400 hover:text-white'

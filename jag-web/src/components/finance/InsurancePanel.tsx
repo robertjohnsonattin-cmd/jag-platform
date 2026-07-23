@@ -324,9 +324,9 @@ function PolicyDetail({ policy, onClose }: { policy: InsurancePolicy; onClose: (
         </div>
 
         {/* Sub-tabs */}
-        <div className="flex border-b border-slate-700 px-5">
+        <div className="flex border-b border-slate-700 px-5 overflow-x-auto">
           {SUB_TABS.map(tb => (
-            <button key={tb.key} onClick={() => setSubTab(tb.key)} className={`py-2.5 px-3 text-xs font-medium border-b-2 -mb-px transition-colors ${subTab === tb.key ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400 hover:text-white'}`}>{tb.label}</button>
+            <button key={tb.key} onClick={() => setSubTab(tb.key)} className={`py-2.5 px-3 text-xs font-medium border-b-2 -mb-px transition-colors whitespace-nowrap ${subTab === tb.key ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400 hover:text-white'}`}>{tb.label}</button>
           ))}
         </div>
 

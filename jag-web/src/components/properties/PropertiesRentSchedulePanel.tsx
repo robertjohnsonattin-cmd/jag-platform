@@ -50,7 +50,8 @@ export default function PropertiesRentSchedulePanel() {
       </div>
 
       {schedule.length === 0 && <p className="text-sm text-slate-500 py-6 text-center">{t('tenancy.noSchedule', 'No rent schedule found.')}</p>}
-      <table className="w-full text-sm">
+      <div className="overflow-x-auto">
+      <table className="w-full text-sm min-w-[720px]">
         <thead>
           <tr className="text-xs text-slate-500 border-b border-slate-700">
             <th className="text-left pb-2">{t('tenancy.tenant', 'Tenant')}</th>
@@ -95,6 +96,7 @@ export default function PropertiesRentSchedulePanel() {
           ))}
         </tbody>
       </table>
+      </div>
 
       {payModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">

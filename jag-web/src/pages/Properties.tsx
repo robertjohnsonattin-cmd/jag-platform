@@ -19,45 +19,106 @@ import PropertiesRenewalsPanel from '../components/properties/PropertiesRenewals
 import PropertiesWhatsAppPanel from '../components/properties/PropertiesWhatsAppPanel'
 import PropertiesWaApprovalsPanel from '../components/properties/PropertiesWaApprovalsPanel'
 
-const TABS = [
-  { id: 'properties',  key: 'properties.tabs.properties' },
-  { id: 'tenants',     key: 'properties.tabs.tenants' },
-  { id: 'doc_expiry',  key: 'tenancy.tabs.docExpiry' },
-  { id: 'pipeline',    key: 'properties.tabs.pipeline' },
-  { id: 'enquiries',   key: 'tenancy.tabs.enquiries' },
-  { id: 'viewings',    key: 'tenancy.tabs.viewings' },
-  { id: 'applications',key: 'tenancy.tabs.applications' },
-  { id: 'deposits',    key: 'tenancy.tabs.deposits' },
-  { id: 'rent',        key: 'tenancy.tabs.rent' },
-  { id: 'reconciliation', key: 'tenancy.tabs.reconciliation' },
-  { id: 'maintenance', key: 'tenancy.tabs.maintenance' },
-  { id: 'sched_maintenance', key: 'tenancy.tabs.schedMaintenance' },
-  { id: 'contractors', key: 'tenancy.tabs.contractors' },
-  { id: 'handover',    key: 'tenancy.tabs.handover' },
-  { id: 'renewals',    key: 'tenancy.tabs.renewals' },
-  { id: 'whatsapp',    key: 'tenancy.tabs.whatsapp' },
-  { id: 'approvals',   key: 'tenancy.tabs.approvals' },
+// Tabs are grouped into short sections so the nav fits two shallow rows
+// instead of one 17-wide scroll strip — the flat list was unusable on mobile.
+const GROUPS = [
+  {
+    id: 'overview',
+    key: 'properties.groups.overview',
+    tabs: [
+      { id: 'properties', key: 'properties.tabs.properties' },
+      { id: 'tenants',    key: 'properties.tabs.tenants' },
+      { id: 'doc_expiry', key: 'tenancy.tabs.docExpiry' },
+    ],
+  },
+  {
+    id: 'leasing',
+    key: 'properties.groups.leasing',
+    tabs: [
+      { id: 'pipeline',     key: 'properties.tabs.pipeline' },
+      { id: 'enquiries',    key: 'tenancy.tabs.enquiries' },
+      { id: 'viewings',     key: 'tenancy.tabs.viewings' },
+      { id: 'applications', key: 'tenancy.tabs.applications' },
+      { id: 'renewals',     key: 'tenancy.tabs.renewals' },
+    ],
+  },
+  {
+    id: 'tenancy_ops',
+    key: 'properties.groups.tenancyOps',
+    tabs: [
+      { id: 'deposits',       key: 'tenancy.tabs.deposits' },
+      { id: 'rent',           key: 'tenancy.tabs.rent' },
+      { id: 'reconciliation', key: 'tenancy.tabs.reconciliation' },
+      { id: 'handover',       key: 'tenancy.tabs.handover' },
+    ],
+  },
+  {
+    id: 'maintenance',
+    key: 'properties.groups.maintenance',
+    tabs: [
+      { id: 'maintenance',       key: 'tenancy.tabs.maintenance' },
+      { id: 'sched_maintenance', key: 'tenancy.tabs.schedMaintenance' },
+      { id: 'contractors',       key: 'tenancy.tabs.contractors' },
+    ],
+  },
+  {
+    id: 'comms',
+    key: 'properties.groups.comms',
+    tabs: [
+      { id: 'whatsapp',  key: 'tenancy.tabs.whatsapp' },
+      { id: 'approvals', key: 'tenancy.tabs.approvals' },
+    ],
+  },
 ] as const
 
-type TabId = (typeof TABS)[number]['id']
+type TabId = (typeof GROUPS)[number]['tabs'][number]['id']
+type GroupId = (typeof GROUPS)[number]['id']
 
-const VALID_TAB_IDS = new Set(TABS.map(tb => tb.id))
+const TAB_TO_GROUP = new Map<TabId, GroupId>(
+  GROUPS.flatMap(g => g.tabs.map(tb => [tb.id, g.id] as [TabId, GroupId])),
+)
+const VALID_TAB_IDS = new Set(TAB_TO_GROUP.keys())
 
 export default function Properties() {
   const { t } = useTranslation()
   const [searchParams] = useSearchParams()
   const initialTab = searchParams.get('tab')
   const focusId = searchParams.get('focus')
-  const [tab, setTab] = useState<TabId>(
-    initialTab && VALID_TAB_IDS.has(initialTab as TabId) ? (initialTab as TabId) : 'properties',
-  )
+  const startTab: TabId = initialTab && VALID_TAB_IDS.has(initialTab as TabId) ? (initialTab as TabId) : 'properties'
+  const [tab, setTab] = useState<TabId>(startTab)
+  const [group, setGroup] = useState<GroupId>(TAB_TO_GROUP.get(startTab)!)
+
+  const activeGroup = GROUPS.find(g => g.id === group)!
+
+  const selectGroup = (g: GroupId) => {
+    setGroup(g)
+    setTab(GROUPS.find(gr => gr.id === g)!.tabs[0].id)
+  }
 
   return (
     <div>
       <h1 className="text-2xl font-semibold mb-6">{t('properties.title')}</h1>
 
-      <div className="flex gap-1 mb-6 border-b border-slate-700 overflow-x-auto pb-0">
-        {TABS.map(tb => (
+      {/* Section row */}
+      <div className="flex gap-1 mb-1 overflow-x-auto">
+        {GROUPS.map(g => (
+          <button
+            key={g.id}
+            onClick={() => selectGroup(g.id)}
+            className={`px-3 py-1.5 text-xs font-semibold uppercase tracking-wide rounded-t-md whitespace-nowrap transition-colors ${
+              group === g.id
+                ? 'bg-slate-800 text-white'
+                : 'bg-slate-900 text-slate-500 hover:text-slate-300'
+            }`}
+          >
+            {t(g.key, g.id)}
+          </button>
+        ))}
+      </div>
+
+      {/* Tab row for the active section */}
+      <div className="flex gap-1 mb-6 border-b border-slate-700 overflow-x-auto pb-0 bg-slate-800/50 rounded-t-md">
+        {activeGroup.tabs.map(tb => (
           <button
             key={tb.id}
             onClick={() => setTab(tb.id)}
