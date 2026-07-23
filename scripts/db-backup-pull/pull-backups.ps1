@@ -9,8 +9,11 @@
 #                                              export, bundled as secrets.tar.gz
 # All of this lives on the same Oracle instance, so a total instance loss
 # takes it all out together. This script gives a third copy, off-instance
-# entirely, on the local workstation. Run daily via Windows Task Scheduler
-# after all three VM backups have had time to complete.
+# entirely, on the local workstation -- then mirrors that local copy out to
+# OneDrive (cloud-synced) and the E: drive (separate physical disk), so a
+# single laptop-disk failure doesn't take out the off-instance copy too.
+# Run daily via Windows Task Scheduler after all three VM backups have had
+# time to complete.
 #
 # secrets.tar.gz is left as a compressed tar, not auto-extracted -- it holds
 # every credential the platform runs on, so it should not sit around as
@@ -26,6 +29,16 @@ $VmHost     = "ubuntu@150.136.151.64"
 $LocalRoot  = "$env:USERPROFILE\JAG-DB-Backups"
 $RetainDays = 90
 $LogFile    = "$LocalRoot\pull-backups.log"
+
+# Mirror targets -- copied to after the local pull completes. Each is
+# checked for availability at run time (OneDrive may not be signed in yet
+# on a fresh boot; E: may be unplugged) so a missing one just logs a
+# warning instead of failing the whole run -- the local pull is the copy
+# that matters most and must not be blocked by a missing mirror.
+$Mirrors = @(
+    @{ Name = "OneDrive"; Root = "$env:USERPROFILE\OneDrive\JAG-DB-Backups"; RequireParent = "$env:USERPROFILE\OneDrive" },
+    @{ Name = "E-Drive";  Root = "E:\JAG-DB-Backups";                        RequireParent = "E:\" }
+)
 
 function Log($msg) {
     $line = "[{0}] {1}" -f (Get-Date -Format "yyyy-MM-dd HH:mm:ss"), $msg
@@ -84,13 +97,17 @@ foreach ($dateDir in $remoteDirs) {
             $localTar = Join-Path $localPath "minio-buckets.tar.gz"
             & scp -i $SshKey -o ConnectTimeout=10 -o BatchMode=yes -q "${VmHost}:${remoteTar}" $localTar
             if ($LASTEXITCODE -eq 0) {
-                # cd into the target dir and use relative names only -- tar
-                # (the git-bash /usr/bin/tar that's first on PATH here)
-                # misparses any "C:\..." argument, even under -C, as a remote
-                # host:path tape spec. Even --force-local didn't fully avoid
-                # it for -C, so side-step colons entirely instead.
+                # cd into the target dir and use a relative filename only --
+                # both git-bash tar and Windows' native tar.exe misparse any
+                # "C:\..." argument as a remote host:path tape spec, so side-
+                # step colons entirely instead of relying on a flag. (Do NOT
+                # add --force-local back here: git-bash tar accepts it but
+                # Windows' native tar.exe -- which Task Scheduler's plain
+                # `powershell` picks up ahead of git-bash's on PATH -- errors
+                # out on it entirely, since the relative filename never
+                # needed the flag in the first place.)
                 Push-Location $localPath
-                & tar --force-local -xzf "minio-buckets.tar.gz"
+                & tar -xzf "minio-buckets.tar.gz"
                 Pop-Location
                 Remove-Item $localTar -Force -ErrorAction SilentlyContinue
                 Log "Pulled minio-buckets mirror for $dateDir"
@@ -121,6 +138,27 @@ if ($pulled -eq 0) {
     Log "WARNING: zero backup directories were successfully pulled this run"
 }
 
+# Back up the local SSH private keys used to reach the VM (jag_oracle,
+# jag_oracle2). These live ONLY on this workstation -- they authenticate
+# every deploy, every admin SSH session, everything -- and were never part
+# of the VM-side secrets.tar.gz (that bundle only holds server-side .env
+# files + the Keycloak realm export). Kept in a non-date-named subfolder so
+# the retention prune below (which only matches yyyy-MM-dd dirs) never
+# touches it -- keys don't rotate daily, so there's nothing to prune, just
+# overwrite in place each run. Rides along on the existing OneDrive/E:
+# mirror pass below since it lives under $LocalRoot.
+$SshKeyBackupDir = Join-Path $LocalRoot "ssh-keys"
+$SshKeyFiles = Get-ChildItem -Path "$env:USERPROFILE\.ssh" -Filter "jag_oracle*" -ErrorAction SilentlyContinue
+if ($SshKeyFiles) {
+    if (-not (Test-Path $SshKeyBackupDir)) {
+        New-Item -ItemType Directory -Path $SshKeyBackupDir -Force | Out-Null
+    }
+    Copy-Item -Path $SshKeyFiles.FullName -Destination $SshKeyBackupDir -Force
+    Log "Backed up $($SshKeyFiles.Count) SSH key file(s) (jag_oracle*) to $SshKeyBackupDir"
+} else {
+    Log "WARNING: no jag_oracle* SSH key files found in $env:USERPROFILE\.ssh - nothing to back up"
+}
+
 # Prune local copies older than RetainDays
 $cutoff = (Get-Date).AddDays(-$RetainDays)
 Get-ChildItem -Path $LocalRoot -Directory -ErrorAction SilentlyContinue | ForEach-Object {
@@ -132,6 +170,32 @@ Get-ChildItem -Path $LocalRoot -Directory -ErrorAction SilentlyContinue | ForEac
         }
     } catch {
         # not a date-named dir, skip
+    }
+}
+
+
+# Mirror the pruned local tree out to OneDrive + E: drive. /MIR keeps each
+# mirror an exact copy of $LocalRoot, including deletions from the
+# retention prune above, so old backups don't pile up forever on the
+# mirrors either. robocopy exit codes 0-7 are all "success" (8+ is a real
+# failure) -- see https://learn.microsoft.com/windows-server/administration/windows-commands/robocopy
+# exit code table.
+foreach ($mirror in $Mirrors) {
+    if (-not (Test-Path $mirror.RequireParent)) {
+        Log "WARNING: mirror target '$($mirror.Name)' unavailable (missing $($mirror.RequireParent)) - skipped this run"
+        continue
+    }
+
+    if (-not (Test-Path $mirror.Root)) {
+        New-Item -ItemType Directory -Path $mirror.Root -Force | Out-Null
+    }
+
+    Log "Mirroring $LocalRoot to $($mirror.Name) ($($mirror.Root))"
+    & robocopy $LocalRoot $mirror.Root /MIR /R:2 /W:5 /NFL /NDL /NP | Out-Null
+    if ($LASTEXITCODE -ge 8) {
+        Log "WARNING: robocopy to $($mirror.Name) failed with exit code $LASTEXITCODE"
+    } else {
+        Log "Mirrored to $($mirror.Name) OK (robocopy exit $LASTEXITCODE)"
     }
 }
 
