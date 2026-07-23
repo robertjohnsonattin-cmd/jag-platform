@@ -18,7 +18,9 @@ const cls = 'w-full bg-slate-700 border border-slate-600 rounded px-3 py-1.5 tex
 
 function daysUntil(dateStr: string): number {
   const today = new Date(); today.setHours(0, 0, 0, 0)
-  const due = new Date(`${dateStr}T00:00:00`)
+  // next_due_date can arrive as a full ISO timestamp (e.g. "2026-08-10T00:00:00.000Z");
+  // take just the date part so the constructed string stays valid (else -> NaN).
+  const due = new Date(`${dateStr.slice(0, 10)}T00:00:00`)
   return Math.ceil((due.getTime() - today.getTime()) / 86_400_000)
 }
 

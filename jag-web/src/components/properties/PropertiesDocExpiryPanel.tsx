@@ -13,10 +13,11 @@ const DOC_TYPE_LABELS: Record<string, string> = {
 
 function daysUntil(dateStr: string): number {
   const today = new Date(); today.setHours(0, 0, 0, 0)
-  return Math.ceil((new Date(`${dateStr}T00:00:00`).getTime() - today.getTime()) / 86_400_000)
+  // dateStr may be a full ISO timestamp; take just the date part to avoid Invalid Date (NaN).
+  return Math.ceil((new Date(`${dateStr.slice(0, 10)}T00:00:00`).getTime() - today.getTime()) / 86_400_000)
 }
 
-const fmtDate = (s: string) => new Date(`${s}T00:00:00`).toLocaleDateString('en-TT', { day: 'numeric', month: 'short', year: 'numeric' })
+const fmtDate = (s: string) => new Date(`${s.slice(0, 10)}T00:00:00`).toLocaleDateString('en-TT', { day: 'numeric', month: 'short', year: 'numeric' })
 
 const tenantName = (d: ExpiringDocument) =>
   d.is_company ? (d.company_name ?? '—') : `${d.first_name ?? ''}${d.last_name ? ` ${d.last_name}` : ''}`.trim() || '—'
