@@ -1471,16 +1471,23 @@ function PhotosTab({ itemId }: { itemId: string }) {
   })
 
   async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]
-    if (!file) return
+    const files = Array.from(e.target.files ?? [])
+    if (files.length === 0) return
     setUploading(true)
     setUploadError(null)
+    let wasEmpty = photos.length === 0
     try {
-      await imsApi.uploadPhoto(itemId, file, photos.length === 0)
-      qc.invalidateQueries({ queryKey: ['ims-photos', itemId] })
-    } catch (err) {
-      setUploadError(err instanceof Error ? err.message : 'Upload failed.')
+      for (const file of files) {
+        try {
+          await imsApi.uploadPhoto(itemId, file, wasEmpty)
+          wasEmpty = false
+        } catch (err) {
+          setUploadError(err instanceof Error ? err.message : 'Upload failed.')
+          return
+        }
+      }
     } finally {
+      qc.invalidateQueries({ queryKey: ['ims-photos', itemId] })
       setUploading(false)
       e.target.value = ''
     }
@@ -1492,7 +1499,7 @@ function PhotosTab({ itemId }: { itemId: string }) {
         <p className="text-slate-400 text-xs">{t('inv.photoCount', { count: photos.length })}</p>
         <label className={`px-2.5 py-1 text-xs rounded transition-colors cursor-pointer ${uploading ? 'bg-slate-600 text-slate-400' : 'bg-orange-600 hover:bg-orange-500 text-white'}`}>
           {uploading ? t('inv.uploading') : t('inv.addPhoto')}
-          <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={handleFileChange} disabled={uploading} />
+          <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp" multiple className="hidden" onChange={handleFileChange} disabled={uploading} />
         </label>
       </div>
 
@@ -3273,13 +3280,17 @@ function VehiclePhotosTab({ itemId }: { itemId: string }) {
   })
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
+    const files = Array.from(e.target.files ?? [])
+    if (files.length === 0) return
     setUploading(true)
+    let wasEmpty = photos.length === 0
     try {
-      await imsApi.uploadPhoto(itemId, file, photos.length === 0)
-      qc.invalidateQueries({ queryKey: ['item-photos', itemId] })
+      for (const file of files) {
+        await imsApi.uploadPhoto(itemId, file, wasEmpty)
+        wasEmpty = false
+      }
     } finally {
+      qc.invalidateQueries({ queryKey: ['item-photos', itemId] })
       setUploading(false)
       if (inputRef.current) inputRef.current.value = ''
     }
@@ -3298,7 +3309,7 @@ function VehiclePhotosTab({ itemId }: { itemId: string }) {
         <p className="text-slate-400 text-sm">{photos.length} {photos.length === 1 ? t('inv.photo') : t('inv.photoCount_other', { count: photos.length })}</p>
         <label className={`cursor-pointer px-3 py-1.5 bg-orange-600 hover:bg-orange-500 text-white text-xs rounded-lg transition-colors ${uploading ? 'opacity-50 pointer-events-none' : ''}`}>
           {uploading ? t('inv.uploading') : `+ ${t('inv.addPhoto')}`}
-          <input ref={inputRef} type="file" accept="image/*" className="hidden" onChange={handleUpload} />
+          <input ref={inputRef} type="file" accept="image/*" multiple className="hidden" onChange={handleUpload} />
         </label>
       </div>
       {photos.length === 0 ? (
