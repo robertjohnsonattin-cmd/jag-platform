@@ -1,7 +1,7 @@
 # JAG Integrated Business Platform — Claude Session Context
 
 **Owner:** Robert Johnson-Attin | Barataria, Trinidad & Tobago
-**Architecture:** v1.9 | **Current Phase:** ALL PHASES COMPLETE — in production | **Updated:** 2026-07-22 (session 45)
+**Architecture:** v1.9 | **Current Phase:** ALL PHASES COMPLETE — in production | **Updated:** 2026-07-24 (session 46)
 
 ---
 
@@ -195,6 +195,9 @@ No separate mobile app — the React + Tailwind stack handles all screen sizes. 
 - **Grid layouts on main pages**: always add a mobile breakpoint — `grid-cols-1 sm:grid-cols-3` not bare `grid-cols-3`; `grid-cols-2 sm:grid-cols-3 md:grid-cols-5` for 5-column KPI strips
 - **Table wrappers**: use `overflow-x-auto rounded-lg border border-slate-700` not `overflow-hidden` — the horizontal scroll is the correct mobile behaviour; `overflow-hidden` traps wide tables
 - **Master-detail layouts** (list sidebar + detail panel): use mobile toggle pattern — list is `${selected ? 'hidden md:flex' : 'flex'} w-full md:w-64`, detail is `${!selected ? 'hidden md:block' : 'block'} flex-1`. Add a `md:hidden` back button at top of detail pane using `t('common.back')` (`← Back` / `返回` — key exists in both locale files)
+- **Master-detail list pane MUST also have `min-w-0`** (session 46) — `flex flex-col ${selected ? 'hidden md:flex md:w-XX' : 'flex-1'}` alone is not enough. A flex item's default `min-width` is `auto`, so a `flex-1` list pane refuses to shrink below its content's natural width (e.g. a filter row with 2-3 `<select>`s). On mobile this doesn't show up as a visible page-level scrollbar — the wider content gets silently clipped by a sibling `overflow-hidden` wrapper instead, so search boxes / filter dropdowns / buttons just vanish off the right edge with no way to reach them. Always add `min-w-0` to the list-pane div alongside `flex-1`. Found across 12 list/detail screens (Properties, CRM, Inventory ×3, DragonBridge ×2, Entertainment ×3, NLCB, Purchasing, DocVault) — all fixed session 46.
+- **Tab bars need `overflow-x-auto` explicitly** (session 46) — a `<div className="flex border-b ...">` of tab buttons with no `overflow-x-auto` doesn't just clip on mobile, it can force the **entire page** to scroll horizontally (found on Inventory's 7-tab top bar — the missing class on that one div pushed the whole `<body>`). Any row of ≥3 tab-style buttons must have `overflow-x-auto` on the container and `whitespace-nowrap` on each button, even if it "fits fine" on desktop.
+- **Flat tab strips over ~6 items are hard to use on mobile** (session 46) — Properties (17 tabs), Finance (11), HR (9) were single horizontally-scrolling rows; users had to blind-swipe to find e.g. "Renewals" or "Approvals". Pattern now used on all three: group tabs into 3-5 short sections, render a section-pill row + a shorter sub-tab row for the active section (see `Properties.tsx` `GROUPS` const for the reference implementation). Apply this once a page's tab count exceeds ~6-7.
 - **Form grids inside modals**: `grid-cols-2` is fine at modal width (~380px) — do not add breakpoints to modal-internal form field pairs
 
 ### Auth-gated streaming assets — cannot be bare `<img src>` / `<a href>` (session 26)
@@ -527,6 +530,9 @@ The `minio` npm package's `presignedUrl()` (used by `getPresignedGetUrl`/`getPre
 | Notification bell | `components/NotificationBell.tsx` + `api/notifications.ts` | Badge (60s poll) + dropdown, mark-read / mark-all-read; mounted in AppShell desktop + mobile |
 | Pending-review → Transactions | `components/finance/TransactionsPanel.tsx` | AI `suggested_category`/`confidence` surfaced in review modal; orphaned `fin_pending_review_queue` row closed on PATCH |
 | IMS photo 401 fix | `components/AuthedImg.tsx` + `api/client.ts` `objectUrl()` | Auth-gated streaming `<img>` now Bearer-fetched → blob (see implementation rule above) |
+
+### Mobile density / navigation cleanup (session 46, 2026-07-24)
+Robert flagged Properties (most-fleshed-out module) as hard to use on mobile. Fixed platform-wide, not just Properties — see the three new bullets under "Mobile responsive patterns" above for the reusable rules (`min-w-0` on master-detail list panes, `overflow-x-auto` on tab bars, grouped tabs over ~6 items). Concretely: grouped nav on Properties (17→5 sections), Finance (11→3), HR (9→4); wrapped 21 bare `<table>`s in `overflow-x-auto` (Purchasing, NLCB, JournalEntries, DragonBridge, Inventory); added `overflow-x-auto` to 14 previously-unwrapped tab bars; fixed the `min-w-0` gap on 12 master-detail screens (this was the real bug — Inventory's Items filter row was silently clipped off-screen with no scrollbar, not just "cramped"). Deployed via `./deploy.sh --frontend-only` (commit `9f691a9`). **Note:** `deploy.sh`'s git-snapshot step does `git add -A`, so an unrelated frontend-only deploy can sweep up any stray untracked files sitting in the repo at deploy time — worth a `git status` glance before deploying if you know there's WIP lying around.
 
 ### Phase 7 Backend Additions (done during frontend build)
 
