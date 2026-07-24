@@ -89,7 +89,11 @@ bookPreviewRouter.get('/:slug', async (req: Request, res: Response, next: NextFu
     const beds = unit.bedrooms ?? '?';
     // City only — no exact street address in anything crawler-facing or public.
     const title = `$${rent.toLocaleString('en-US')}/mo · ${beds}BR Apartment — ${unit.city ?? 'Trinidad'}`;
-    const description = String(unit.listing_description ?? '').replace(/\s+/g, ' ').trim().slice(0, 160);
+    const description = String(unit.listing_description ?? '')
+      .replace(/\n\s*\n/g, ' — ')   // paragraph breaks (e.g. heading -> body) become a visible separator
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 160);
 
     const photoRow = await withOwnerRLS(propertiesPool, PUBLIC_LISTING_OWNER_ID, async client => {
       const { rows } = await client.query(
