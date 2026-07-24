@@ -138,7 +138,7 @@ function UploadModal({ onClose }: { onClose: () => void }) {
   const qc = useQueryClient()
   const fileRef = useRef<HTMLInputElement>(null)
   const { members } = useFamilyMembers()
-  const [file, setFile] = useState<File | null>(null)
+  const [files, setFiles] = useState<File[]>([])
   const [form, setForm] = useState({
     title: '', document_type: '' as DocType | '',
     family_member_id: '',
@@ -146,50 +146,58 @@ function UploadModal({ onClose }: { onClose: () => void }) {
     data_room_entity: '', notes: '',
   })
   const [progress, setProgress] = useState<'idle' | 'uploading' | 'registering' | 'done'>('idle')
+  const [progressCount, setProgressCount] = useState<{ done: number; total: number } | null>(null)
   const [uploadError, setUploadError] = useState<string | null>(null)
 
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
     setForm(f => ({ ...f, [k]: e.target.value }))
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0] ?? null
-    setFile(f)
-    if (f && !form.title) setForm(prev => ({ ...prev, title: f.name.replace(/\.[^.]+$/, '') }))
+    const fs = Array.from(e.target.files ?? [])
+    setFiles(fs)
+    if (fs.length === 1 && !form.title) setForm(prev => ({ ...prev, title: fs[0].name.replace(/\.[^.]+$/, '') }))
+  }
+
+  const uploadOne = async (file: File, title: string) => {
+    const entityId = uuidv4()
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('bucket', BUCKET_DOCUMENTS)
+    formData.append('module', 'docvault')
+    formData.append('entity_id', entityId)
+
+    const uploaded = await api.postForm<{ key: string; size: number; content_type: string }>(
+      '/files/upload', formData,
+    )
+
+    await api.post('/docvault/files', {
+      title,
+      document_type:    form.document_type,
+      file_name:        file.name,
+      storage_path:     uploaded.key,
+      mime_type:        uploaded.content_type,
+      file_size_bytes:  uploaded.size,
+      family_member_id: form.family_member_id || undefined,
+      expires_date:     form.expires_date || undefined,
+      is_data_room:     form.is_data_room,
+      data_room_entity: form.is_data_room && form.data_room_entity ? form.data_room_entity : undefined,
+      notes:            form.notes || undefined,
+    })
   }
 
   const handleUpload = async () => {
-    if (!file || !form.document_type) return
+    if (files.length === 0 || !form.document_type) return
     setUploadError(null)
 
     try {
-      // Step 1 — upload file to MinIO via the files proxy
       setProgress('uploading')
-      const entityId = uuidv4()
-      const formData = new FormData()
-      formData.append('file', file)
-      formData.append('bucket', BUCKET_DOCUMENTS)
-      formData.append('module', 'docvault')
-      formData.append('entity_id', entityId)
-
-      const uploaded = await api.postForm<{ key: string; size: number; content_type: string }>(
-        '/files/upload', formData,
-      )
-
-      // Step 2 — register metadata
-      setProgress('registering')
-      await api.post('/docvault/files', {
-        title:            form.title || file.name,
-        document_type:    form.document_type,
-        file_name:        file.name,
-        storage_path:     uploaded.key,
-        mime_type:        uploaded.content_type,
-        file_size_bytes:  uploaded.size,
-        family_member_id: form.family_member_id || undefined,
-        expires_date:     form.expires_date || undefined,
-        is_data_room:     form.is_data_room,
-        data_room_entity: form.is_data_room && form.data_room_entity ? form.data_room_entity : undefined,
-        notes:            form.notes || undefined,
-      })
+      setProgressCount({ done: 0, total: files.length })
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i]
+        const title = files.length === 1 ? (form.title || file.name) : file.name.replace(/\.[^.]+$/, '')
+        await uploadOne(file, title)
+        setProgressCount({ done: i + 1, total: files.length })
+      }
 
       setProgress('done')
       qc.invalidateQueries({ queryKey: ['docvault-files'] })
@@ -200,7 +208,7 @@ function UploadModal({ onClose }: { onClose: () => void }) {
     }
   }
 
-  const canSubmit = file && form.document_type && progress === 'idle'
+  const canSubmit = files.length > 0 && form.document_type && progress === 'idle'
 
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
@@ -211,16 +219,29 @@ function UploadModal({ onClose }: { onClose: () => void }) {
         <div
           onClick={() => fileRef.current?.click()}
           className={`border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition-colors mb-4 ${
-            file ? 'border-orange-500 bg-orange-950/20' : 'border-slate-600 hover:border-slate-500'
+            files.length > 0 ? 'border-orange-500 bg-orange-950/20' : 'border-slate-600 hover:border-slate-500'
           }`}>
-          <input ref={fileRef} type="file" className="hidden"
+          <input ref={fileRef} type="file" multiple className="hidden"
             accept=".pdf,.jpg,.jpeg,.png,.webp,.doc,.docx,.xls,.xlsx,.csv,.txt"
             onChange={handleFileChange} />
-          {file ? (
+          {files.length === 1 ? (
             <div>
-              <p className="text-2xl mb-1">{mimeIcon(file.type)}</p>
-              <p className="text-white font-medium">{file.name}</p>
-              <p className="text-slate-400 text-xs mt-1">{fmtSize(file.size)} · {file.type}</p>
+              <p className="text-2xl mb-1">{mimeIcon(files[0].type)}</p>
+              <p className="text-white font-medium">{files[0].name}</p>
+              <p className="text-slate-400 text-xs mt-1">{fmtSize(files[0].size)} · {files[0].type}</p>
+            </div>
+          ) : files.length > 1 ? (
+            <div className="text-left">
+              <p className="text-white font-medium mb-2 text-center">{files.length} files selected</p>
+              <ul className="max-h-32 overflow-y-auto space-y-1">
+                {files.map((f, i) => (
+                  <li key={i} className="text-slate-300 text-xs flex items-center gap-1.5">
+                    <span>{mimeIcon(f.type)}</span>
+                    <span className="truncate">{f.name}</span>
+                    <span className="text-slate-500 flex-shrink-0">({fmtSize(f.size)})</span>
+                  </li>
+                ))}
+              </ul>
             </div>
           ) : (
             <div>
@@ -235,7 +256,11 @@ function UploadModal({ onClose }: { onClose: () => void }) {
           <div className="flex gap-3">
             <div className="flex-1">
               <label className="block text-xs text-slate-400 mb-1">{t('docvault.docTitle')}</label>
-              <input value={form.title} onChange={set('title')} placeholder={file?.name ?? ''} className={cls} />
+              {files.length > 1 ? (
+                <p className="text-slate-500 text-xs py-2">Using each file's own name (multiple files selected)</p>
+              ) : (
+                <input value={form.title} onChange={set('title')} placeholder={files[0]?.name ?? ''} className={cls} />
+              )}
             </div>
             <div className="flex-1">
               <label className="block text-xs text-slate-400 mb-1">{t('docvault.docType')}</label>
@@ -292,7 +317,9 @@ function UploadModal({ onClose }: { onClose: () => void }) {
         {progress !== 'idle' && (
           <div className="mt-3 flex items-center gap-2 text-sm text-slate-400">
             <div className="w-4 h-4 border-2 border-orange-500 border-t-transparent rounded-full animate-spin" />
-            {progress === 'uploading'   && t('docvault.uploading')}
+            {progress === 'uploading'   && (progressCount && progressCount.total > 1
+              ? `${t('docvault.uploading')} (${progressCount.done}/${progressCount.total})`
+              : t('docvault.uploading'))}
             {progress === 'registering' && t('docvault.registering')}
             {progress === 'done'        && <span className="text-green-400">{t('docvault.done')}</span>}
           </div>
