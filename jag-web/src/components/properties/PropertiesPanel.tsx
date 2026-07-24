@@ -3462,18 +3462,28 @@ function ManageListingModal({ unit, propertyId, onClose, onChanged }: {
   }
 
   async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]
-    if (!file) return
+    const files = Array.from(e.target.files ?? [])
+    if (files.length === 0) return
     setUploading(true)
     setMsg(null)
+    let nextOrder = (photos as UnitPhoto[]).length
+    let uploaded = 0
     try {
-      const { upload_url, object_key } = await propertiesApi.getPhotoUploadUrl(unit.id, file.name)
-      await fetch(upload_url, { method: 'PUT', body: file, headers: { 'Content-Type': file.type } })
-      await propertiesApi.confirmUnitPhoto(unit.id, { object_key, display_order: (photos as UnitPhoto[]).length })
+      for (const file of files) {
+        try {
+          const { upload_url, object_key } = await propertiesApi.getPhotoUploadUrl(unit.id, file.name)
+          await fetch(upload_url, { method: 'PUT', body: file, headers: { 'Content-Type': file.type } })
+          await propertiesApi.confirmUnitPhoto(unit.id, { object_key, display_order: nextOrder })
+          nextOrder += 1
+          uploaded += 1
+        } catch (err) {
+          setMsg(`Upload failed on "${file.name}" (${uploaded}/${files.length} uploaded so far): ` + (err as Error).message)
+          if (uploaded > 0) await refetchPhotos()
+          return
+        }
+      }
       await refetchPhotos()
-      setMsg('Photo uploaded.')
-    } catch (err) {
-      setMsg('Upload failed: ' + (err as Error).message)
+      setMsg(uploaded === 1 ? 'Photo uploaded.' : `${uploaded} photos uploaded.`)
     } finally {
       setUploading(false)
       e.target.value = ''
@@ -3592,8 +3602,8 @@ function ManageListingModal({ unit, propertyId, onClose, onChanged }: {
               </div>
             )}
             <label className={`text-xs px-3 py-1.5 rounded-lg border border-dashed border-slate-600 text-slate-400 hover:border-blue-500 hover:text-blue-400 cursor-pointer transition-colors inline-block ${isBusy ? 'opacity-50 pointer-events-none' : ''}`}>
-              {uploading ? 'Uploading...' : '+ Add Photo'}
-              <input type="file" accept="image/*" className="hidden" onChange={ev => void handleFileChange(ev)} disabled={isBusy} />
+              {uploading ? 'Uploading...' : '+ Add Photos'}
+              <input type="file" accept="image/*" multiple className="hidden" onChange={ev => void handleFileChange(ev)} disabled={isBusy} />
             </label>
           </div>
 
