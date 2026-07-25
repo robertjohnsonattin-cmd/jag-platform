@@ -30,6 +30,22 @@ $LocalRoot  = "$env:USERPROFILE\JAG-DB-Backups"
 $RetainDays = 90
 $LogFile    = "$LocalRoot\pull-backups.log"
 
+# ConnectTimeout only bounds the initial handshake -- once a session is
+# established, ssh/scp will otherwise wait forever for a reply, even if the
+# connection has silently died (e.g. an idle NAT/firewall timeout mid-run).
+# ServerAliveInterval+CountMax makes the client actively probe the connection
+# and give up after ~45s of silence, so a dead session fails fast and this
+# run can log a warning and move on instead of hanging indefinitely (found
+# 2026-07-23 and 2026-07-25 -- both times the whole run hung with no timeout
+# ever firing, once before any dumps pulled, once mid MinIO-mirror step).
+$SshArgs = @(
+    "-i", $SshKey,
+    "-o", "ConnectTimeout=10",
+    "-o", "BatchMode=yes",
+    "-o", "ServerAliveInterval=15",
+    "-o", "ServerAliveCountMax=3"
+)
+
 # Mirror targets -- copied to after the local pull completes. Each is
 # checked for availability at run time (OneDrive may not be signed in yet
 # on a fresh boot; E: may be unplugged) so a missing one just logs a
@@ -55,7 +71,7 @@ Log "=== pull-backups start ==="
 # Ask the VM directly which date-named backup dirs actually exist (VM runs on UTC,
 # this workstation runs on local time -- don't guess date strings, query reality).
 $listCmd = "ls -1 /opt/jag/backups/ 2>/dev/null | grep -E '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' | sort -r | head -3"
-$remoteDirs = & ssh -i $SshKey -o ConnectTimeout=10 -o BatchMode=yes $VmHost $listCmd
+$remoteDirs = & ssh @SshArgs $VmHost $listCmd
 
 if (-not $remoteDirs) {
     Log "WARNING: could not list any date-named backup dirs on the VM - VM backup may not have run"
@@ -75,7 +91,7 @@ foreach ($dateDir in $remoteDirs) {
 
     Log "Pulling $remotePath to $localPath"
     $remoteSpec = "${VmHost}:${remotePath}/*.dump"
-    & scp -i $SshKey -o ConnectTimeout=10 -o BatchMode=yes -q $remoteSpec "$localPath\"
+    & scp @SshArgs -q $remoteSpec "$localPath\"
     if ($LASTEXITCODE -ne 0) {
         Log "WARNING: scp exited $LASTEXITCODE for $dateDir"
     } else {
@@ -89,13 +105,13 @@ foreach ($dateDir in $remoteDirs) {
     # notes on scp -r reliability).
     $remoteTar = "/tmp/minio-buckets-$dateDir.tar.gz"
     $checkCmd = "test -d '$remotePath/minio-buckets' && echo yes || echo no"
-    $hasMinio = (& ssh -i $SshKey -o ConnectTimeout=10 -o BatchMode=yes $VmHost $checkCmd).Trim()
+    $hasMinio = (& ssh @SshArgs $VmHost $checkCmd).Trim()
     if ($hasMinio -eq "yes") {
         $tarCmd = "tar -czf '$remoteTar' -C '$remotePath' minio-buckets"
-        & ssh -i $SshKey -o ConnectTimeout=10 -o BatchMode=yes $VmHost $tarCmd
+        & ssh @SshArgs $VmHost $tarCmd
         if ($LASTEXITCODE -eq 0) {
             $localTar = Join-Path $localPath "minio-buckets.tar.gz"
-            & scp -i $SshKey -o ConnectTimeout=10 -o BatchMode=yes -q "${VmHost}:${remoteTar}" $localTar
+            & scp @SshArgs -q "${VmHost}:${remoteTar}" $localTar
             if ($LASTEXITCODE -eq 0) {
                 # cd into the target dir and use a relative filename only --
                 # both git-bash tar and Windows' native tar.exe misparse any
@@ -114,7 +130,7 @@ foreach ($dateDir in $remoteDirs) {
             } else {
                 Log "WARNING: scp of minio-buckets tar failed for $dateDir"
             }
-            & ssh -i $SshKey -o ConnectTimeout=10 -o BatchMode=yes $VmHost "rm -f '$remoteTar'"
+            & ssh @SshArgs $VmHost "rm -f '$remoteTar'"
         } else {
             Log "WARNING: remote tar of minio-buckets failed for $dateDir"
         }
@@ -123,9 +139,9 @@ foreach ($dateDir in $remoteDirs) {
     # Secrets bundle (.env files + Keycloak realm export) -- single small
     # file already, plain scp is fine, no tar-then-scp needed.
     $checkSecretsCmd = "test -f '$remotePath/secrets.tar.gz' && echo yes || echo no"
-    $hasSecrets = (& ssh -i $SshKey -o ConnectTimeout=10 -o BatchMode=yes $VmHost $checkSecretsCmd).Trim()
+    $hasSecrets = (& ssh @SshArgs $VmHost $checkSecretsCmd).Trim()
     if ($hasSecrets -eq "yes") {
-        & scp -i $SshKey -o ConnectTimeout=10 -o BatchMode=yes -q "${VmHost}:${remotePath}/secrets.tar.gz" "$localPath\"
+        & scp @SshArgs -q "${VmHost}:${remotePath}/secrets.tar.gz" "$localPath\"
         if ($LASTEXITCODE -eq 0) {
             Log "Pulled secrets.tar.gz for $dateDir"
         } else {
