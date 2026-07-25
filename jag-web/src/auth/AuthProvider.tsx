@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState } from 'react'
+import { createContext, useContext, useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import keycloak from '../keycloak'
 
@@ -18,8 +18,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [userId, setUserId] = useState<string | undefined>()
   const [tenantId, setTenantId] = useState<string | undefined>()
   const [roles, setRoles] = useState<string[]>([])
+  // React StrictMode double-invokes effects in dev — keycloak.init() is not
+  // idempotent (throws "can only be initialized once" on the 2nd call), which
+  // silently left the app rendering in an unauthenticated state. Guard so init
+  // only ever actually runs once per page load.
+  const initStarted = useRef(false)
 
   useEffect(() => {
+    if (initStarted.current) return
+    initStarted.current = true
+
     keycloak
       .init({ onLoad: 'login-required', checkLoginIframe: false })
       .then((authenticated) => {

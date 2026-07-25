@@ -86,6 +86,7 @@
     "family": "Family",
     "ownership": "Ownership",
     "lifestyle": "Lifestyle",
+    "fitness": "Fitness",
     "hr": "HR",
     "brianPortal": "Brian's Portal"
   },
@@ -2169,6 +2170,17 @@
       "OTHER": "Other"
     }
   },
+  "fitness": {
+    "title": "Fitness",
+    "subtitle": "Programs, workout logging, progress and personal records",
+    "tabAi": "✨ AI Coach",
+    "tabExercises": "Exercises",
+    "tabPrograms": "Programs",
+    "tabLog": "Log Workout",
+    "tabHistory": "History",
+    "tabProgress": "Progress",
+    "tabRecords": "Records"
+  },
   "lifestyle": {
     "title": "JAG Lifestyle",
     "subtitle": "Loyalty programmes & health tracker",
@@ -2247,6 +2259,11 @@
       "BLOOD_PRESSURE_SYSTOLIC": "BP Systolic",
       "BLOOD_PRESSURE_DIASTOLIC": "BP Diastolic",
       "RESTING_HEART_RATE": "Resting HR",
+      "CHOLESTEROL_TOTAL": "Cholesterol — Total",
+      "CHOLESTEROL_LDL": "Cholesterol — LDL",
+      "CHOLESTEROL_HDL": "Cholesterol — HDL",
+      "TRIGLYCERIDES": "Triglycerides",
+      "BLOOD_GLUCOSE": "Blood Glucose",
       "OTHER": "Other"
     }
   },

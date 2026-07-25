@@ -66,17 +66,25 @@ const METRIC_LABELS: Record<MetricType, string> = {
   WEIGHT_KG: 'Weight (kg)', STEPS: 'Steps', SLEEP_HOURS: 'Sleep (hrs)',
   CALORIES: 'Calories', EXERCISE_MINUTES: 'Exercise (min)',
   BLOOD_PRESSURE_SYSTOLIC: 'BP Systolic', BLOOD_PRESSURE_DIASTOLIC: 'BP Diastolic',
-  RESTING_HEART_RATE: 'Resting HR', OTHER: 'Other',
+  RESTING_HEART_RATE: 'Resting HR',
+  CHOLESTEROL_TOTAL: 'Cholesterol — Total', CHOLESTEROL_LDL: 'Cholesterol — LDL',
+  CHOLESTEROL_HDL: 'Cholesterol — HDL', TRIGLYCERIDES: 'Triglycerides', BLOOD_GLUCOSE: 'Blood Glucose',
+  OTHER: 'Other',
 }
 const METRIC_ICONS: Record<MetricType, string> = {
   WEIGHT_KG: '⚖️', STEPS: '👣', SLEEP_HOURS: '😴', CALORIES: '🔥',
   EXERCISE_MINUTES: '🏃', BLOOD_PRESSURE_SYSTOLIC: '❤️', BLOOD_PRESSURE_DIASTOLIC: '❤️',
-  RESTING_HEART_RATE: '💓', OTHER: '📊',
+  RESTING_HEART_RATE: '💓',
+  CHOLESTEROL_TOTAL: '🩸', CHOLESTEROL_LDL: '🩸', CHOLESTEROL_HDL: '🩸', TRIGLYCERIDES: '🩸', BLOOD_GLUCOSE: '🩸',
+  OTHER: '📊',
 }
 const METRIC_DEFAULT_UNIT: Record<MetricType, string> = {
   WEIGHT_KG: 'kg', STEPS: 'steps', SLEEP_HOURS: 'hrs', CALORIES: 'kcal',
   EXERCISE_MINUTES: 'min', BLOOD_PRESSURE_SYSTOLIC: 'mmHg', BLOOD_PRESSURE_DIASTOLIC: 'mmHg',
-  RESTING_HEART_RATE: 'bpm', OTHER: '',
+  RESTING_HEART_RATE: 'bpm',
+  CHOLESTEROL_TOTAL: 'mg/dL', CHOLESTEROL_LDL: 'mg/dL', CHOLESTEROL_HDL: 'mg/dL',
+  TRIGLYCERIDES: 'mg/dL', BLOOD_GLUCOSE: 'mg/dL',
+  OTHER: '',
 }
 
 const today = () => new Date().toISOString().split('T')[0]

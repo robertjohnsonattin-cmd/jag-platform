@@ -25,6 +25,7 @@ const NAV = [
   { to: '/family',        key: 'nav.family' },
   { to: '/ownership',     key: 'nav.ownership' },
   { to: '/lifestyle',     key: 'nav.lifestyle' },
+  { to: '/fitness',       key: 'nav.fitness' },
   { to: '/hr',            key: 'nav.hr' },
   { to: '/brian-admin',   key: 'nav.brianPortal' },
 ]

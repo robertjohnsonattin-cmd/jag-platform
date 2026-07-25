@@ -86,6 +86,7 @@
     "family": "家庭",
     "ownership": "所有权",
     "lifestyle": "生活方式",
+    "fitness": "健身",
     "hr": "人力资源",
     "brianPortal": "Brian的门户"
   },
@@ -2168,6 +2169,17 @@
       "OTHER": "其他"
     }
   },
+  "fitness": {
+    "title": "健身",
+    "subtitle": "训练计划、锻炼记录、进度与个人记录",
+    "tabAi": "✨ AI 教练",
+    "tabExercises": "动作库",
+    "tabPrograms": "训练计划",
+    "tabLog": "记录锻炼",
+    "tabHistory": "历史记录",
+    "tabProgress": "进度",
+    "tabRecords": "个人记录"
+  },
   "lifestyle": {
     "title": "JAG 生活",
     "subtitle": "积分计划与健康追踪",
@@ -2246,6 +2258,11 @@
       "BLOOD_PRESSURE_SYSTOLIC": "收缩压",
       "BLOOD_PRESSURE_DIASTOLIC": "舒张压",
       "RESTING_HEART_RATE": "静息心率",
+      "CHOLESTEROL_TOTAL": "总胆固醇",
+      "CHOLESTEROL_LDL": "低密度脂蛋白胆固醇",
+      "CHOLESTEROL_HDL": "高密度脂蛋白胆固醇",
+      "TRIGLYCERIDES": "甘油三酯",
+      "BLOOD_GLUCOSE": "血糖",
       "OTHER": "其他"
     }
   },

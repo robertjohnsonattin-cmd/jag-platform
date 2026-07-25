@@ -21,6 +21,7 @@ import Ownership from './pages/Ownership'
 import BrianAdmin from './pages/BrianAdmin'
 import BrianPortal from './pages/BrianPortal'
 import Lifestyle from './pages/Lifestyle'
+import Fitness from './pages/Fitness'
 import Reports from './pages/Reports'
 import Export from './pages/Export'
 import HR from './pages/HR'
@@ -71,6 +72,7 @@ function AppRoutes() {
           <Route path="family" element={<Family />} />
           <Route path="ownership" element={<Ownership />} />
           <Route path="lifestyle" element={<Lifestyle />} />
+          <Route path="fitness" element={<Fitness />} />
           <Route path="hr" element={<HR />} />
           <Route path="brian-admin" element={<BrianAdmin />} />
         </Route>

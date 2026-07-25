@@ -4,6 +4,8 @@ import { useTranslation } from 'react-i18next'
 import { api } from '../api/client'
 import { familyApi, type FamilyMember, type FamilyMemberInput, type Relationship, type PreferredLanguage } from '../api/family'
 import { lifestyleApi, type LoyaltyProgramme, type TrackerEntry } from '../api/lifestyle'
+import { fitnessApi } from '../api/fitness'
+import type { PersonalRecord } from '../types/fitness'
 import { ownershipApi } from '../api/ownership'
 
 const fmtTTD = (n: number) => 'TTD ' + (n || 0).toLocaleString('en-TT', { maximumFractionDigits: 0 })
@@ -81,6 +83,21 @@ function MemberModal({ member, docs, programmes, onClose }: { member: FamilyMemb
   const { data: holdings } = useQuery({
     queryKey: ['ownership-holdings', member?.id],
     queryFn: () => ownershipApi.holdings(member!.id),
+    enabled: editing,
+  })
+
+  // Fitness summary (recent PRs + this month's session count) — lazily fetched.
+  const { data: records = [] } = useQuery<PersonalRecord[]>({
+    queryKey: ['fitness-records', member?.id],
+    queryFn: () => fitnessApi.getRecords({ family_member_id: member!.id }),
+    enabled: editing,
+  })
+  const { data: sessionsThisMonth = [] } = useQuery({
+    queryKey: ['fitness-sessions-month', member?.id],
+    queryFn: () => fitnessApi.getSessions({
+      family_member_id: member!.id,
+      from_date: new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10),
+    }),
     enabled: editing,
   })
 
@@ -282,6 +299,25 @@ function MemberModal({ member, docs, programmes, onClose }: { member: FamilyMemb
                   </div>
                 ))}
               </div>
+            </div>
+          )}
+
+          {editing && (records.length > 0 || sessionsThisMonth.length > 0) && (
+            <div className="pt-2 border-t border-slate-700">
+              <p className="text-xs text-slate-400 mb-2">
+                {t('family.fitness', 'Fitness')} — 🏋 {t('family.workoutsThisMonth', '{{count}} workouts this month', { count: sessionsThisMonth.length })}
+              </p>
+              {records.length > 0 && (
+                <div className="space-y-1">
+                  {records.slice(0, 5).map(r => (
+                    <div key={r.id} className="flex items-center justify-between gap-2 text-xs">
+                      <span className="text-slate-400">🏆 {r.exercise_name}</span>
+                      <span className="text-white">{r.value} {r.unit}</span>
+                      <span className="text-slate-500 shrink-0">{fmtDate(r.achieved_date)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>

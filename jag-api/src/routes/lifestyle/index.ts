@@ -14,17 +14,19 @@ import { withOwnerRLS } from '../../middleware/rls';
 import { familyPool } from '../../db/index';
 import { logger } from '../../lib/logger';
 import { ok, err } from '../../lib/response';
+import { fitnessRouter } from './fitness';
 
 export const lifestyleRouter = Router();
 lifestyleRouter.use(requireAuth());
 lifestyleRouter.use(brianPortalGate('LIFESTYLE'));
+lifestyleRouter.use('/fitness', fitnessRouter);
 
 const UUIDParam = z.object({ id: z.string().uuid() });
 const ProgrammeParam = z.object({ programmeId: z.string().uuid() });
 
 const ProgTypeEnum = z.enum(['AIRLINE','HOTEL','CRUISE','CREDIT_CARD','RETAIL','DINING','OTHER']);
 const TxTypeEnum   = z.enum(['EARN','REDEEM','EXPIRE','TRANSFER_IN','TRANSFER_OUT','BONUS','REINSTATEMENT']);
-const MetricEnum   = z.enum(['WEIGHT_KG','STEPS','SLEEP_HOURS','CALORIES','EXERCISE_MINUTES','BLOOD_PRESSURE_SYSTOLIC','BLOOD_PRESSURE_DIASTOLIC','RESTING_HEART_RATE','OTHER']);
+const MetricEnum   = z.enum(['WEIGHT_KG','STEPS','SLEEP_HOURS','CALORIES','EXERCISE_MINUTES','BLOOD_PRESSURE_SYSTOLIC','BLOOD_PRESSURE_DIASTOLIC','RESTING_HEART_RATE','CHOLESTEROL_TOTAL','CHOLESTEROL_LDL','CHOLESTEROL_HDL','TRIGLYCERIDES','BLOOD_GLUCOSE','OTHER']);
 
 const CreateProgrammeSchema = z.object({
   programme_type:   ProgTypeEnum,

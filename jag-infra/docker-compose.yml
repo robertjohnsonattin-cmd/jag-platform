@@ -179,6 +179,12 @@ services:
       JAG_MANAGER_PHONE:              ${JAG_MANAGER_PHONE}
       JAG_OWNER_PHONE:                ${JAG_OWNER_PHONE}
       PUBLIC_APPLY_BASE_URL:          ${PUBLIC_APPLY_BASE_URL}
+      # Found missing 2026-07-25 — same docker-compose env-wiring gap as the other
+      # entries above. .env had real values but the api container never saw them,
+      # so both listing.ts's suggest-price AND the new AI fitness coach silently
+      # 503 (GEMINI_API_KEY not configured) despite looking correctly configured.
+      GEMINI_API_KEY:                 ${GEMINI_API_KEY}
+      GEMINI_MODEL:                   ${GEMINI_MODEL}
     volumes:
       - /opt/jag/jag-api/google-calendar-key.json:/opt/jag/jag-api/google-calendar-key.json:ro
     ports:
