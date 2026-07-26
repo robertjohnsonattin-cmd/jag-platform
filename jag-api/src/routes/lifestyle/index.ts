@@ -15,11 +15,13 @@ import { familyPool } from '../../db/index';
 import { logger } from '../../lib/logger';
 import { ok, err } from '../../lib/response';
 import { fitnessRouter } from './fitness';
+import { medicalRecordsRouter } from './medical-records';
 
 export const lifestyleRouter = Router();
 lifestyleRouter.use(requireAuth());
 lifestyleRouter.use(brianPortalGate('LIFESTYLE'));
 lifestyleRouter.use('/fitness', fitnessRouter);
+lifestyleRouter.use('/medical-records', medicalRecordsRouter);
 
 const UUIDParam = z.object({ id: z.string().uuid() });
 const ProgrammeParam = z.object({ programmeId: z.string().uuid() });
