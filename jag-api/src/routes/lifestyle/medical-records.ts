@@ -31,7 +31,7 @@ const RecordTypeEnum = z.enum([
   'DISCHARGE_SUMMARY', 'VISIT_NOTE', 'IMMUNIZATION', 'DEVICE_EQUIPMENT',
   'INVOICE', 'CHRONOLOGY_SUMMARY', 'OTHER',
 ]);
-const MetricEnum = z.enum(['WEIGHT_KG', 'STEPS', 'SLEEP_HOURS', 'CALORIES', 'EXERCISE_MINUTES', 'BLOOD_PRESSURE_SYSTOLIC', 'BLOOD_PRESSURE_DIASTOLIC', 'RESTING_HEART_RATE', 'CHOLESTEROL_TOTAL', 'CHOLESTEROL_LDL', 'CHOLESTEROL_HDL', 'TRIGLYCERIDES', 'BLOOD_GLUCOSE', 'OTHER']);
+const MetricEnum = z.enum(['WEIGHT_KG', 'STEPS', 'SLEEP_HOURS', 'CALORIES', 'EXERCISE_MINUTES', 'BLOOD_PRESSURE_SYSTOLIC', 'BLOOD_PRESSURE_DIASTOLIC', 'RESTING_HEART_RATE', 'CHOLESTEROL_TOTAL', 'CHOLESTEROL_LDL', 'CHOLESTEROL_HDL', 'TRIGLYCERIDES', 'BLOOD_GLUCOSE', 'PSA', 'ESR', 'ACE_LEVEL', 'CREATININE', 'AST', 'ALT', 'WBC', 'HEMOGLOBIN', 'HBA1C', 'BUN', 'TSH', 'VITAMIN_B12', 'FREE_T4', 'RBC', 'HCT', 'MCV', 'MCH', 'MCHC', 'RDW', 'PLATELETS', 'MPV', 'NEUTROPHILS_PCT', 'LYMPHOCYTES_PCT', 'MONOCYTES_PCT', 'EOSINOPHILS_PCT', 'BASOPHILS_PCT', 'NEUTROPHILS_ABSOLUTE', 'LYMPHOCYTES_ABSOLUTE', 'MONOCYTES_ABSOLUTE', 'EOSINOPHILS_ABSOLUTE', 'BASOPHILS_ABSOLUTE', 'ALKALINE_PHOSPHATASE', 'SODIUM', 'POTASSIUM', 'CHLORIDE', 'TOTAL_PROTEIN', 'OTHER']);
 const DateStr = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 
 const LifestyleMetricSchema = z.object({
@@ -54,6 +54,7 @@ const CreateRecordSchema = z.object({
   details: z.record(z.string(), z.unknown()).optional(),
   source_file_name: z.string().max(500).optional(),
   extracted_by: z.enum(['CLAUDE', 'OLLAMA', 'MANUAL']).optional(),
+  needs_verification: z.boolean().optional(),
 }).strict();
 
 const PatchRecordSchema = CreateRecordSchema.partial().refine(o => Object.keys(o).length > 0);
@@ -88,6 +89,7 @@ const PutProfileSchema = z.object({
   allergies: z.array(AllergySchema).optional(),
   care_team: z.array(CareTeamSchema).optional(),
   summary_notes: z.string().max(10000).optional(),
+  blood_type: z.string().max(10).optional(),
 }).strict();
 
 const FamilyMemberParam = z.object({ familyMemberId: z.string().uuid() });
@@ -100,6 +102,7 @@ medicalRecordsRouter.get('/', async (req: Request, res: Response, next: NextFunc
     const statusFilter = req.query.status as string | undefined;
     const typeFilter = req.query.record_type as string | undefined;
     const specialtyFilter = req.query.specialty as string | undefined;
+    const needsVerificationFilter = req.query.needs_verification as string | undefined;
 
     const client = await familyPool.connect();
     try {
@@ -111,10 +114,11 @@ medicalRecordsRouter.get('/', async (req: Request, res: Response, next: NextFunc
         if (statusFilter) conditions.push(`status = ${push(statusFilter)}`);
         if (typeFilter) conditions.push(`record_type = ${push(typeFilter)}`);
         if (specialtyFilter) conditions.push(`specialty = ${push(specialtyFilter)}`);
+        if (needsVerificationFilter === 'true') conditions.push(`needs_verification = true`);
         const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
         return c.query(
           `SELECT * FROM fam_medical_records ${where}
-           ORDER  BY status = 'REVIEW' DESC, record_date DESC NULLS LAST, created_at DESC`,
+           ORDER  BY status = 'REVIEW' DESC, needs_verification DESC, record_date DESC NULLS LAST, created_at DESC`,
           params,
         ).then(r => r.rows);
       });
@@ -148,6 +152,10 @@ medicalRecordsRouter.post('/', async (req: Request, res: Response, next: NextFun
     if (!parsed.success) { err(res, 422, 'VALIDATION_ERROR', 'Request body validation failed.'); return; }
     const body = parsed.data;
     const { userId: ownerId } = req.rlsCtx;
+    const extractedBy = body.extracted_by ?? 'CLAUDE';
+    // A person typing their own note directly doesn't need a self-review step —
+    // only AI/OCR-extracted records default to REVIEW. Manual entries land APPROVED.
+    const isManual = extractedBy === 'MANUAL';
     const client = await familyPool.connect();
     try {
       const rec = await withOwnerRLS(client, req.rlsCtx, (c) =>
@@ -155,13 +163,14 @@ medicalRecordsRouter.post('/', async (req: Request, res: Response, next: NextFun
           `INSERT INTO fam_medical_records
              (owner_id, family_member_id, record_type, specialty, provider_name, facility_name,
               record_date, record_date_end, title, summary, details, source_file_name,
-              extracted_by, last_modified_by)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *`,
+              extracted_by, last_modified_by, status, reviewed_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING *`,
           [ownerId, body.family_member_id, body.record_type, body.specialty ?? null,
            body.provider_name ?? null, body.facility_name ?? null, body.record_date ?? null,
            body.record_date_end ?? null, body.title, body.summary ?? null,
            JSON.stringify(body.details ?? {}), body.source_file_name ?? null,
-           body.extracted_by ?? 'CLAUDE', ownerId],
+           extractedBy, ownerId,
+           isManual ? 'APPROVED' : 'REVIEW', isManual ? new Date() : null],
         ).then(r => r.rows[0]),
       );
       logger.info({ entity: 'LIFESTYLE', action: 'MEDICAL_RECORD_CREATED', user_id: ownerId, record_id: rec.id });
@@ -194,6 +203,7 @@ medicalRecordsRouter.patch('/:id', async (req: Request, res: Response, next: Nex
     if (body.details !== undefined) setCols.push(`details = ${push(JSON.stringify(body.details))}`);
     if (body.source_file_name !== undefined) setCols.push(`source_file_name = ${push(body.source_file_name)}`);
     if (body.family_member_id !== undefined) setCols.push(`family_member_id = ${push(body.family_member_id)}`);
+    if (body.needs_verification !== undefined) setCols.push(`needs_verification = ${push(body.needs_verification)}`);
     params.push(idP.data.id);
     const client = await familyPool.connect();
     try {
@@ -290,7 +300,7 @@ medicalRecordsRouter.get('/profile/:familyMemberId', async (req: Request, res: R
       ok(res, rec ?? {
         family_member_id: paramP.data.familyMemberId,
         active_diagnoses: [], current_medications: [], allergies: [], care_team: [],
-        summary_notes: null, last_synthesized_at: null,
+        summary_notes: null, blood_type: null, last_synthesized_at: null,
       });
     } finally { client.release(); }
   } catch (e) { next(e); }
@@ -313,14 +323,15 @@ medicalRecordsRouter.put('/profile/:familyMemberId', async (req: Request, res: R
         c.query(
           `INSERT INTO fam_medical_profile
              (owner_id, family_member_id, active_diagnoses, current_medications, allergies, care_team,
-              summary_notes, last_synthesized_at, last_modified_by)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,now(),$1)
+              summary_notes, blood_type, last_synthesized_at, last_modified_by)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,now(),$1)
            ON CONFLICT (family_member_id) DO UPDATE SET
              active_diagnoses    = EXCLUDED.active_diagnoses,
              current_medications = EXCLUDED.current_medications,
              allergies            = EXCLUDED.allergies,
              care_team            = EXCLUDED.care_team,
              summary_notes        = EXCLUDED.summary_notes,
+             blood_type           = EXCLUDED.blood_type,
              last_synthesized_at  = now(),
              last_modified_at     = now(),
              last_modified_by     = $1
@@ -328,7 +339,7 @@ medicalRecordsRouter.put('/profile/:familyMemberId', async (req: Request, res: R
           [ownerId, paramP.data.familyMemberId,
            JSON.stringify(body.active_diagnoses ?? []), JSON.stringify(body.current_medications ?? []),
            JSON.stringify(body.allergies ?? []), JSON.stringify(body.care_team ?? []),
-           body.summary_notes ?? null],
+           body.summary_notes ?? null, body.blood_type ?? null],
         ).then(r => r.rows[0]),
       );
       logger.info({ entity: 'LIFESTYLE', action: 'MEDICAL_PROFILE_SYNTHESIZED', user_id: ownerId, record_id: rec.id });

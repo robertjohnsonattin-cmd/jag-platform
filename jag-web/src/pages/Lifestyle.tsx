@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 
@@ -20,6 +20,7 @@ import {
   type RecordType, type RecordStatus,
   type MedicalRecord, type MedicalProfile,
 } from '../api/medical-records'
+import { clinicRegistrationsApi, type ClinicRegistration } from '../api/clinic-registrations'
 
 // Shared family-member directory (cached by query key — deduped across components).
 function useFamilyMembers() {
@@ -74,6 +75,16 @@ const METRIC_LABELS: Record<MetricType, string> = {
   RESTING_HEART_RATE: 'Resting HR',
   CHOLESTEROL_TOTAL: 'Cholesterol — Total', CHOLESTEROL_LDL: 'Cholesterol — LDL',
   CHOLESTEROL_HDL: 'Cholesterol — HDL', TRIGLYCERIDES: 'Triglycerides', BLOOD_GLUCOSE: 'Blood Glucose',
+  PSA: 'PSA', ESR: 'ESR', ACE_LEVEL: 'ACE Level', CREATININE: 'Creatinine', AST: 'AST', ALT: 'ALT',
+  WBC: 'White Blood Cell Count', HEMOGLOBIN: 'Haemoglobin', HBA1C: 'HbA1c', BUN: 'BUN', TSH: 'TSH', VITAMIN_B12: 'Vitamin B12', FREE_T4: 'Free T4',
+  RBC: 'Red Blood Cell Count', HCT: 'Haematocrit', MCV: 'MCV', MCH: 'MCH', MCHC: 'MCHC', RDW: 'RDW',
+  PLATELETS: 'Platelets', MPV: 'MPV',
+  NEUTROPHILS_PCT: 'Neutrophils (%)', LYMPHOCYTES_PCT: 'Lymphocytes (%)', MONOCYTES_PCT: 'Monocytes (%)',
+  EOSINOPHILS_PCT: 'Eosinophils (%)', BASOPHILS_PCT: 'Basophils (%)',
+  NEUTROPHILS_ABSOLUTE: 'Neutrophils (abs)', LYMPHOCYTES_ABSOLUTE: 'Lymphocytes (abs)', MONOCYTES_ABSOLUTE: 'Monocytes (abs)',
+  EOSINOPHILS_ABSOLUTE: 'Eosinophils (abs)', BASOPHILS_ABSOLUTE: 'Basophils (abs)',
+  ALKALINE_PHOSPHATASE: 'Alkaline Phosphatase', SODIUM: 'Sodium', POTASSIUM: 'Potassium', CHLORIDE: 'Chloride',
+  TOTAL_PROTEIN: 'Total Protein',
   OTHER: 'Other',
 }
 const METRIC_ICONS: Record<MetricType, string> = {
@@ -81,14 +92,27 @@ const METRIC_ICONS: Record<MetricType, string> = {
   EXERCISE_MINUTES: '🏃', BLOOD_PRESSURE_SYSTOLIC: '❤️', BLOOD_PRESSURE_DIASTOLIC: '❤️',
   RESTING_HEART_RATE: '💓',
   CHOLESTEROL_TOTAL: '🩸', CHOLESTEROL_LDL: '🩸', CHOLESTEROL_HDL: '🩸', TRIGLYCERIDES: '🩸', BLOOD_GLUCOSE: '🩸',
+  PSA: '🧪', ESR: '🧪', ACE_LEVEL: '🧪', CREATININE: '🧪', AST: '🧪', ALT: '🧪',
+  WBC: '🧪', HEMOGLOBIN: '🧪', HBA1C: '🧪', BUN: '🧪', TSH: '🧪', VITAMIN_B12: '🧪', FREE_T4: '🧪',
+  RBC: '🧪', HCT: '🧪', MCV: '🧪', MCH: '🧪', MCHC: '🧪', RDW: '🧪', PLATELETS: '🧪', MPV: '🧪',
+  NEUTROPHILS_PCT: '🧪', LYMPHOCYTES_PCT: '🧪', MONOCYTES_PCT: '🧪', EOSINOPHILS_PCT: '🧪', BASOPHILS_PCT: '🧪',
+  NEUTROPHILS_ABSOLUTE: '🧪', LYMPHOCYTES_ABSOLUTE: '🧪', MONOCYTES_ABSOLUTE: '🧪', EOSINOPHILS_ABSOLUTE: '🧪', BASOPHILS_ABSOLUTE: '🧪',
+  ALKALINE_PHOSPHATASE: '🧪', SODIUM: '🧪', POTASSIUM: '🧪', CHLORIDE: '🧪', TOTAL_PROTEIN: '🧪',
   OTHER: '📊',
 }
 const METRIC_DEFAULT_UNIT: Record<MetricType, string> = {
   WEIGHT_KG: 'kg', STEPS: 'steps', SLEEP_HOURS: 'hrs', CALORIES: 'kcal',
   EXERCISE_MINUTES: 'min', BLOOD_PRESSURE_SYSTOLIC: 'mmHg', BLOOD_PRESSURE_DIASTOLIC: 'mmHg',
   RESTING_HEART_RATE: 'bpm',
+  PSA: 'ng/mL', ESR: 'mm/hr', ACE_LEVEL: 'U/L', CREATININE: 'mg/dL', AST: 'IU/L', ALT: 'IU/L',
+  WBC: 'x10^3/uL', HEMOGLOBIN: 'g/dL', HBA1C: '%', BUN: 'mg/dL', TSH: 'uIU/mL', VITAMIN_B12: 'pg/mL', FREE_T4: 'ng/dL',
   CHOLESTEROL_TOTAL: 'mg/dL', CHOLESTEROL_LDL: 'mg/dL', CHOLESTEROL_HDL: 'mg/dL',
   TRIGLYCERIDES: 'mg/dL', BLOOD_GLUCOSE: 'mg/dL',
+  RBC: 'x10^6/uL', HCT: '%', MCV: 'fL', MCH: 'pg', MCHC: 'g/dL', RDW: '%', PLATELETS: 'x10^3/uL', MPV: 'fL',
+  NEUTROPHILS_PCT: '%', LYMPHOCYTES_PCT: '%', MONOCYTES_PCT: '%', EOSINOPHILS_PCT: '%', BASOPHILS_PCT: '%',
+  NEUTROPHILS_ABSOLUTE: 'x10^3/uL', LYMPHOCYTES_ABSOLUTE: 'x10^3/uL', MONOCYTES_ABSOLUTE: 'x10^3/uL',
+  EOSINOPHILS_ABSOLUTE: 'x10^3/uL', BASOPHILS_ABSOLUTE: 'x10^3/uL',
+  ALKALINE_PHOSPHATASE: 'U/L', SODIUM: 'mmol/L', POTASSIUM: 'mmol/L', CHLORIDE: 'mmol/L', TOTAL_PROTEIN: 'g/dL',
   OTHER: '',
 }
 
@@ -110,7 +134,10 @@ const RECORD_STATUS_COLORS: Record<RecordStatus, string> = {
 }
 
 const today = () => new Date().toISOString().split('T')[0]
-const fmtDate = (d: string) => new Date(d + 'T00:00:00').toLocaleDateString('en-TT', { day: '2-digit', month: 'short', year: 'numeric' })
+// entry_date/record_date are PG DATE columns — they can arrive as full ISO datetime
+// strings (e.g. "2024-03-27T00:00:00.000Z") rather than plain YYYY-MM-DD. Slice to the
+// date portion first so appending 'T00:00:00' below doesn't produce an invalid string.
+const fmtDate = (d: string) => new Date(d.slice(0, 10) + 'T00:00:00').toLocaleDateString('en-TT', { day: '2-digit', month: 'short', year: 'numeric' })
 const fmtNum = (n: number) => n.toLocaleString()
 
 // ── Add Programme Modal ────────────────────────────────────────────────────────
@@ -805,6 +832,7 @@ function ProfileTab() {
   const [selectedMember, setSelectedMember] = useState('')
 
   const eligibleMembers = members // any family member may have a profile
+  const member = eligibleMembers.find(m => m.id === selectedMember) ?? null
 
   const { data: profile, isLoading } = useQuery({
     queryKey: ['medical-profile', selectedMember],
@@ -830,13 +858,131 @@ function ProfileTab() {
       {!selectedMember ? null : isLoading ? (
         <p className="text-slate-500 text-sm">{t('common.loading')}</p>
       ) : (
-        <ProfileView profile={profile ?? null} />
+        <ProfileView profile={profile ?? null} member={member} />
       )}
     </div>
   )
 }
 
-function ProfileView({ profile }: { profile: MedicalProfile | null }) {
+// Builds a clean, black-on-white printable summary of a family member's medical
+// profile — meant to be handed (printed or PDF'd) to a treating doctor. Rendered
+// entirely client-side (the profile is already loaded via React Query — no server
+// HTML endpoint needed, same rationale as the WhatsApp receipt "Print/PDF" button).
+function ageFromDob(dob: string): number {
+  const [y, m, d] = dob.slice(0, 10).split('-').map(Number)
+  const today = new Date()
+  let age = today.getFullYear() - y
+  if (today.getMonth() + 1 < m || (today.getMonth() + 1 === m && today.getDate() < d)) age--
+  return age
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+}
+
+function buildProfilePrintHtml(member: FamilyMember, profile: MedicalProfile): string {
+  const patientName = escapeHtml(`${member.first_name} ${member.last_name}`)
+  const dobLine = member.date_of_birth
+    ? `${fmtDate(member.date_of_birth)} (age ${ageFromDob(member.date_of_birth)})`
+    : 'Not on file'
+  const generatedOn = new Date().toLocaleDateString('en-TT', { day: '2-digit', month: 'long', year: 'numeric' })
+  const lastSynth = profile.last_synthesized_at ? fmtDate(profile.last_synthesized_at.slice(0, 10)) : 'Never'
+
+  const diagnosesHtml = (profile.active_diagnoses ?? []).map(d => `
+    <tr>
+      <td><strong>${escapeHtml(d.name)}</strong>${d.notes ? `<div class="notes">${escapeHtml(d.notes)}</div>` : ''}</td>
+      <td>${escapeHtml(d.status ?? '')}</td>
+      <td>${escapeHtml(d.since ?? '')}</td>
+    </tr>`).join('')
+
+  const medsHtml = (profile.current_medications ?? []).map(m => `
+    <tr>
+      <td><strong>${escapeHtml(m.name)}</strong></td>
+      <td>${escapeHtml([m.dose, m.frequency].filter(Boolean).join(' — '))}</td>
+      <td>${escapeHtml(m.prescribed_by ?? '')}</td>
+      <td>${escapeHtml(m.since ?? '')}</td>
+    </tr>`).join('')
+
+  const allergiesHtml = (profile.allergies ?? []).map(a =>
+    `<li><strong>${escapeHtml(a.allergen)}</strong>${a.reaction ? ` — ${escapeHtml(a.reaction)}` : ''}</li>`).join('')
+
+  const careTeamHtml = (profile.care_team ?? []).map(c => `
+    <tr>
+      <td>${escapeHtml(c.name)}</td>
+      <td>${escapeHtml(c.specialty ?? '')}</td>
+      <td>${escapeHtml(c.facility ?? '')}</td>
+      <td>${escapeHtml(c.phone ?? '')}</td>
+    </tr>`).join('')
+
+  return `<!doctype html>
+<html><head><meta charset="utf-8"><title>Medical Summary — ${patientName}</title>
+<style>
+  @page { margin: 18mm 16mm; }
+  * { box-sizing: border-box; }
+  body { font-family: Georgia, 'Times New Roman', serif; color: #1a1a1a; margin: 0; padding: 24px; font-size: 13px; line-height: 1.5; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  h2 { font-size: 14px; margin: 22px 0 8px; padding-bottom: 4px; border-bottom: 1.5px solid #1a1a1a; text-transform: uppercase; letter-spacing: 0.03em; }
+  .subtitle { color: #555; font-size: 12px; margin-bottom: 18px; }
+  .patient-box { display: flex; justify-content: space-between; border: 1px solid #999; border-radius: 6px; padding: 12px 16px; margin-bottom: 8px; }
+  .patient-box .field { font-size: 12px; }
+  .patient-box .field .label { color: #666; display: block; font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; }
+  .patient-box .field.blood-type { font-weight: bold; color: #b00; font-size: 15px; }
+  .meta { font-size: 10px; color: #777; margin-bottom: 20px; }
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; font-size: 10px; text-transform: uppercase; color: #666; padding: 3px 8px 3px 0; border-bottom: 1px solid #ccc; }
+  td { padding: 6px 8px 6px 0; vertical-align: top; border-bottom: 1px solid #eee; }
+  td .notes { font-size: 11px; color: #555; margin-top: 2px; }
+  ul { margin: 0; padding-left: 18px; }
+  .overview { white-space: pre-wrap; }
+  .allergy-box { border: 1.5px solid #b00; border-radius: 6px; padding: 10px 14px; background: #fff5f5; }
+  .allergy-box h2 { color: #b00; border-color: #b00; }
+  .empty { color: #888; font-style: italic; font-size: 12px; }
+  .footer { margin-top: 30px; padding-top: 10px; border-top: 1px solid #ccc; font-size: 10px; color: #777; }
+  @media print { .no-print { display: none; } }
+</style></head>
+<body>
+  <div class="no-print" style="text-align:right; margin-bottom: 12px;">
+    <button onclick="window.print()" style="padding:8px 16px; font-size:13px; cursor:pointer;">Print</button>
+  </div>
+
+  <h1>Medical Summary</h1>
+  <div class="subtitle">Prepared for review by a treating medical practitioner</div>
+
+  <div class="patient-box">
+    <div class="field"><span class="label">Patient</span>${patientName}</div>
+    <div class="field"><span class="label">Date of Birth</span>${dobLine}</div>
+    <div class="field blood-type"><span class="label" style="color:#b00;">Blood Type</span>${escapeHtml(profile.blood_type ?? 'Not on file')}</div>
+    <div class="field"><span class="label">Generated</span>${generatedOn}</div>
+  </div>
+  <div class="meta">Profile last synthesized: ${lastSynth} — this summary reflects the family's own JAG Holdings medical record system and is not a substitute for the patient's full clinical chart.</div>
+
+  <h2>Overview</h2>
+  ${profile.summary_notes ? `<div class="overview">${escapeHtml(profile.summary_notes)}</div>` : '<p class="empty">No overview on file.</p>'}
+
+  <h2>Active Diagnoses</h2>
+  ${diagnosesHtml ? `<table><thead><tr><th>Diagnosis</th><th>Status</th><th>Since</th></tr></thead><tbody>${diagnosesHtml}</tbody></table>` : '<p class="empty">None on file.</p>'}
+
+  <h2>Current Medications</h2>
+  ${medsHtml ? `<table><thead><tr><th>Medication</th><th>Dose / Frequency</th><th>Prescribed By</th><th>Since</th></tr></thead><tbody>${medsHtml}</tbody></table>` : '<p class="empty">None on file.</p>'}
+
+  ${allergiesHtml ? `<div class="allergy-box"><h2 style="margin-top:0; border-bottom:none;">⚠ Allergies</h2><ul>${allergiesHtml}</ul></div>` : ''}
+
+  <h2>Care Team</h2>
+  ${careTeamHtml ? `<table><thead><tr><th>Name</th><th>Specialty</th><th>Facility</th><th>Phone</th></tr></thead><tbody>${careTeamHtml}</tbody></table>` : '<p class="empty">None on file.</p>'}
+
+  <div class="footer">Generated by JAG Holdings — Medical Records module. Please verify all details with the patient/family before relying on this summary clinically.</div>
+</body></html>`
+}
+
+function printMedicalProfile(member: FamilyMember, profile: MedicalProfile) {
+  const w = window.open('', '_blank')
+  if (!w) return
+  w.document.open()
+  w.document.write(buildProfilePrintHtml(member, profile))
+  w.document.close()
+}
+
+function ProfileView({ profile, member }: { profile: MedicalProfile | null; member: FamilyMember | null }) {
   const { t } = useTranslation()
 
   const diagnoses = profile?.active_diagnoses ?? []
@@ -844,7 +990,7 @@ function ProfileView({ profile }: { profile: MedicalProfile | null }) {
   const allergies = profile?.allergies ?? []
   const careTeam = profile?.care_team ?? []
 
-  const hasContent = diagnoses.length + medications.length + allergies.length + careTeam.length > 0 || !!profile?.summary_notes
+  const hasContent = diagnoses.length + medications.length + allergies.length + careTeam.length > 0 || !!profile?.summary_notes || !!profile?.blood_type
 
   if (!hasContent) {
     return (
@@ -856,9 +1002,21 @@ function ProfileView({ profile }: { profile: MedicalProfile | null }) {
 
   return (
     <div className="space-y-6">
-      {profile?.last_synthesized_at && (
-        <p className="text-xs text-slate-500">{t('medical.lastSynthesized', { date: fmtDate(profile.last_synthesized_at.slice(0, 10)), defaultValue: 'Last synthesized {{date}}' })}</p>
-      )}
+      <div className="bg-red-950/40 border border-red-800 rounded-lg px-4 py-2 flex items-center gap-2 text-sm">
+        <span className="text-red-300 font-semibold">🩸 {t('medical.bloodType', 'Blood Type')}:</span>
+        <span className="text-red-100 font-bold">{profile?.blood_type || t('medical.notOnFile', 'Not on file')}</span>
+      </div>
+      <div className="flex items-center justify-between">
+        {profile?.last_synthesized_at ? (
+          <p className="text-xs text-slate-500">{t('medical.lastSynthesized', { date: fmtDate(profile.last_synthesized_at.slice(0, 10)), defaultValue: 'Last synthesized {{date}}' })}</p>
+        ) : <span />}
+        {member && profile && (
+          <button onClick={() => printMedicalProfile(member, profile)}
+            className="text-xs px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg font-medium">
+            🖨 {t('medical.printForDoctor', 'Print for Doctor')}
+          </button>
+        )}
+      </div>
 
       {profile?.summary_notes && (
         <div className="bg-slate-800 rounded-xl border border-slate-700 p-5">
@@ -946,6 +1104,15 @@ function MedicalRecordDetail({ record, onClose, onChanged }: { record: MedicalRe
   const { nameOf } = useFamilyMembers()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [editing, setEditing] = useState(false)
+
+  if (editing) {
+    return (
+      <EditMedicalRecordForm record={record}
+        onCancel={() => setEditing(false)}
+        onSaved={() => { setEditing(false); onChanged() }} />
+    )
+  }
 
   const approve = async () => {
     setBusy(true); setError('')
@@ -961,6 +1128,11 @@ function MedicalRecordDetail({ record, onClose, onChanged }: { record: MedicalRe
     if (!confirm(t('medical.confirmDelete', 'Delete this record permanently?'))) return
     setBusy(true); setError('')
     try { await medicalRecordsApi.delete(record.id); onChanged() }
+    catch (e) { setError((e as Error).message); setBusy(false) }
+  }
+  const toggleVerification = async () => {
+    setBusy(true); setError('')
+    try { await medicalRecordsApi.update(record.id, { needs_verification: !record.needs_verification }); onChanged() }
     catch (e) { setError((e as Error).message); setBusy(false) }
   }
 
@@ -979,6 +1151,11 @@ function MedicalRecordDetail({ record, onClose, onChanged }: { record: MedicalRe
               {t(`medical.status.${record.status}`, record.status)}
             </span>
             {record.specialty && <span className="text-xs bg-slate-700 text-slate-300 px-2 py-0.5 rounded">{record.specialty}</span>}
+            {record.needs_verification && (
+              <span className="text-xs bg-amber-900 text-amber-200 px-2 py-0.5 rounded">
+                ⚠ {t('medical.needsVerification', 'Needs Verification')}
+              </span>
+            )}
           </div>
           <h3 className="text-xl font-bold">{record.title}</h3>
           <p className="text-sm text-slate-400 mt-0.5">
@@ -1052,10 +1229,272 @@ function MedicalRecordDetail({ record, onClose, onChanged }: { record: MedicalRe
             </button>
           </>
         )}
+        <button onClick={toggleVerification} disabled={busy}
+          className="text-xs px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded disabled:opacity-50">
+          {record.needs_verification ? t('medical.markVerified', '✓ Mark Verified') : t('medical.flagForVerification', '⚠ Flag for Verification')}
+        </button>
+        <button onClick={() => setEditing(true)} disabled={busy}
+          className="text-xs px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded disabled:opacity-50">
+          ✎ {t('common.edit', 'Edit')}
+        </button>
         <button onClick={remove} disabled={busy}
           className="text-xs px-4 py-2 bg-red-900/50 hover:bg-red-900 text-red-300 rounded ml-auto disabled:opacity-50">
           {t('common.delete', 'Delete')}
         </button>
+      </div>
+    </div>
+  )
+}
+
+// ── Edit Medical Record Form ─────────────────────────────────────────────────
+// Lets a reviewer correct a record's fields (and its extracted details, including
+// the lifestyle_metrics that get pushed to Biometrics on approval) before approving it.
+
+function EditMedicalRecordForm({ record, onCancel, onSaved }: { record: MedicalRecord; onCancel: () => void; onSaved: () => void }) {
+  const { t } = useTranslation()
+  const { members, nameOf } = useFamilyMembers()
+  const [form, setForm] = useState({
+    family_member_id: record.family_member_id,
+    record_type: record.record_type,
+    specialty: record.specialty ?? '',
+    provider_name: record.provider_name ?? '',
+    facility_name: record.facility_name ?? '',
+    record_date: record.record_date?.slice(0, 10) ?? '',
+    record_date_end: record.record_date_end?.slice(0, 10) ?? '',
+    title: record.title,
+    summary: record.summary ?? '',
+  })
+  const [detailsText, setDetailsText] = useState(() => JSON.stringify(record.details ?? {}, null, 2))
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  const set = (k: keyof typeof form, v: string) => setForm(p => ({ ...p, [k]: v }))
+
+  const submit = async () => {
+    if (!form.title.trim()) { setError(t('medical.titleRequired', 'Title is required.')); return }
+    let details: Record<string, unknown>
+    try { details = JSON.parse(detailsText) }
+    catch { setError(t('medical.invalidDetailsJson', 'Extracted Details is not valid JSON — check for a missing comma or bracket.')); return }
+    setSaving(true); setError('')
+    try {
+      await medicalRecordsApi.update(record.id, {
+        family_member_id: form.family_member_id,
+        record_type: form.record_type,
+        specialty: form.specialty || undefined,
+        provider_name: form.provider_name || undefined,
+        facility_name: form.facility_name || undefined,
+        record_date: form.record_date || undefined,
+        record_date_end: form.record_date_end || undefined,
+        title: form.title.trim(),
+        summary: form.summary || undefined,
+        details,
+      })
+      onSaved()
+    } catch (e) { setError((e as Error).message); setSaving(false) }
+  }
+
+  return (
+    <div className="bg-slate-800 rounded-xl border border-blue-600 p-6">
+      <div className="flex justify-between items-center mb-4">
+        <h3 className="text-lg font-semibold">✎ {t('medical.editRecord', 'Edit Record')}</h3>
+        <button onClick={onCancel} className="text-slate-400 hover:text-white text-xl px-1">✕</button>
+      </div>
+      <div className="space-y-4 max-h-[65vh] overflow-y-auto pr-1">
+        <div>
+          <label className="block text-xs text-slate-400 mb-1">{t('medical.selectMember', 'Family member')}</label>
+          <select value={form.family_member_id} onChange={e => set('family_member_id', e.target.value)}
+            className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-sm">
+            {members.map(m => <option key={m.id} value={m.id}>{m.first_name} {m.last_name}</option>)}
+            {!members.some(m => m.id === form.family_member_id) && (
+              <option value={form.family_member_id}>{nameOf(form.family_member_id) ?? form.family_member_id}</option>
+            )}
+          </select>
+        </div>
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">{t('crm.typeLabel')}</label>
+            <select value={form.record_type} onChange={e => set('record_type', e.target.value)}
+              className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-sm">
+              {(Object.keys(RECORD_TYPE_LABELS) as RecordType[]).map(rt => (
+                <option key={rt} value={rt}>{RECORD_TYPE_ICONS[rt]} {t(`medical.recordTypes.${rt}`, RECORD_TYPE_LABELS[rt])}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">{t('medical.specialty', 'Specialty')}</label>
+            <input value={form.specialty} onChange={e => set('specialty', e.target.value)}
+              className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-sm" />
+          </div>
+        </div>
+        <div>
+          <label className="block text-xs text-slate-400 mb-1">{t('medical.titleStar', 'Title *')}</label>
+          <input value={form.title} onChange={e => set('title', e.target.value)}
+            className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-sm" />
+        </div>
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">{t('medical.provider', 'Provider')}</label>
+            <input value={form.provider_name} onChange={e => set('provider_name', e.target.value)}
+              className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-sm" />
+          </div>
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">{t('medical.facility', 'Facility')}</label>
+            <input value={form.facility_name} onChange={e => set('facility_name', e.target.value)}
+              className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-sm" />
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">{t('lifestyle.dateLabel')}</label>
+            <input type="date" value={form.record_date} onChange={e => set('record_date', e.target.value)}
+              className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-sm" />
+          </div>
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">{t('medical.recordDateEnd', 'End date (if a range)')}</label>
+            <input type="date" value={form.record_date_end} onChange={e => set('record_date_end', e.target.value)}
+              className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-sm" />
+          </div>
+        </div>
+        <div>
+          <label className="block text-xs text-slate-400 mb-1">{t('medical.summary', 'Summary')}</label>
+          <textarea value={form.summary} onChange={e => set('summary', e.target.value)} rows={4}
+            className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-sm resize-none" />
+        </div>
+        <div>
+          <label className="block text-xs text-slate-400 mb-1">
+            {t('medical.detailsJson', 'Extracted Details (JSON)')}
+          </label>
+          <p className="text-xs text-slate-500 mb-1">
+            {t('medical.detailsJsonHint', 'Includes lifestyle_metrics if present — those values get logged to Biometrics on approval, so fix them here too.')}
+          </p>
+          <textarea value={detailsText} onChange={e => setDetailsText(e.target.value)} rows={12}
+            spellCheck={false}
+            className="w-full bg-slate-900 border border-slate-600 rounded px-3 py-2 text-xs font-mono resize-y" />
+        </div>
+        {error && <p className="text-red-400 text-sm">{error}</p>}
+      </div>
+      <div className="flex justify-end gap-3 pt-4 mt-2 border-t border-slate-700">
+        <button onClick={onCancel} className="px-4 py-2 text-sm rounded bg-slate-700 hover:bg-slate-600">{t('common.cancel')}</button>
+        <button onClick={submit} disabled={saving}
+          className="px-4 py-2 text-sm rounded bg-blue-600 hover:bg-blue-500 disabled:opacity-50">
+          {saving ? t('common.saving') : t('common.save', 'Save')}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ── Add Medical Record Modal ─────────────────────────────────────────────────
+
+function AddMedicalRecordModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
+  const { t } = useTranslation()
+  const { members } = useFamilyMembers()
+  const [form, setForm] = useState({
+    family_member_id: '',
+    record_type: 'VISIT_NOTE' as RecordType,
+    specialty: '',
+    provider_name: '',
+    facility_name: '',
+    record_date: today(),
+    title: '',
+    summary: '',
+  })
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  const set = (k: string, v: string) => setForm(p => ({ ...p, [k]: v }))
+
+  const submit = async () => {
+    if (!form.family_member_id) { setError(t('medical.memberRequired', 'Choose a family member.')); return }
+    if (!form.title.trim()) { setError(t('medical.titleRequired', 'Title is required.')); return }
+    setSaving(true); setError('')
+    try {
+      await medicalRecordsApi.create({
+        family_member_id: form.family_member_id,
+        record_type: form.record_type,
+        specialty: form.specialty || undefined,
+        provider_name: form.provider_name || undefined,
+        facility_name: form.facility_name || undefined,
+        record_date: form.record_date || undefined,
+        title: form.title.trim(),
+        summary: form.summary || undefined,
+        extracted_by: 'MANUAL',
+      })
+      onSaved()
+    } catch (e) { setError((e as Error).message); setSaving(false) }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+      <div className="bg-slate-800 rounded-xl w-full max-w-lg shadow-2xl">
+        <div className="flex justify-between items-center px-6 py-4 border-b border-slate-700">
+          <h2 className="text-lg font-semibold">{t('medical.addRecord', '+ Add Medical Record')}</h2>
+          <button onClick={onClose} className="text-slate-400 hover:text-white text-xl">✕</button>
+        </div>
+        <div className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">{t('medical.selectMember', 'Family member')} *</label>
+            <select value={form.family_member_id} onChange={e => set('family_member_id', e.target.value)}
+              className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-sm">
+              <option value="">{t('medical.chooseMember', '— Choose —')}</option>
+              {members.map(m => <option key={m.id} value={m.id}>{m.first_name} {m.last_name}</option>)}
+            </select>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">{t('crm.typeLabel')}</label>
+              <select value={form.record_type} onChange={e => set('record_type', e.target.value)}
+                className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-sm">
+                {(Object.keys(RECORD_TYPE_LABELS) as RecordType[]).map(rt => (
+                  <option key={rt} value={rt}>{RECORD_TYPE_ICONS[rt]} {t(`medical.recordTypes.${rt}`, RECORD_TYPE_LABELS[rt])}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">{t('lifestyle.dateLabel')}</label>
+              <input type="date" value={form.record_date} onChange={e => set('record_date', e.target.value)}
+                className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-sm" />
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">{t('medical.titleStar', 'Title *')}</label>
+            <input value={form.title} onChange={e => set('title', e.target.value)}
+              placeholder={t('medical.titlePlaceholder', 'e.g. Rheumatology follow-up visit')}
+              className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-sm" />
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">{t('medical.specialty', 'Specialty')}</label>
+              <input value={form.specialty} onChange={e => set('specialty', e.target.value)}
+                placeholder="e.g. Rheumatology"
+                className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-sm" />
+            </div>
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">{t('medical.provider', 'Provider')}</label>
+              <input value={form.provider_name} onChange={e => set('provider_name', e.target.value)}
+                className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-sm" />
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">{t('medical.facility', 'Facility')}</label>
+            <input value={form.facility_name} onChange={e => set('facility_name', e.target.value)}
+              className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-sm" />
+          </div>
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">{t('medical.summary', 'Summary')}</label>
+            <textarea value={form.summary} onChange={e => set('summary', e.target.value)} rows={4}
+              placeholder={t('medical.summaryPlaceholder', 'What happened at this visit / what the note covers...')}
+              className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-sm resize-none" />
+          </div>
+          {error && <p className="text-red-400 text-sm">{error}</p>}
+        </div>
+        <div className="flex justify-end gap-3 px-6 pb-5">
+          <button onClick={onClose} className="px-4 py-2 text-sm rounded bg-slate-700 hover:bg-slate-600">{t('common.cancel')}</button>
+          <button onClick={submit} disabled={saving}
+            className="px-4 py-2 text-sm rounded bg-blue-600 hover:bg-blue-500 disabled:opacity-50">
+            {saving ? t('common.saving') : t('medical.saveRecord', 'Save Record')}
+          </button>
+        </div>
       </div>
     </div>
   )
@@ -1068,16 +1507,32 @@ function MedicalRecordsTab() {
   const qc = useQueryClient()
   const { members, nameOf } = useFamilyMembers()
   const [selected, setSelected] = useState<MedicalRecord | null>(null)
-  const [statusFilter, setStatusFilter] = useState<RecordStatus | 'ALL'>('ALL')
+  const [showAdd, setShowAdd] = useState(false)
+  const [statusFilter, setStatusFilter] = useState<RecordStatus | 'ALL'>('REVIEW')
   const [memberFilter, setMemberFilter] = useState('')
+  const [verificationOnly, setVerificationOnly] = useState(false)
 
   const { data: records = [], isLoading, refetch } = useQuery({
     queryKey: ['medical-records', memberFilter],
     queryFn: () => medicalRecordsApi.list({ family_member_id: memberFilter || undefined }),
   })
 
-  const filtered = records.filter(r => statusFilter === 'ALL' || r.status === statusFilter)
+  const filtered = records.filter(r =>
+    (statusFilter === 'ALL' || r.status === statusFilter) &&
+    (!verificationOnly || r.needs_verification)
+  )
   const reviewCount = records.filter(r => r.status === 'REVIEW').length
+  const verificationCount = records.filter(r => r.needs_verification).length
+
+  // Default view is REVIEW so pending records don't require scrolling past approved ones,
+  // but fall back to ALL once nothing's pending so the tab doesn't look empty.
+  const autoFellBack = useRef(false)
+  useEffect(() => {
+    if (!isLoading && statusFilter === 'REVIEW' && reviewCount === 0 && !autoFellBack.current) {
+      autoFellBack.current = true
+      setStatusFilter('ALL')
+    }
+  }, [isLoading, reviewCount, statusFilter])
 
   const refresh = () => {
     setSelected(null)
@@ -1093,6 +1548,15 @@ function MedicalRecordsTab() {
           ⚠️ {t('medical.pendingReviewAlert', { count: reviewCount, defaultValue: '{{count}} record(s) awaiting review' })}
         </div>
       )}
+      {verificationCount > 0 && (
+        <div className="bg-amber-900/30 border border-amber-700 rounded-lg px-4 py-3 text-sm text-amber-300 flex justify-between items-center gap-3">
+          <span>⚠ {t('medical.needsVerificationAlert', { count: verificationCount, defaultValue: '{{count}} record(s) flagged for verification against the original document' })}</span>
+          <button onClick={() => setVerificationOnly(v => !v)}
+            className="text-xs px-3 py-1 rounded-full bg-amber-800 hover:bg-amber-700 whitespace-nowrap">
+            {verificationOnly ? t('medical.showAll', 'Show all') : t('medical.showOnlyThese', 'Show only these')}
+          </button>
+        </div>
+      )}
 
       <div className="flex flex-wrap justify-between items-end gap-4">
         <div className="flex flex-wrap gap-2">
@@ -1104,14 +1568,26 @@ function MedicalRecordsTab() {
               {s === 'ALL' ? t('lifestyle.allFilter') : t(`medical.status.${s}`, s)}
             </button>
           ))}
+          <button onClick={() => setVerificationOnly(v => !v)}
+            className={`text-xs px-3 py-1.5 rounded-full transition-colors ${
+              verificationOnly ? 'bg-amber-600 text-white' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+            }`}>
+            ⚠ {t('medical.needsVerification', 'Needs Verification')}
+          </button>
         </div>
-        {members.length > 0 && (
-          <select value={memberFilter} onChange={e => setMemberFilter(e.target.value)}
-            className="text-xs bg-slate-700 border border-slate-600 rounded-lg px-3 py-1.5 text-slate-200">
-            <option value="">{t('lifestyle.allMembers')}</option>
-            {members.map(m => <option key={m.id} value={m.id}>{m.first_name} {m.last_name}</option>)}
-          </select>
-        )}
+        <div className="flex items-center gap-2">
+          {members.length > 0 && (
+            <select value={memberFilter} onChange={e => setMemberFilter(e.target.value)}
+              className="text-xs bg-slate-700 border border-slate-600 rounded-lg px-3 py-1.5 text-slate-200">
+              <option value="">{t('lifestyle.allMembers')}</option>
+              {members.map(m => <option key={m.id} value={m.id}>{m.first_name} {m.last_name}</option>)}
+            </select>
+          )}
+          <button onClick={() => setShowAdd(true)}
+            className="text-sm px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg font-medium">
+            {t('medical.addRecordShort', '+ Add Record')}
+          </button>
+        </div>
       </div>
 
       {isLoading ? (
@@ -1129,9 +1605,12 @@ function MedicalRecordsTab() {
                 <span className="text-xs px-2 py-0.5 rounded bg-slate-700 text-slate-200">
                   {RECORD_TYPE_ICONS[r.record_type]} {t(`medical.recordTypes.${r.record_type}`, RECORD_TYPE_LABELS[r.record_type])}
                 </span>
-                <span className={`text-xs px-2 py-0.5 rounded ${RECORD_STATUS_COLORS[r.status]}`}>
-                  {t(`medical.status.${r.status}`, r.status)}
-                </span>
+                <div className="flex items-center gap-1">
+                  {r.needs_verification && <span className="text-xs px-2 py-0.5 rounded bg-amber-900 text-amber-200">⚠</span>}
+                  <span className={`text-xs px-2 py-0.5 rounded ${RECORD_STATUS_COLORS[r.status]}`}>
+                    {t(`medical.status.${r.status}`, r.status)}
+                  </span>
+                </div>
               </div>
               <div className="font-semibold">{r.title}</div>
               <div className="text-xs text-slate-400 mt-0.5">
@@ -1146,11 +1625,106 @@ function MedicalRecordsTab() {
       {selected && (
         <MedicalRecordDetail record={selected} onClose={() => setSelected(null)} onChanged={refresh} />
       )}
+
+      {showAdd && (
+        <AddMedicalRecordModal onClose={() => setShowAdd(false)}
+          onSaved={() => { setShowAdd(false); refresh() }} />
+      )}
     </div>
   )
 }
 
 // ── Tracker Tab ────────────────────────────────────────────────────────────────
+
+// Builds a printable trend summary of biometric readings — same rationale and layout
+// conventions as buildProfilePrintHtml (client-side, patient header, black-on-white).
+function buildBiometricsPrintHtml(
+  member: FamilyMember,
+  metricOrder: string[],
+  groupedByMetric: Record<string, TrackerEntry[]>,
+  metricLabel: (m: MetricType) => string,
+): string {
+  const patientName = escapeHtml(`${member.first_name} ${member.last_name}`)
+  const dobLine = member.date_of_birth
+    ? `${fmtDate(member.date_of_birth)} (age ${ageFromDob(member.date_of_birth)})`
+    : 'Not on file'
+  const generatedOn = new Date().toLocaleDateString('en-TT', { day: '2-digit', month: 'long', year: 'numeric' })
+
+  const sections = metricOrder.map(metricKey => {
+    const history = groupedByMetric[metricKey]
+    const values = history.map(h => Number(h.value)).filter(v => !Number.isNaN(v))
+    const min = values.length ? Math.min(...values) : null
+    const max = values.length ? Math.max(...values) : null
+    const rangeLine = min !== null && max !== null && min !== max
+      ? ` — Range: ${min}–${max} ${escapeHtml(history[0].unit)}` : ''
+    const rows = history.map((e, i) => {
+      const isLatest = i === history.length - 1
+      return `<tr class="${isLatest ? 'latest' : ''}">
+        <td>${fmtDate(e.entry_date)}${isLatest ? ' <span class="tag">latest</span>' : ''}</td>
+        <td><strong>${escapeHtml(String(e.value))}</strong> ${escapeHtml(e.unit)}</td>
+        <td>${escapeHtml(e.notes || '')}</td>
+      </tr>`
+    }).join('')
+    return `<div class="metric-block">
+      <h2>${escapeHtml(metricLabel(metricKey as MetricType))} <span class="count">(${history.length} reading${history.length === 1 ? '' : 's'})${rangeLine}</span></h2>
+      <table><thead><tr><th>Date</th><th>Value</th><th>Notes</th></tr></thead><tbody>${rows}</tbody></table>
+    </div>`
+  }).join('')
+
+  return `<!doctype html>
+<html><head><meta charset="utf-8"><title>Biometrics Summary — ${patientName}</title>
+<style>
+  @page { margin: 18mm 16mm; }
+  * { box-sizing: border-box; }
+  body { font-family: Georgia, 'Times New Roman', serif; color: #1a1a1a; margin: 0; padding: 24px; font-size: 13px; line-height: 1.5; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  h2 { font-size: 13px; margin: 0 0 6px; padding-bottom: 4px; border-bottom: 1.5px solid #1a1a1a; text-transform: uppercase; letter-spacing: 0.03em; }
+  h2 .count { text-transform: none; font-weight: normal; color: #666; letter-spacing: normal; font-size: 11px; }
+  .subtitle { color: #555; font-size: 12px; margin-bottom: 18px; }
+  .patient-box { display: flex; justify-content: space-between; border: 1px solid #999; border-radius: 6px; padding: 12px 16px; margin-bottom: 20px; }
+  .patient-box .field { font-size: 12px; }
+  .patient-box .field .label { color: #666; display: block; font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; }
+  .metric-block { margin-bottom: 22px; break-inside: avoid; }
+  table { width: 100%; border-collapse: collapse; }
+  td, th { padding: 4px 8px 4px 0; text-align: left; border-bottom: 1px solid #eee; }
+  th { font-size: 10px; text-transform: uppercase; color: #666; border-bottom: 1px solid #ccc; }
+  tr.latest { background: #f0f6ff; }
+  .tag { font-size: 9px; color: #2563eb; text-transform: uppercase; }
+  .footer { margin-top: 30px; padding-top: 10px; border-top: 1px solid #ccc; font-size: 10px; color: #777; }
+  @media print { .no-print { display: none; } }
+</style></head>
+<body>
+  <div class="no-print" style="text-align:right; margin-bottom: 12px;">
+    <button onclick="window.print()" style="padding:8px 16px; font-size:13px; cursor:pointer;">Print</button>
+  </div>
+
+  <h1>Biometrics Summary</h1>
+  <div class="subtitle">Prepared for review by a treating medical practitioner</div>
+
+  <div class="patient-box">
+    <div class="field"><span class="label">Patient</span>${patientName}</div>
+    <div class="field"><span class="label">Date of Birth</span>${dobLine}</div>
+    <div class="field"><span class="label">Generated</span>${generatedOn}</div>
+  </div>
+
+  ${sections || '<p style="color:#888;font-style:italic;">No biometric readings on file.</p>'}
+
+  <div class="footer">Generated by JAG Holdings — Medical Records module. Please verify all details with the patient/family before relying on this summary clinically.</div>
+</body></html>`
+}
+
+function printBiometrics(
+  member: FamilyMember,
+  metricOrder: string[],
+  groupedByMetric: Record<string, TrackerEntry[]>,
+  metricLabel: (m: MetricType) => string,
+) {
+  const w = window.open('', '_blank')
+  if (!w) return
+  w.document.open()
+  w.document.write(buildBiometricsPrintHtml(member, metricOrder, groupedByMetric, metricLabel))
+  w.document.close()
+}
 
 function TrackerTab() {
   const { t } = useTranslation()
@@ -1172,15 +1746,24 @@ function TrackerTab() {
     }),
   })
 
-  // Group entries by date for display
-  const grouped = entries.reduce<Record<string, TrackerEntry[]>>((acc, e) => {
-    acc[e.entry_date] = [...(acc[e.entry_date] ?? []), e]
+  // Group entries by metric type — a chronological history per test, not mixed by date,
+  // so a trend (e.g. PSA over 15 years) reads as one table instead of scattered rows.
+  const groupedByMetric = entries.reduce<Record<string, TrackerEntry[]>>((acc, e) => {
+    acc[e.metric_type] = [...(acc[e.metric_type] ?? []), e]
     return acc
   }, {})
+  for (const key of Object.keys(groupedByMetric)) {
+    groupedByMetric[key].sort((a, b) => a.entry_date.localeCompare(b.entry_date))
+  }
+  const metricOrder = Object.keys(groupedByMetric).sort((a, b) =>
+    groupedByMetric[b][groupedByMetric[b].length - 1].entry_date.localeCompare(
+      groupedByMetric[a][groupedByMetric[a].length - 1].entry_date)
+  )
 
-  // Latest value per metric for summary
+  // Latest value per metric for summary. API returns entries sorted entry_date DESC,
+  // so the first occurrence of each metric_type in iteration order is already the latest.
   const latestByMetric: Partial<Record<MetricType, TrackerEntry>> = {}
-  for (const e of [...entries].reverse()) {
+  for (const e of entries) {
     if (!latestByMetric[e.metric_type]) latestByMetric[e.metric_type] = e
   }
 
@@ -1233,6 +1816,16 @@ function TrackerTab() {
             <input type="date" value={toDate} onChange={e => setToDate(e.target.value)}
               className="bg-slate-700 border border-slate-600 rounded px-2 py-1.5 text-sm" />
           </div>
+          <button
+            onClick={() => {
+              const member = members.find(m => m.id === memberFilter)
+              if (member) printBiometrics(member, metricOrder, groupedByMetric, (m) => t(`lifestyle.metricTypes.${m}`, METRIC_LABELS[m]))
+            }}
+            disabled={!memberFilter || entries.length === 0}
+            title={!memberFilter ? t('medical.selectMemberToPrint', 'Select a family member above to print their biometrics') : ''}
+            className="text-xs px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg font-medium disabled:opacity-40 disabled:cursor-not-allowed">
+            🖨 {t('medical.printForDoctor', 'Print for Doctor')}
+          </button>
           <button onClick={() => setShowAdd(true)}
             className="text-sm px-4 py-2 bg-emerald-600 hover:bg-emerald-500 rounded-lg font-medium">
             {t('lifestyle.logMetricShort')}
@@ -1245,26 +1838,55 @@ function TrackerTab() {
       ) : entries.length === 0 ? (
         <p className="text-slate-500 text-sm italic">{t('lifestyle.noEntries')}</p>
       ) : (
-        <div className="space-y-4">
-          {Object.entries(grouped)
-            .sort(([a], [b]) => b.localeCompare(a))
-            .map(([date, dayEntries]) => (
-              <div key={date}>
-                <div className="text-xs font-semibold text-slate-400 mb-2">{fmtDate(date)}</div>
-                <div className="space-y-1">
-                  {dayEntries.map(e => (
-                    <div key={e.id} className="flex items-center gap-4 bg-slate-800 rounded-lg px-4 py-2.5 text-sm">
-                      <span className="text-base">{METRIC_ICONS[e.metric_type]}</span>
-                      <span className="text-slate-300 w-48 shrink-0">{t(`lifestyle.metricTypes.${e.metric_type}`, METRIC_LABELS[e.metric_type])}</span>
-                      <span className="font-semibold text-white">{e.value}</span>
-                      <span className="text-slate-400">{e.unit}</span>
-                      {e.source && <span className="text-xs text-slate-500 ml-auto">{t('lifestyle.viaSource', { source: e.source })}</span>}
-                      {e.notes && <span className="text-xs text-slate-500 italic">{e.notes}</span>}
-                    </div>
-                  ))}
+        <div className="space-y-5">
+          {metricOrder.map(metricKey => {
+            const m = metricKey as MetricType
+            const history = groupedByMetric[metricKey]
+            const values = history.map(h => Number(h.value)).filter(v => !Number.isNaN(v))
+            const min = values.length ? Math.min(...values) : null
+            const max = values.length ? Math.max(...values) : null
+            return (
+              <div key={metricKey} className="bg-slate-800 rounded-xl border border-slate-700 overflow-hidden">
+                <div className="flex items-center justify-between px-4 py-3 border-b border-slate-700 bg-slate-800/80">
+                  <div className="flex items-center gap-2">
+                    <span className="text-base">{METRIC_ICONS[m]}</span>
+                    <span className="font-semibold text-slate-100">{t(`lifestyle.metricTypes.${m}`, METRIC_LABELS[m])}</span>
+                    <span className="text-xs text-slate-500">({history.length})</span>
+                  </div>
+                  {min !== null && max !== null && min !== max && (
+                    <span className="text-xs text-slate-400">{t('medical.rangeLabel', 'Range')}: {min} – {max} {history[0].unit}</span>
+                  )}
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="text-xs text-slate-500 border-b border-slate-700/50">
+                        <th className="text-left px-4 py-1.5 font-medium">{t('lifestyle.dateLabel')}</th>
+                        <th className="text-left px-4 py-1.5 font-medium">{t('lifestyle.valueStar', 'Value').replace(' *', '')}</th>
+                        <th className="text-left px-4 py-1.5 font-medium">{t('common.notes')}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {history.map((e, i) => {
+                        const isLatest = i === history.length - 1
+                        return (
+                          <tr key={e.id} className={`border-b border-slate-700/30 last:border-0 ${isLatest ? 'bg-blue-900/20' : ''}`}>
+                            <td className="px-4 py-2 text-slate-300 whitespace-nowrap">
+                              {fmtDate(e.entry_date)}{isLatest && <span className="text-xs text-blue-400 ml-2">{t('medical.latest', 'latest')}</span>}
+                            </td>
+                            <td className="px-4 py-2 font-semibold text-white whitespace-nowrap">{e.value} <span className="text-slate-400 font-normal">{e.unit}</span></td>
+                            <td className="px-4 py-2 text-slate-400 text-xs">
+                              {e.notes || (e.source ? t('lifestyle.viaSource', { source: e.source }) : '')}
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
                 </div>
               </div>
-            ))}
+            )
+          })}
         </div>
       )}
 
@@ -1279,10 +1901,280 @@ function TrackerTab() {
   )
 }
 
+// ── Clinic Registrations Tab ─────────────────────────────────────────────────
+
+function daysUntil(dateStr: string): number {
+  const [y, m, d] = dateStr.slice(0, 10).split('-').map(Number)
+  const target = new Date(y, m - 1, d)
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  return Math.round((target.getTime() - today.getTime()) / 86400000)
+}
+
+function ClinicRegistrationsTab() {
+  const { t } = useTranslation()
+  const qc = useQueryClient()
+  const { members, nameOf } = useFamilyMembers()
+  const [memberFilter, setMemberFilter] = useState('')
+  const [showAdd, setShowAdd] = useState(false)
+  const [editing, setEditing] = useState<ClinicRegistration | null>(null)
+  const [syncingId, setSyncingId] = useState<string | null>(null)
+  const [error, setError] = useState('')
+
+  const { data: registrations = [], isLoading } = useQuery({
+    queryKey: ['clinic-registrations', memberFilter],
+    queryFn: () => clinicRegistrationsApi.list({ family_member_id: memberFilter || undefined }),
+  })
+
+  const refresh = () => qc.invalidateQueries({ queryKey: ['clinic-registrations'] })
+
+  const syncCalendar = async (reg: ClinicRegistration) => {
+    setSyncingId(reg.id); setError('')
+    try { await clinicRegistrationsApi.syncCalendar(reg.id); refresh() }
+    catch (e) { setError((e as Error).message) }
+    finally { setSyncingId(null) }
+  }
+
+  const remove = async (reg: ClinicRegistration) => {
+    if (!confirm(t('medical.confirmDeleteClinic', 'Remove this clinic registration?'))) return
+    try { await clinicRegistrationsApi.delete(reg.id); refresh() }
+    catch (e) { setError((e as Error).message) }
+  }
+
+  return (
+    <div className="space-y-6">
+      <p className="text-sm text-slate-400">
+        {t('medical.clinicsHint', 'Which clinics each family member is enrolled at, their registration number, and their next appointment — synced to Google Calendar when set.')}
+      </p>
+
+      <div className="flex flex-wrap justify-between items-end gap-4">
+        {members.length > 0 && (
+          <select value={memberFilter} onChange={e => setMemberFilter(e.target.value)}
+            className="text-xs bg-slate-700 border border-slate-600 rounded-lg px-3 py-1.5 text-slate-200">
+            <option value="">{t('lifestyle.allMembers')}</option>
+            {members.map(m => <option key={m.id} value={m.id}>{m.first_name} {m.last_name}</option>)}
+          </select>
+        )}
+        <button onClick={() => setShowAdd(true)}
+          className="text-sm px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg font-medium">
+          {t('medical.addClinic', '+ Add Clinic')}
+        </button>
+      </div>
+
+      {error && <p className="text-red-400 text-sm">{error}</p>}
+
+      {isLoading ? (
+        <p className="text-slate-500 text-sm">{t('common.loading')}</p>
+      ) : registrations.length === 0 ? (
+        <p className="text-slate-500 text-sm italic">{t('medical.noClinics', 'No clinic registrations logged yet.')}</p>
+      ) : (
+        <div className="overflow-x-auto rounded-lg border border-slate-700">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="bg-slate-800 text-xs text-slate-400">
+                <th className="text-left px-4 py-2 font-medium">{t('medical.patient', 'Patient')}</th>
+                <th className="text-left px-4 py-2 font-medium">{t('medical.facility', 'Facility')}</th>
+                <th className="text-left px-4 py-2 font-medium">{t('medical.regNumber', 'Reg #')}</th>
+                <th className="text-left px-4 py-2 font-medium">{t('medical.nextAppointment', 'Next Appointment')}</th>
+                <th className="text-right px-4 py-2 font-medium">{t('common.actions', 'Actions')}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {registrations.map(reg => {
+                const dleft = reg.next_appointment_date ? daysUntil(reg.next_appointment_date) : null
+                return (
+                  <tr key={reg.id} className="border-t border-slate-700/50">
+                    <td className="px-4 py-2.5 text-slate-200">{nameOf(reg.family_member_id) ?? '—'}</td>
+                    <td className="px-4 py-2.5">
+                      <div className="text-slate-100">{reg.facility_name}</div>
+                      {reg.department && <div className="text-xs text-slate-500">{reg.department}</div>}
+                    </td>
+                    <td className="px-4 py-2.5 text-slate-300 font-mono text-xs">{reg.registration_number || '—'}</td>
+                    <td className="px-4 py-2.5">
+                      {reg.next_appointment_date ? (
+                        <div>
+                          <span className={dleft !== null && dleft < 0 ? 'text-slate-500' : dleft !== null && dleft <= 7 ? 'text-amber-300 font-semibold' : 'text-slate-200'}>
+                            {fmtDate(reg.next_appointment_date)}
+                          </span>
+                          {dleft !== null && dleft >= 0 && (
+                            <span className="text-xs text-slate-500 ml-2">
+                              ({dleft === 0 ? t('medical.today', 'today') : t('medical.inDays', { count: dleft, defaultValue: 'in {{count}}d' })})
+                            </span>
+                          )}
+                          {reg.calendar_event_id && <span className="text-xs text-emerald-400 ml-2">📅 {t('medical.synced', 'synced')}</span>}
+                        </div>
+                      ) : (
+                        <span className="text-slate-500 italic text-xs">{t('medical.noneScheduled', 'None scheduled')}</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-2.5 text-right whitespace-nowrap">
+                      <button onClick={() => setEditing(reg)}
+                        className="text-xs px-2.5 py-1 bg-slate-700 hover:bg-slate-600 rounded mr-1.5">
+                        ✎ {t('common.edit', 'Edit')}
+                      </button>
+                      {reg.next_appointment_date && (
+                        <button onClick={() => syncCalendar(reg)} disabled={syncingId === reg.id}
+                          className="text-xs px-2.5 py-1 bg-emerald-700 hover:bg-emerald-600 rounded mr-1.5 disabled:opacity-50">
+                          📅 {syncingId === reg.id ? t('common.saving') : t('medical.syncCalendar', 'Sync to Calendar')}
+                        </button>
+                      )}
+                      <button onClick={() => remove(reg)}
+                        className="text-xs px-2.5 py-1 bg-red-900/50 hover:bg-red-900 text-red-300 rounded">
+                        {t('common.delete', 'Delete')}
+                      </button>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {(showAdd || editing) && (
+        <ClinicRegistrationModal
+          registration={editing}
+          onClose={() => { setShowAdd(false); setEditing(null) }}
+          onSaved={() => { setShowAdd(false); setEditing(null); refresh() }}
+        />
+      )}
+    </div>
+  )
+}
+
+function ClinicRegistrationModal({ registration, onClose, onSaved }: {
+  registration: ClinicRegistration | null; onClose: () => void; onSaved: () => void
+}) {
+  const { t } = useTranslation()
+  const { members } = useFamilyMembers()
+  const [form, setForm] = useState({
+    family_member_id: registration?.family_member_id ?? '',
+    facility_name: registration?.facility_name ?? '',
+    department: registration?.department ?? '',
+    registration_number: registration?.registration_number ?? '',
+    next_appointment_date: registration?.next_appointment_date?.slice(0, 10) ?? '',
+    notes: registration?.notes ?? '',
+  })
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  // Unfiltered (all family members) so facility/department suggestions are drawn
+  // from everything already on file, not just the currently-selected member.
+  const { data: allRegistrations = [] } = useQuery({
+    queryKey: ['clinic-registrations', 'all-for-suggestions'],
+    queryFn: () => clinicRegistrationsApi.list(),
+  })
+  const facilityOptions = Array.from(new Set(allRegistrations.map(r => r.facility_name))).sort()
+  const matchingReg = form.facility_name
+    ? allRegistrations.filter(r => r.facility_name === form.facility_name)
+    : allRegistrations
+  const departmentOptions = Array.from(new Set(matchingReg.map(r => r.department).filter((d): d is string => !!d))).sort()
+
+  const set = (k: keyof typeof form, v: string) => setForm(p => ({ ...p, [k]: v }))
+  const selectFacility = (v: string) => {
+    setForm(p => ({
+      ...p,
+      facility_name: v,
+      // Auto-fill the registration # already known for this facility (e.g. the
+      // shared hospital-wide number) unless the user already typed one in.
+      registration_number: p.registration_number || (allRegistrations.find(r => r.facility_name === v && r.registration_number)?.registration_number ?? p.registration_number),
+    }))
+  }
+
+  const submit = async () => {
+    if (!form.family_member_id) { setError(t('medical.memberRequired', 'Choose a family member.')); return }
+    if (!form.facility_name.trim()) { setError(t('medical.facilityRequired', 'Facility name is required.')); return }
+    setSaving(true); setError('')
+    try {
+      const payload = {
+        family_member_id: form.family_member_id,
+        facility_name: form.facility_name.trim(),
+        department: form.department || undefined,
+        registration_number: form.registration_number || undefined,
+        next_appointment_date: form.next_appointment_date || undefined,
+        notes: form.notes || undefined,
+      }
+      if (registration) await clinicRegistrationsApi.update(registration.id, payload)
+      else await clinicRegistrationsApi.create(payload)
+      onSaved()
+    } catch (e) { setError((e as Error).message); setSaving(false) }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+      <div className="bg-slate-800 rounded-xl w-full max-w-lg shadow-2xl">
+        <div className="flex justify-between items-center px-6 py-4 border-b border-slate-700">
+          <h2 className="text-lg font-semibold">{registration ? t('medical.editClinic', 'Edit Clinic Registration') : t('medical.addClinic', '+ Add Clinic')}</h2>
+          <button onClick={onClose} className="text-slate-400 hover:text-white text-xl">✕</button>
+        </div>
+        <div className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">{t('medical.selectMember', 'Family member')} *</label>
+            <select value={form.family_member_id} onChange={e => set('family_member_id', e.target.value)}
+              className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-sm">
+              <option value="">{t('medical.chooseMember', '— Choose —')}</option>
+              {members.map(m => <option key={m.id} value={m.id}>{m.first_name} {m.last_name}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">{t('medical.facility', 'Facility')} *</label>
+            <input value={form.facility_name} onChange={e => selectFacility(e.target.value)}
+              list="clinic-facility-options"
+              placeholder="e.g. General Hospital San Fernando"
+              className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-sm" />
+            <datalist id="clinic-facility-options">
+              {facilityOptions.map(f => <option key={f} value={f} />)}
+            </datalist>
+            {facilityOptions.length > 0 && (
+              <p className="text-xs text-slate-500 mt-1">{t('medical.facilityPickHint', 'Start typing to pick an existing facility, or enter a new one.')}</p>
+            )}
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">{t('medical.department', 'Department / Clinic')}</label>
+              <input value={form.department} onChange={e => set('department', e.target.value)}
+                list="clinic-department-options"
+                placeholder="e.g. Rheumatology OPC"
+                className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-sm" />
+              <datalist id="clinic-department-options">
+                {departmentOptions.map(d => <option key={d} value={d} />)}
+              </datalist>
+            </div>
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">{t('medical.regNumber', 'Registration #')}</label>
+              <input value={form.registration_number} onChange={e => set('registration_number', e.target.value)}
+                className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-sm" />
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">{t('medical.nextAppointment', 'Next Appointment')}</label>
+            <input type="date" value={form.next_appointment_date} onChange={e => set('next_appointment_date', e.target.value)}
+              className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-sm" />
+            <p className="text-xs text-slate-500 mt-1">{t('medical.syncAfterSaveHint', 'After saving, use "Sync to Calendar" on the list to push this to Google Calendar.')}</p>
+          </div>
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">{t('medical.notes', 'Notes')}</label>
+            <textarea value={form.notes} onChange={e => set('notes', e.target.value)} rows={3}
+              className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-sm resize-none" />
+          </div>
+          {error && <p className="text-red-400 text-sm">{error}</p>}
+        </div>
+        <div className="flex justify-end gap-3 px-6 pb-5">
+          <button onClick={onClose} className="px-4 py-2 text-sm rounded bg-slate-700 hover:bg-slate-600">{t('common.cancel')}</button>
+          <button onClick={submit} disabled={saving}
+            className="px-4 py-2 text-sm rounded bg-blue-600 hover:bg-blue-500 disabled:opacity-50">
+            {saving ? t('common.saving') : t('common.save', 'Save')}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 type Tab = 'loyalty' | 'medical'
-type MedicalSubTab = 'profile' | 'records' | 'biometrics'
+type MedicalSubTab = 'profile' | 'records' | 'biometrics' | 'clinics'
 
 export default function Lifestyle() {
   const { t } = useTranslation()
@@ -1322,6 +2214,7 @@ export default function Lifestyle() {
               ['profile', t('medical.subTabProfile', '🗂 Profile')],
               ['records', t('medical.subTabRecords', '📁 Records')],
               ['biometrics', t('medical.subTabBiometrics', '📈 Biometrics')],
+              ['clinics', t('medical.subTabClinics', '🏥 Clinics')],
             ] as [MedicalSubTab, string][]).map(([tb, label]) => (
               <button key={tb} onClick={() => setMedicalSubTab(tb)}
                 className={`px-3 py-1.5 rounded text-xs font-medium transition-colors whitespace-nowrap ${
@@ -1334,6 +2227,7 @@ export default function Lifestyle() {
           {medicalSubTab === 'profile' && <ProfileTab />}
           {medicalSubTab === 'records' && <MedicalRecordsTab />}
           {medicalSubTab === 'biometrics' && <TrackerTab />}
+          {medicalSubTab === 'clinics' && <ClinicRegistrationsTab />}
         </div>
       )}
     </div>

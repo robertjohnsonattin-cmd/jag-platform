@@ -16,19 +16,21 @@ import { logger } from '../../lib/logger';
 import { ok, err } from '../../lib/response';
 import { fitnessRouter } from './fitness';
 import { medicalRecordsRouter } from './medical-records';
+import { clinicRegistrationsRouter } from './clinic-registrations';
 
 export const lifestyleRouter = Router();
 lifestyleRouter.use(requireAuth());
 lifestyleRouter.use(brianPortalGate('LIFESTYLE'));
 lifestyleRouter.use('/fitness', fitnessRouter);
 lifestyleRouter.use('/medical-records', medicalRecordsRouter);
+lifestyleRouter.use('/clinic-registrations', clinicRegistrationsRouter);
 
 const UUIDParam = z.object({ id: z.string().uuid() });
 const ProgrammeParam = z.object({ programmeId: z.string().uuid() });
 
 const ProgTypeEnum = z.enum(['AIRLINE','HOTEL','CRUISE','CREDIT_CARD','RETAIL','DINING','OTHER']);
 const TxTypeEnum   = z.enum(['EARN','REDEEM','EXPIRE','TRANSFER_IN','TRANSFER_OUT','BONUS','REINSTATEMENT']);
-const MetricEnum   = z.enum(['WEIGHT_KG','STEPS','SLEEP_HOURS','CALORIES','EXERCISE_MINUTES','BLOOD_PRESSURE_SYSTOLIC','BLOOD_PRESSURE_DIASTOLIC','RESTING_HEART_RATE','CHOLESTEROL_TOTAL','CHOLESTEROL_LDL','CHOLESTEROL_HDL','TRIGLYCERIDES','BLOOD_GLUCOSE','OTHER']);
+const MetricEnum   = z.enum(['WEIGHT_KG','STEPS','SLEEP_HOURS','CALORIES','EXERCISE_MINUTES','BLOOD_PRESSURE_SYSTOLIC','BLOOD_PRESSURE_DIASTOLIC','RESTING_HEART_RATE','CHOLESTEROL_TOTAL','CHOLESTEROL_LDL','CHOLESTEROL_HDL','TRIGLYCERIDES','BLOOD_GLUCOSE','PSA','ESR','ACE_LEVEL','CREATININE','AST','ALT','WBC','HEMOGLOBIN','HBA1C','BUN','TSH','VITAMIN_B12','FREE_T4','RBC','HCT','MCV','MCH','MCHC','RDW','PLATELETS','MPV','NEUTROPHILS_PCT','LYMPHOCYTES_PCT','MONOCYTES_PCT','EOSINOPHILS_PCT','BASOPHILS_PCT','NEUTROPHILS_ABSOLUTE','LYMPHOCYTES_ABSOLUTE','MONOCYTES_ABSOLUTE','EOSINOPHILS_ABSOLUTE','BASOPHILS_ABSOLUTE','ALKALINE_PHOSPHATASE','SODIUM','POTASSIUM','CHLORIDE','TOTAL_PROTEIN','OTHER']);
 
 const CreateProgrammeSchema = z.object({
   programme_type:   ProgTypeEnum,

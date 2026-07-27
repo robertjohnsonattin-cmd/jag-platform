@@ -23,6 +23,7 @@ export interface MedicalRecord {
   source_file_name: string | null
   status: RecordStatus
   extracted_by: ExtractedBy
+  needs_verification: boolean
   reviewed_at: string | null
   last_modified_at: string
   created_at: string
@@ -40,16 +41,18 @@ export interface MedicalProfile {
   allergies: Allergy[]
   care_team: CareTeamMember[]
   summary_notes: string | null
+  blood_type: string | null
   last_synthesized_at: string | null
 }
 
 export const medicalRecordsApi = {
-  list: (params?: { family_member_id?: string; status?: RecordStatus; record_type?: RecordType; specialty?: string }) => {
+  list: (params?: { family_member_id?: string; status?: RecordStatus; record_type?: RecordType; specialty?: string; needs_verification?: boolean }) => {
     const q = new URLSearchParams()
     if (params?.family_member_id) q.set('family_member_id', params.family_member_id)
     if (params?.status) q.set('status', params.status)
     if (params?.record_type) q.set('record_type', params.record_type)
     if (params?.specialty) q.set('specialty', params.specialty)
+    if (params?.needs_verification) q.set('needs_verification', 'true')
     const qs = q.toString()
     return api.get<MedicalRecord[]>(`/lifestyle/medical-records${qs ? `?${qs}` : ''}`)
   },
@@ -83,6 +86,7 @@ export const medicalRecordsApi = {
     details: Record<string, unknown>
     source_file_name: string
     family_member_id: string
+    needs_verification: boolean
   }>) => api.patch<MedicalRecord>(`/lifestyle/medical-records/${id}`, data),
 
   approve: (id: string) => api.post<MedicalRecord>(`/lifestyle/medical-records/${id}/approve`, {}),
@@ -96,5 +100,6 @@ export const medicalRecordsApi = {
     allergies?: Allergy[]
     care_team?: CareTeamMember[]
     summary_notes?: string
+    blood_type?: string
   }) => api.put<MedicalProfile>(`/lifestyle/medical-records/profile/${familyMemberId}`, data),
 }
