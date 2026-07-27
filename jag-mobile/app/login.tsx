@@ -7,58 +7,36 @@ import {
   StyleSheet,
   Alert,
 } from 'react-native'
-import { useRouter } from 'expo-router'
-import * as SecureStore from 'expo-secure-store'
-import * as LocalAuthentication from 'expo-local-authentication'
-import { login, getValidAccessToken } from '../src/auth/keycloak'
+import { useRouter, useRootNavigationState } from 'expo-router'
+import { getValidAccessToken, login } from '../src/auth/keycloak'
 
+// Fingerprint verification already happened in _layout.tsx's app-level lock
+// screen before this route is ever reachable — a second, independent biometric
+// prompt here was redundant and, worse, was racing that lock screen's own
+// re-render/navigation cycle (repeated fingerprint prompts, and a navigation
+// call landing before the root navigator had attached — surfaced as a
+// misleading "Biometric error" alert). This screen now only does a silent
+// token check (no fingerprint) and falls back to the Keycloak button.
 export default function LoginScreen() {
   const router = useRouter()
-  const [loading, setLoading]       = useState(false)
-  const [bioAvailable, setBioAvailable] = useState(false)
-  const [bioLoading, setBioLoading] = useState(false)
+  const rootNavigationState = useRootNavigationState()
+  const [loading, setLoading] = useState(false)
+  const [wantsExpenseForm, setWantsExpenseForm] = useState(false)
 
   useEffect(() => {
-    async function checkBiometric() {
-      try {
-        const refreshToken = await SecureStore.getItemAsync('jag_refresh_token')
-        if (!refreshToken) return
-        const [hasHw, enrolled] = await Promise.all([
-          LocalAuthentication.hasHardwareAsync(),
-          LocalAuthentication.isEnrolledAsync(),
-        ])
-        if (hasHw && enrolled) {
-          setBioAvailable(true)
-          promptFingerprint()
-        }
-      } catch {}
-    }
-    checkBiometric()
+    getValidAccessToken().then(token => {
+      if (token) setWantsExpenseForm(true)
+    }).catch(() => {})
   }, [])
 
-  async function promptFingerprint() {
-    setBioLoading(true)
-    try {
-      const result = await LocalAuthentication.authenticateAsync({
-        promptMessage: 'Verify identity to access JAG',
-        cancelLabel: 'Cancel',
-        disableDeviceFallback: false,
-      })
-      if (result.success) {
-        const token = await getValidAccessToken()
-        if (token) {
-          router.replace('/expense-form')
-        } else {
-          Alert.alert('Session expired', 'Please sign in with Keycloak to continue.')
-        }
-      }
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Biometric failed'
-      Alert.alert('Biometric error', msg)
-    } finally {
-      setBioLoading(false)
+  // useRootNavigationState().key is undefined until the root navigator has
+  // actually attached — waiting on it (rather than guessing a delay) avoids
+  // "Attempted to navigate before mounting the Root Layout component".
+  useEffect(() => {
+    if (wantsExpenseForm && rootNavigationState?.key) {
+      router.replace('/expense-form')
     }
-  }
+  }, [wantsExpenseForm, rootNavigationState?.key])
 
   async function handleLogin() {
     setLoading(true)
@@ -73,40 +51,21 @@ export default function LoginScreen() {
     }
   }
 
-  const busy = loading || bioLoading
-
   return (
     <View style={styles.container}>
       <Text style={styles.logo}>JAG</Text>
       <Text style={styles.subtitle}>Integrated Business Platform</Text>
 
-      {bioAvailable && (
-        <TouchableOpacity
-          style={[styles.button, styles.bioButton, busy && styles.buttonDisabled]}
-          onPress={promptFingerprint}
-          disabled={busy}
-          activeOpacity={0.8}
-        >
-          {bioLoading ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <Text style={styles.buttonText}>Use Fingerprint</Text>
-          )}
-        </TouchableOpacity>
-      )}
-
       <TouchableOpacity
-        style={[styles.button, bioAvailable && styles.kcButtonSecondary, busy && styles.buttonDisabled]}
+        style={[styles.button, loading && styles.buttonDisabled]}
         onPress={handleLogin}
-        disabled={busy}
+        disabled={loading}
         activeOpacity={0.8}
       >
         {loading ? (
-          <ActivityIndicator color={bioAvailable ? '#94a3b8' : '#fff'} />
+          <ActivityIndicator color="#fff" />
         ) : (
-          <Text style={[styles.buttonText, bioAvailable && styles.kcButtonSecondaryText]}>
-            Sign in with Keycloak
-          </Text>
+          <Text style={styles.buttonText}>Sign in with Keycloak</Text>
         )}
       </TouchableOpacity>
     </View>
@@ -142,17 +101,6 @@ const styles = StyleSheet.create({
     minWidth: 240,
     alignItems: 'center',
     marginBottom: 12,
-  },
-  bioButton: {
-    backgroundColor: '#059669',
-  },
-  kcButtonSecondary: {
-    backgroundColor: 'transparent',
-    borderWidth: 1,
-    borderColor: '#334155',
-  },
-  kcButtonSecondaryText: {
-    color: '#64748b',
   },
   buttonDisabled: {
     opacity: 0.6,

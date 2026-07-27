@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native'
-import { Stack, useRouter, useSegments } from 'expo-router'
+import { Stack, useRouter, useSegments, useRootNavigationState } from 'expo-router'
 import * as SecureStore from 'expo-secure-store'
 import * as LocalAuthentication from 'expo-local-authentication'
 import { isAuthenticated } from '../src/auth/keycloak'
@@ -13,6 +13,7 @@ notifee.onBackgroundEvent(async () => {})
 export default function RootLayout() {
   const router = useRouter()
   const segments = useSegments()
+  const rootNavigationState = useRootNavigationState()
   const [authed, setAuthed]     = useState(false)
   const [checking, setChecking] = useState(true)
   const [locked, setLocked]     = useState(true)   // biometric gate
@@ -39,6 +40,18 @@ export default function RootLayout() {
 
   // Route guard
   useEffect(() => {
+    // Hooks always run regardless of which JSX branch this component returns —
+    // while the lock screen below is showing, <Stack /> (the Root Layout's own
+    // navigator) has never actually mounted yet, and even just after it mounts
+    // the navigator needs a moment to actually attach. rootNavigationState.key
+    // is expo-router's own readiness signal (undefined until attached) — more
+    // reliable than inferring readiness from locked/bioReady alone. Calling
+    // router.replace() before this is ready throws "Attempted to navigate
+    // before mounting the Root Layout component", which login.tsx's biometric
+    // flow was catching and mislabeling as a "Biometric error" (the fingerprint
+    // auth itself was always fine).
+    if (locked && bioReady) return
+    if (!rootNavigationState?.key) return
     if (checking) return
     const inAuthGroup = segments[0] === 'login'
     if (!authed && !inAuthGroup) {
@@ -47,13 +60,20 @@ export default function RootLayout() {
       router.replace('/expense-form')
       showQuickEntryNotification()
     }
-  }, [checking, authed, segments])
+  }, [checking, authed, segments, locked, bioReady, rootNavigationState?.key])
 
   // Health Connect sync — fire once per cold start once we know the user is
   // authenticated. Non-blocking, silently no-ops if Health Connect / perms aren't
-  // available (see syncHealthConnect's own try/catch).
+  // available (see syncHealthConnect's own try/catch). Delayed because Android
+  // only allows one permission-request dialog in flight at a time — the notifee
+  // notification-permission request (fired from the refresh-token effect above,
+  // near-simultaneously on cold start) would otherwise win the race and silently
+  // starve this one (logged as "Can request only one set of permissions at a
+  // time", no crash, no dialog ever shown for Health Connect).
   useEffect(() => {
-    if (authed) syncHealthConnect()
+    if (!authed) return
+    const timer = setTimeout(() => { syncHealthConnect() }, 4000)
+    return () => clearTimeout(timer)
   }, [authed])
 
   // Handle app opened via notification action

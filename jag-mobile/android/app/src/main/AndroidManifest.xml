@@ -42,6 +42,23 @@
         <action android:name="androidx.health.ACTION_SHOW_PERMISSIONS_RATIONALE"/>
       </intent-filter>
     </activity>
+    <!-- Health Connect privacy-policy / permission-rationale entry point.
+         REQUIRED on Android 14+ (this device is Android 16 / SDK 36): without
+         this alias, Health Connect launches its PermissionsActivity and then
+         immediately finishes it without ever showing the dialog, and the
+         request returns "denied" with no error - exactly the silent failure
+         seen here. The plain androidx.health.ACTION_SHOW_PERMISSIONS_RATIONALE
+         filter on MainActivity above only covers Android 13 and below. -->
+    <activity-alias
+      android:name="ViewPermissionUsageActivity"
+      android:exported="true"
+      android:targetActivity=".MainActivity"
+      android:permission="android.permission.START_VIEW_PERMISSION_USAGE">
+      <intent-filter>
+        <action android:name="android.intent.action.VIEW_PERMISSION_USAGE"/>
+        <category android:name="android.intent.category.HEALTH_PERMISSIONS"/>
+      </intent-filter>
+    </activity-alias>
     <receiver
       android:name=".BootReceiver"
       android:exported="false"
