@@ -58,6 +58,7 @@ const CreateTransactionSchema = z.object({
 
 const CreateTrackerSchema = z.object({
   entry_date:       z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  entry_time:       z.string().regex(/^\d{2}:\d{2}(:\d{2})?$/).optional(),
   metric_type:      MetricEnum,
   value:            z.number(),
   unit:             z.string().min(1).max(20),
@@ -253,7 +254,7 @@ lifestyleRouter.get('/tracker', async (req: Request, res: Response, next: NextFu
         if (toDate)       conditions.push(`entry_date <= ${push(toDate)}`);
         const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
         return c.query(
-          `SELECT id, entry_date, metric_type, value, unit, family_member_id, source, notes, created_at
+          `SELECT id, entry_date, entry_time, metric_type, value, unit, family_member_id, source, notes, created_at
            FROM   fam_lifestyle_tracker ${where}
            ORDER  BY entry_date DESC, metric_type`,
           params,
@@ -277,9 +278,9 @@ lifestyleRouter.post('/tracker', async (req: Request, res: Response, next: NextF
       const rec = await withOwnerRLS(client, req.rlsCtx, (c) =>
         c.query(
           `INSERT INTO fam_lifestyle_tracker
-             (owner_id, entry_date, metric_type, value, unit, family_member_id, notes, source)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
-          [ownerId, body.entry_date, body.metric_type, body.value, body.unit,
+             (owner_id, entry_date, entry_time, metric_type, value, unit, family_member_id, notes, source)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+          [ownerId, body.entry_date, body.entry_time ?? null, body.metric_type, body.value, body.unit,
            body.family_member_id ?? null, body.notes ?? null, body.source ?? null],
         ).then(r => r.rows[0]),
       );

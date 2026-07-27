@@ -41,6 +41,7 @@ export interface LoyaltyTransaction {
 export interface TrackerEntry {
   id: string
   entry_date: string
+  entry_time: string | null
   metric_type: MetricType
   value: number
   unit: string
@@ -108,6 +109,7 @@ export const lifestyleApi = {
 
   addTrackerEntry: (data: {
     entry_date: string
+    entry_time?: string
     metric_type: MetricType
     value: number
     unit: string

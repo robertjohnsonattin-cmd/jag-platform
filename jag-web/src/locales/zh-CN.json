@@ -2204,6 +2204,7 @@
     "saveChanges": "保存更改",
     "recordTxBtn": "记录交易",
     "dateLabel": "日期",
+    "timeLabel": "记录时间",
     "points": "积分",
     "miles": "里程",
     "descriptionStar": "描述 *",

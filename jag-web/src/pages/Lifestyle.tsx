@@ -133,11 +133,23 @@ const RECORD_STATUS_COLORS: Record<RecordStatus, string> = {
   REJECTED: 'bg-red-900 text-red-300',
 }
 
+const VITALS_METRICS: MetricType[] = ['BLOOD_PRESSURE_SYSTOLIC', 'BLOOD_PRESSURE_DIASTOLIC', 'RESTING_HEART_RATE']
+const isVitalsMetric = (m: MetricType) => VITALS_METRICS.includes(m)
+
 const today = () => new Date().toISOString().split('T')[0]
+const nowHHMM = () => { const d = new Date(); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}` }
 // entry_date/record_date are PG DATE columns — they can arrive as full ISO datetime
 // strings (e.g. "2024-03-27T00:00:00.000Z") rather than plain YYYY-MM-DD. Slice to the
 // date portion first so appending 'T00:00:00' below doesn't produce an invalid string.
 const fmtDate = (d: string) => new Date(d.slice(0, 10) + 'T00:00:00').toLocaleDateString('en-TT', { day: '2-digit', month: 'short', year: 'numeric' })
+// entry_time is a PG TIME value ("14:30:00") — parse it directly rather than through Date() to avoid any timezone shifting.
+const fmtTime = (t: string | null | undefined) => {
+  if (!t) return ''
+  const [h, m] = t.split(':').map(Number)
+  const period = h >= 12 ? 'PM' : 'AM'
+  const h12 = h % 12 === 0 ? 12 : h % 12
+  return `${h12}:${String(m).padStart(2, '0')} ${period}`
+}
 const fmtNum = (n: number) => n.toLocaleString()
 
 // ── Add Programme Modal ────────────────────────────────────────────────────────
@@ -718,6 +730,7 @@ function AddTrackerModal({ onClose, onSaved }: { onClose: () => void; onSaved: (
   const { members } = useFamilyMembers()
   const [form, setForm] = useState({
     entry_date: today(),
+    entry_time: nowHHMM(),
     metric_type: 'WEIGHT_KG' as MetricType,
     value: '',
     unit: METRIC_DEFAULT_UNIT['WEIGHT_KG'],
@@ -725,28 +738,55 @@ function AddTrackerModal({ onClose, onSaved }: { onClose: () => void; onSaved: (
     source: '',
     notes: '',
   })
+  // Systolic/diastolic BP and resting HR are always taken as one reading — recorded together
+  // as three tracker rows sharing the same date/source/member/notes, not three separate entries.
+  const [vitals, setVitals] = useState({ systolic: '', diastolic: '', restingHr: '' })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
   const set = (k: string, v: string) => setForm(p => ({ ...p, [k]: v }))
+  const setVital = (k: string, v: string) => setVitals(p => ({ ...p, [k]: v }))
 
   const handleMetricChange = (m: MetricType) => {
     setForm(p => ({ ...p, metric_type: m, unit: METRIC_DEFAULT_UNIT[m] }))
   }
 
   const submit = async () => {
-    if (!form.value) { setError('Value is required.'); return }
     setSaving(true); setError('')
     try {
-      await lifestyleApi.addTrackerEntry({
-        entry_date: form.entry_date,
-        metric_type: form.metric_type,
-        value: Number(form.value),
-        unit: form.unit,
-        family_member_id: form.family_member_id || undefined,
-        source: form.source || undefined,
-        notes: form.notes || undefined,
-      })
+      if (isVitalsMetric(form.metric_type)) {
+        const vitalsRows: Array<{ metric_type: MetricType; value: string }> = [
+          { metric_type: 'BLOOD_PRESSURE_SYSTOLIC', value: vitals.systolic },
+          { metric_type: 'BLOOD_PRESSURE_DIASTOLIC', value: vitals.diastolic },
+          { metric_type: 'RESTING_HEART_RATE', value: vitals.restingHr },
+        ]
+        const entries = vitalsRows.filter(e => e.value !== '')
+        if (entries.length === 0) { setError('Enter at least one value.'); setSaving(false); return }
+        for (const e of entries) {
+          await lifestyleApi.addTrackerEntry({
+            entry_date: form.entry_date,
+            entry_time: form.entry_time || undefined,
+            metric_type: e.metric_type,
+            value: Number(e.value),
+            unit: METRIC_DEFAULT_UNIT[e.metric_type],
+            family_member_id: form.family_member_id || undefined,
+            source: form.source || undefined,
+            notes: form.notes || undefined,
+          })
+        }
+      } else {
+        if (!form.value) { setError('Value is required.'); setSaving(false); return }
+        await lifestyleApi.addTrackerEntry({
+          entry_date: form.entry_date,
+          entry_time: form.entry_time || undefined,
+          metric_type: form.metric_type,
+          value: Number(form.value),
+          unit: form.unit,
+          family_member_id: form.family_member_id || undefined,
+          source: form.source || undefined,
+          notes: form.notes || undefined,
+        })
+      }
       onSaved()
     } catch (e) { setError((e as Error).message); setSaving(false) }
   }
@@ -759,10 +799,15 @@ function AddTrackerModal({ onClose, onSaved }: { onClose: () => void; onSaved: (
           <button onClick={onClose} className="text-slate-400 hover:text-white text-xl">✕</button>
         </div>
         <div className="p-6 space-y-4">
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-3 gap-4">
             <div>
               <label className="block text-xs text-slate-400 mb-1">{t('lifestyle.dateLabel')}</label>
               <input type="date" value={form.entry_date} onChange={e => set('entry_date', e.target.value)}
+                className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-sm" />
+            </div>
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">{t('lifestyle.timeLabel', 'Time taken')}</label>
+              <input type="time" value={form.entry_time} onChange={e => set('entry_time', e.target.value)}
                 className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-sm" />
             </div>
             <div>
@@ -775,18 +820,38 @@ function AddTrackerModal({ onClose, onSaved }: { onClose: () => void; onSaved: (
               </select>
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs text-slate-400 mb-1">{t('lifestyle.valueStar')}</label>
-              <input type="number" step="any" value={form.value} onChange={e => set('value', e.target.value)}
-                className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-sm" />
+          {isVitalsMetric(form.metric_type) ? (
+            <div className="grid grid-cols-3 gap-4">
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">❤️ {t('lifestyle.metricTypes.BLOOD_PRESSURE_SYSTOLIC', 'BP Systolic')} (mmHg)</label>
+                <input type="number" step="any" value={vitals.systolic} onChange={e => setVital('systolic', e.target.value)}
+                  className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-sm" />
+              </div>
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">❤️ {t('lifestyle.metricTypes.BLOOD_PRESSURE_DIASTOLIC', 'BP Diastolic')} (mmHg)</label>
+                <input type="number" step="any" value={vitals.diastolic} onChange={e => setVital('diastolic', e.target.value)}
+                  className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-sm" />
+              </div>
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">💓 {t('lifestyle.metricTypes.RESTING_HEART_RATE', 'Resting HR')} (bpm)</label>
+                <input type="number" step="any" value={vitals.restingHr} onChange={e => setVital('restingHr', e.target.value)}
+                  className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-sm" />
+              </div>
             </div>
-            <div>
-              <label className="block text-xs text-slate-400 mb-1">{t('lifestyle.unitLabel')}</label>
-              <input value={form.unit} onChange={e => set('unit', e.target.value)}
-                className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-sm" />
+          ) : (
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">{t('lifestyle.valueStar')}</label>
+                <input type="number" step="any" value={form.value} onChange={e => set('value', e.target.value)}
+                  className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-sm" />
+              </div>
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">{t('lifestyle.unitLabel')}</label>
+                <input value={form.unit} onChange={e => set('unit', e.target.value)}
+                  className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-sm" />
+              </div>
             </div>
-          </div>
+          )}
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-xs text-slate-400 mb-1">{t('lifestyle.sourceLabel')}</label>
@@ -1660,7 +1725,7 @@ function buildBiometricsPrintHtml(
     const rows = history.map((e, i) => {
       const isLatest = i === history.length - 1
       return `<tr class="${isLatest ? 'latest' : ''}">
-        <td>${fmtDate(e.entry_date)}${isLatest ? ' <span class="tag">latest</span>' : ''}</td>
+        <td>${fmtDate(e.entry_date)}${e.entry_time ? ` ${fmtTime(e.entry_time)}` : ''}${isLatest ? ' <span class="tag">latest</span>' : ''}</td>
         <td><strong>${escapeHtml(String(e.value))}</strong> ${escapeHtml(e.unit)}</td>
         <td>${escapeHtml(e.notes || '')}</td>
       </tr>`
@@ -1779,7 +1844,7 @@ function TrackerTab() {
                 <div className="text-lg">{METRIC_ICONS[m]}</div>
                 <div className="text-lg font-bold text-slate-100 mt-1">{e.value} <span className="text-sm text-slate-400">{e.unit}</span></div>
                 <div className="text-xs text-slate-400 mt-0.5">{t(`lifestyle.metricTypes.${m}`, METRIC_LABELS[m])}</div>
-                <div className="text-xs text-slate-500">{fmtDate(e.entry_date)}</div>
+                <div className="text-xs text-slate-500">{fmtDate(e.entry_date)}{e.entry_time ? ` · ${fmtTime(e.entry_time)}` : ''}</div>
               </div>
             )
           })}
@@ -1872,7 +1937,7 @@ function TrackerTab() {
                         return (
                           <tr key={e.id} className={`border-b border-slate-700/30 last:border-0 ${isLatest ? 'bg-blue-900/20' : ''}`}>
                             <td className="px-4 py-2 text-slate-300 whitespace-nowrap">
-                              {fmtDate(e.entry_date)}{isLatest && <span className="text-xs text-blue-400 ml-2">{t('medical.latest', 'latest')}</span>}
+                              {fmtDate(e.entry_date)}{e.entry_time && <span className="text-slate-500"> · {fmtTime(e.entry_time)}</span>}{isLatest && <span className="text-xs text-blue-400 ml-2">{t('medical.latest', 'latest')}</span>}
                             </td>
                             <td className="px-4 py-2 font-semibold text-white whitespace-nowrap">{e.value} <span className="text-slate-400 font-normal">{e.unit}</span></td>
                             <td className="px-4 py-2 text-slate-400 text-xs">

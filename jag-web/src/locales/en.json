@@ -2205,6 +2205,7 @@
     "saveChanges": "Save Changes",
     "recordTxBtn": "Record Transaction",
     "dateLabel": "Date",
+    "timeLabel": "Time taken",
     "points": "Points",
     "miles": "Miles",
     "descriptionStar": "Description *",
