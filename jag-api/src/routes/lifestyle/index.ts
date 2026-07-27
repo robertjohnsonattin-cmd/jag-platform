@@ -43,8 +43,12 @@ const HealthSyncEntrySchema = z.object({
   value:       z.number(),
   unit:        z.string().min(1).max(20),
 }).strict();
+// Cap sized with headroom: the mobile client backfills 7 days x 6 metric types
+// (42 entries). 50 would fit today but would silently 422 the whole sync as soon
+// as a metric type is added (e.g. heart rate / SpO2 if a Galaxy Watch is paired),
+// which would look like "sync just stopped working".
 const HealthSyncSchema = z.object({
-  entries: z.array(HealthSyncEntrySchema).min(1).max(50),
+  entries: z.array(HealthSyncEntrySchema).min(1).max(200),
 }).strict();
 
 const CreateProgrammeSchema = z.object({

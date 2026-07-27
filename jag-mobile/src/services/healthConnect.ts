@@ -109,8 +109,12 @@ async function summarizeDay(dateStr: string, start: Date, end: Date): Promise<He
   return entries
 }
 
-// Syncs today + the previous 2 days (upsert — safe to re-run), so a missed app-open
-// or an in-progress day's running total still gets backfilled next time it's opened.
+// Syncs today + the previous 6 days (upsert — safe to re-run), so a week of not
+// opening the app still self-heals, and an in-progress day's running total gets
+// refreshed on each open. Keep BACKFILL_DAYS * (number of metric types) under the
+// server's per-request entry cap in routes/lifestyle/index.ts (HealthSyncSchema).
+const BACKFILL_DAYS = 7
+
 export async function syncHealthConnect(): Promise<{ synced: number } | null> {
   try {
     const ready = await ensureReady()
@@ -119,7 +123,7 @@ export async function syncHealthConnect(): Promise<{ synced: number } | null> {
     if (!hasPerms) return null
 
     const entries: HealthSyncEntry[] = []
-    for (let daysAgo = 0; daysAgo < 3; daysAgo++) {
+    for (let daysAgo = 0; daysAgo < BACKFILL_DAYS; daysAgo++) {
       const { start, end, dateStr } = dayBounds(daysAgo)
       entries.push(...(await summarizeDay(dateStr, start, end)))
     }
