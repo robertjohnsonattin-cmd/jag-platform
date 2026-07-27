@@ -1809,6 +1809,7 @@ function TrackerTab() {
       from_date: fromDate || undefined,
       to_date: toDate || undefined,
     }),
+    enabled: !!memberFilter,
   })
 
   // Group entries by metric type — a chronological history per test, not mixed by date,
@@ -1835,7 +1836,7 @@ function TrackerTab() {
   return (
     <div className="space-y-6">
       {/* Latest readings summary */}
-      {Object.keys(latestByMetric).length > 0 && (
+      {memberFilter && Object.keys(latestByMetric).length > 0 && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           {(Object.keys(latestByMetric) as MetricType[]).map(m => {
             const e = latestByMetric[m]!
@@ -1898,7 +1899,9 @@ function TrackerTab() {
         </div>
       </div>
 
-      {isLoading ? (
+      {!memberFilter ? (
+        <p className="text-slate-500 text-sm italic">{t('medical.selectMemberToView', 'Select a family member above to view their biometrics')}</p>
+      ) : isLoading ? (
         <p className="text-slate-500 text-sm">{t('common.loading')}</p>
       ) : entries.length === 0 ? (
         <p className="text-slate-500 text-sm italic">{t('lifestyle.noEntries')}</p>
