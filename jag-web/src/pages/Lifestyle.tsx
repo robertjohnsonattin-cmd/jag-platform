@@ -85,6 +85,7 @@ const METRIC_LABELS: Record<MetricType, string> = {
   EOSINOPHILS_ABSOLUTE: 'Eosinophils (abs)', BASOPHILS_ABSOLUTE: 'Basophils (abs)',
   ALKALINE_PHOSPHATASE: 'Alkaline Phosphatase', SODIUM: 'Sodium', POTASSIUM: 'Potassium', CHLORIDE: 'Chloride',
   TOTAL_PROTEIN: 'Total Protein',
+  DISTANCE_KM: 'Distance', FLOORS_CLIMBED: 'Floors Climbed',
   OTHER: 'Other',
 }
 const METRIC_ICONS: Record<MetricType, string> = {
@@ -98,6 +99,7 @@ const METRIC_ICONS: Record<MetricType, string> = {
   NEUTROPHILS_PCT: '🧪', LYMPHOCYTES_PCT: '🧪', MONOCYTES_PCT: '🧪', EOSINOPHILS_PCT: '🧪', BASOPHILS_PCT: '🧪',
   NEUTROPHILS_ABSOLUTE: '🧪', LYMPHOCYTES_ABSOLUTE: '🧪', MONOCYTES_ABSOLUTE: '🧪', EOSINOPHILS_ABSOLUTE: '🧪', BASOPHILS_ABSOLUTE: '🧪',
   ALKALINE_PHOSPHATASE: '🧪', SODIUM: '🧪', POTASSIUM: '🧪', CHLORIDE: '🧪', TOTAL_PROTEIN: '🧪',
+  DISTANCE_KM: '📍', FLOORS_CLIMBED: '🪜',
   OTHER: '📊',
 }
 const METRIC_DEFAULT_UNIT: Record<MetricType, string> = {
@@ -113,6 +115,7 @@ const METRIC_DEFAULT_UNIT: Record<MetricType, string> = {
   NEUTROPHILS_ABSOLUTE: 'x10^3/uL', LYMPHOCYTES_ABSOLUTE: 'x10^3/uL', MONOCYTES_ABSOLUTE: 'x10^3/uL',
   EOSINOPHILS_ABSOLUTE: 'x10^3/uL', BASOPHILS_ABSOLUTE: 'x10^3/uL',
   ALKALINE_PHOSPHATASE: 'U/L', SODIUM: 'mmol/L', POTASSIUM: 'mmol/L', CHLORIDE: 'mmol/L', TOTAL_PROTEIN: 'g/dL',
+  DISTANCE_KM: 'km', FLOORS_CLIMBED: 'floors',
   OTHER: '',
 }
 

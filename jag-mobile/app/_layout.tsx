@@ -6,6 +6,7 @@ import * as LocalAuthentication from 'expo-local-authentication'
 import { isAuthenticated } from '../src/auth/keycloak'
 import notifee from '@notifee/react-native'
 import { showQuickEntryNotification, registerForegroundHandler } from '../src/services/quickNotification'
+import { syncHealthConnect } from '../src/services/healthConnect'
 
 notifee.onBackgroundEvent(async () => {})
 
@@ -47,6 +48,13 @@ export default function RootLayout() {
       showQuickEntryNotification()
     }
   }, [checking, authed, segments])
+
+  // Health Connect sync — fire once per cold start once we know the user is
+  // authenticated. Non-blocking, silently no-ops if Health Connect / perms aren't
+  // available (see syncHealthConnect's own try/catch).
+  useEffect(() => {
+    if (authed) syncHealthConnect()
+  }, [authed])
 
   // Handle app opened via notification action
   useEffect(() => {

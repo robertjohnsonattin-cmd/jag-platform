@@ -30,7 +30,22 @@ const ProgrammeParam = z.object({ programmeId: z.string().uuid() });
 
 const ProgTypeEnum = z.enum(['AIRLINE','HOTEL','CRUISE','CREDIT_CARD','RETAIL','DINING','OTHER']);
 const TxTypeEnum   = z.enum(['EARN','REDEEM','EXPIRE','TRANSFER_IN','TRANSFER_OUT','BONUS','REINSTATEMENT']);
-const MetricEnum   = z.enum(['WEIGHT_KG','STEPS','SLEEP_HOURS','CALORIES','EXERCISE_MINUTES','BLOOD_PRESSURE_SYSTOLIC','BLOOD_PRESSURE_DIASTOLIC','RESTING_HEART_RATE','CHOLESTEROL_TOTAL','CHOLESTEROL_LDL','CHOLESTEROL_HDL','TRIGLYCERIDES','BLOOD_GLUCOSE','PSA','ESR','ACE_LEVEL','CREATININE','AST','ALT','WBC','HEMOGLOBIN','HBA1C','BUN','TSH','VITAMIN_B12','FREE_T4','RBC','HCT','MCV','MCH','MCHC','RDW','PLATELETS','MPV','NEUTROPHILS_PCT','LYMPHOCYTES_PCT','MONOCYTES_PCT','EOSINOPHILS_PCT','BASOPHILS_PCT','NEUTROPHILS_ABSOLUTE','LYMPHOCYTES_ABSOLUTE','MONOCYTES_ABSOLUTE','EOSINOPHILS_ABSOLUTE','BASOPHILS_ABSOLUTE','ALKALINE_PHOSPHATASE','SODIUM','POTASSIUM','CHLORIDE','TOTAL_PROTEIN','OTHER']);
+const MetricEnum   = z.enum(['WEIGHT_KG','STEPS','SLEEP_HOURS','CALORIES','EXERCISE_MINUTES','BLOOD_PRESSURE_SYSTOLIC','BLOOD_PRESSURE_DIASTOLIC','RESTING_HEART_RATE','CHOLESTEROL_TOTAL','CHOLESTEROL_LDL','CHOLESTEROL_HDL','TRIGLYCERIDES','BLOOD_GLUCOSE','PSA','ESR','ACE_LEVEL','CREATININE','AST','ALT','WBC','HEMOGLOBIN','HBA1C','BUN','TSH','VITAMIN_B12','FREE_T4','RBC','HCT','MCV','MCH','MCHC','RDW','PLATELETS','MPV','NEUTROPHILS_PCT','LYMPHOCYTES_PCT','MONOCYTES_PCT','EOSINOPHILS_PCT','BASOPHILS_PCT','NEUTROPHILS_ABSOLUTE','LYMPHOCYTES_ABSOLUTE','MONOCYTES_ABSOLUTE','EOSINOPHILS_ABSOLUTE','BASOPHILS_ABSOLUTE','ALKALINE_PHOSPHATASE','SODIUM','POTASSIUM','CHLORIDE','TOTAL_PROTEIN','DISTANCE_KM','FLOORS_CLIMBED','OTHER']);
+
+// Health Connect (Samsung Health) auto-sync — one row per (member, date, metric) for
+// source='HEALTH_CONNECT', enforced by a partial unique index (migration 038). A plain
+// POST /tracker insert would create a new row every time the mobile app re-syncs the
+// same day's running totals, so this path upserts instead.
+const HealthSyncMetricEnum = z.enum(['STEPS','DISTANCE_KM','EXERCISE_MINUTES','CALORIES','SLEEP_HOURS','FLOORS_CLIMBED']);
+const HealthSyncEntrySchema = z.object({
+  entry_date:  z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  metric_type: HealthSyncMetricEnum,
+  value:       z.number(),
+  unit:        z.string().min(1).max(20),
+}).strict();
+const HealthSyncSchema = z.object({
+  entries: z.array(HealthSyncEntrySchema).min(1).max(50),
+}).strict();
 
 const CreateProgrammeSchema = z.object({
   programme_type:   ProgTypeEnum,
@@ -288,4 +303,51 @@ lifestyleRouter.post('/tracker', async (req: Request, res: Response, next: NextF
       ok(res, rec, 201);
     } finally { client.release(); }
   } catch (e) { next(e); }
+});
+
+// ── POST /lifestyle/tracker/health-connect-sync ───────────────────────────────
+// Bulk upsert from jag-mobile's Android Health Connect reader (Samsung Health
+// syncs steps/distance/active time/sleep/calories into Health Connect on-device;
+// there is no cloud API, so the phone itself is the only thing that can read it).
+// Always writes to the platform owner's own SELF family member row — this device
+// is Robert's phone, never someone else's biometrics.
+
+lifestyleRouter.post('/tracker/health-connect-sync', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const parsed = HealthSyncSchema.safeParse(req.body);
+    if (!parsed.success) { err(res, 422, 'VALIDATION_ERROR', 'Request body validation failed.'); return; }
+    const { entries } = parsed.data;
+    const { userId: ownerId } = req.rlsCtx;
+    const client = await familyPool.connect();
+    try {
+      const rows = await withOwnerRLS(client, req.rlsCtx, async (c) => {
+        const self = await c.query<{ id: string }>(
+          `SELECT id FROM fam_family_members WHERE owner_id = $1 AND relationship = 'SELF' LIMIT 1`,
+          [ownerId],
+        );
+        if (self.rows.length === 0) throw Object.assign(new Error('SELF_MEMBER_NOT_FOUND'), { httpStatus: 409 });
+        const memberId = self.rows[0].id;
+
+        const results = [];
+        for (const entry of entries) {
+          const rec = await c.query(
+            `INSERT INTO fam_lifestyle_tracker
+               (owner_id, family_member_id, entry_date, metric_type, value, unit, source)
+             VALUES ($1,$2,$3,$4,$5,$6,'HEALTH_CONNECT')
+             ON CONFLICT (family_member_id, entry_date, metric_type) WHERE source = 'HEALTH_CONNECT'
+             DO UPDATE SET value = EXCLUDED.value, unit = EXCLUDED.unit
+             RETURNING id, entry_date, metric_type, value, unit`,
+            [ownerId, memberId, entry.entry_date, entry.metric_type, entry.value, entry.unit],
+          );
+          results.push(rec.rows[0]);
+        }
+        return results;
+      });
+      logger.info({ entity: 'LIFESTYLE', action: 'HEALTH_CONNECT_SYNC', user_id: ownerId, record_id: `${rows.length} entries` });
+      ok(res, { synced: rows.length, entries: rows });
+    } finally { client.release(); }
+  } catch (e) {
+    if ((e as { httpStatus?: number }).httpStatus === 409) { err(res, 409, 'SELF_MEMBER_NOT_FOUND', 'No SELF family member record found for this owner.'); return; }
+    next(e);
+  }
 });
