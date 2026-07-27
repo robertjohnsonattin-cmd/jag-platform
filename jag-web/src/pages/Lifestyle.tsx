@@ -116,6 +116,80 @@ const METRIC_DEFAULT_UNIT: Record<MetricType, string> = {
   OTHER: '',
 }
 
+// General adult reference ranges (not age/sex-personalized) shown so a viewer can spot an
+// out-of-spec reading at a glance. These are widely-cited lab norms, not a clinical judgment
+// for any specific patient — always defer to the source lab report's own reference range and
+// a treating clinician. Lifestyle metrics (weight/steps/sleep/calories/exercise) have no
+// universal "normal" value and are intentionally omitted.
+const REFERENCE_RANGES: Partial<Record<MetricType, { low?: number; high?: number }>> = {
+  BLOOD_PRESSURE_SYSTOLIC: { low: 90, high: 120 },
+  BLOOD_PRESSURE_DIASTOLIC: { low: 60, high: 80 },
+  RESTING_HEART_RATE: { low: 60, high: 100 },
+  CHOLESTEROL_TOTAL: { high: 200 },
+  CHOLESTEROL_LDL: { high: 130 },
+  CHOLESTEROL_HDL: { low: 40 },
+  TRIGLYCERIDES: { high: 150 },
+  BLOOD_GLUCOSE: { low: 70, high: 99 },
+  PSA: { high: 4.0 },
+  ESR: { low: 0, high: 20 },
+  ACE_LEVEL: { low: 9, high: 67 },
+  CREATININE: { low: 0.6, high: 1.3 },
+  AST: { low: 10, high: 40 },
+  ALT: { low: 7, high: 56 },
+  WBC: { low: 4.0, high: 11.0 },
+  HEMOGLOBIN: { low: 12, high: 17.5 },
+  HBA1C: { high: 5.7 },
+  BUN: { low: 7, high: 20 },
+  TSH: { low: 0.4, high: 4.0 },
+  VITAMIN_B12: { low: 200, high: 900 },
+  FREE_T4: { low: 0.8, high: 1.8 },
+  RBC: { low: 4.2, high: 5.9 },
+  HCT: { low: 36, high: 50 },
+  MCV: { low: 80, high: 100 },
+  MCH: { low: 27, high: 33 },
+  MCHC: { low: 32, high: 36 },
+  RDW: { low: 11.5, high: 14.5 },
+  PLATELETS: { low: 150, high: 450 },
+  MPV: { low: 7.5, high: 11.5 },
+  NEUTROPHILS_PCT: { low: 40, high: 70 },
+  LYMPHOCYTES_PCT: { low: 20, high: 40 },
+  MONOCYTES_PCT: { low: 2, high: 8 },
+  EOSINOPHILS_PCT: { low: 1, high: 4 },
+  BASOPHILS_PCT: { low: 0, high: 1 },
+  NEUTROPHILS_ABSOLUTE: { low: 1.8, high: 7.7 },
+  LYMPHOCYTES_ABSOLUTE: { low: 1.0, high: 4.8 },
+  MONOCYTES_ABSOLUTE: { low: 0.2, high: 1.0 },
+  EOSINOPHILS_ABSOLUTE: { low: 0.0, high: 0.5 },
+  BASOPHILS_ABSOLUTE: { low: 0.0, high: 0.2 },
+  ALKALINE_PHOSPHATASE: { low: 44, high: 147 },
+  SODIUM: { low: 135, high: 145 },
+  POTASSIUM: { low: 3.5, high: 5.0 },
+  CHLORIDE: { low: 96, high: 106 },
+  TOTAL_PROTEIN: { low: 6.0, high: 8.3 },
+}
+
+type RangeStatus = 'low' | 'high' | 'normal' | null
+function rangeStatus(m: MetricType, value: number): RangeStatus {
+  const r = REFERENCE_RANGES[m]
+  if (!r || Number.isNaN(value)) return null
+  if (r.low !== undefined && value < r.low) return 'low'
+  if (r.high !== undefined && value > r.high) return 'high'
+  return 'normal'
+}
+function fmtReferenceRange(m: MetricType): string | null {
+  const r = REFERENCE_RANGES[m]
+  if (!r) return null
+  const unit = METRIC_DEFAULT_UNIT[m]
+  if (r.low !== undefined && r.high !== undefined) return `${r.low}–${r.high} ${unit}`
+  if (r.high !== undefined) return `< ${r.high} ${unit}`
+  if (r.low !== undefined) return `> ${r.low} ${unit}`
+  return null
+}
+const RANGE_STATUS_LABEL: Record<'low' | 'high', string> = { low: 'Low', high: 'High' }
+const RANGE_STATUS_CLASSES: Record<'low' | 'high', string> = {
+  low: 'text-amber-400', high: 'text-red-400',
+}
+
 const RECORD_TYPE_LABELS: Record<RecordType, string> = {
   LAB_RESULT: 'Lab Result', IMAGING: 'Imaging', PRESCRIPTION: 'Prescription',
   CLINIC_CARD: 'Clinic Card', REFERRAL: 'Referral', DISCHARGE_SUMMARY: 'Discharge Summary',
@@ -1716,22 +1790,28 @@ function buildBiometricsPrintHtml(
   const generatedOn = new Date().toLocaleDateString('en-TT', { day: '2-digit', month: 'long', year: 'numeric' })
 
   const sections = metricOrder.map(metricKey => {
+    const m = metricKey as MetricType
     const history = groupedByMetric[metricKey]
     const values = history.map(h => Number(h.value)).filter(v => !Number.isNaN(v))
     const min = values.length ? Math.min(...values) : null
     const max = values.length ? Math.max(...values) : null
-    const rangeLine = min !== null && max !== null && min !== max
-      ? ` — Range: ${min}–${max} ${escapeHtml(history[0].unit)}` : ''
+    const observedLine = min !== null && max !== null && min !== max
+      ? ` — Observed: ${min}–${max} ${escapeHtml(history[0].unit)}` : ''
+    const refRange = fmtReferenceRange(m)
+    const refLine = refRange ? ` — Reference: ${escapeHtml(refRange)}` : ''
     const rows = history.map((e, i) => {
       const isLatest = i === history.length - 1
-      return `<tr class="${isLatest ? 'latest' : ''}">
+      const status = rangeStatus(m, Number(e.value))
+      const flagCls = status === 'high' ? 'flag-high' : status === 'low' ? 'flag-low' : ''
+      const flagTag = status === 'high' ? ' <span class="flag-tag">HIGH</span>' : status === 'low' ? ' <span class="flag-tag">LOW</span>' : ''
+      return `<tr class="${isLatest ? 'latest' : ''} ${flagCls}">
         <td>${fmtDate(e.entry_date)}${e.entry_time ? ` ${fmtTime(e.entry_time)}` : ''}${isLatest ? ' <span class="tag">latest</span>' : ''}</td>
-        <td><strong>${escapeHtml(String(e.value))}</strong> ${escapeHtml(e.unit)}</td>
+        <td><strong>${escapeHtml(String(e.value))}</strong> ${escapeHtml(e.unit)}${flagTag}</td>
         <td>${escapeHtml(e.notes || '')}</td>
       </tr>`
     }).join('')
     return `<div class="metric-block">
-      <h2>${escapeHtml(metricLabel(metricKey as MetricType))} <span class="count">(${history.length} reading${history.length === 1 ? '' : 's'})${rangeLine}</span></h2>
+      <h2>${escapeHtml(metricLabel(metricKey as MetricType))} <span class="count">(${history.length} reading${history.length === 1 ? '' : 's'})${refLine}${observedLine}</span></h2>
       <table><thead><tr><th>Date</th><th>Value</th><th>Notes</th></tr></thead><tbody>${rows}</tbody></table>
     </div>`
   }).join('')
@@ -1754,7 +1834,10 @@ function buildBiometricsPrintHtml(
   td, th { padding: 4px 8px 4px 0; text-align: left; border-bottom: 1px solid #eee; }
   th { font-size: 10px; text-transform: uppercase; color: #666; border-bottom: 1px solid #ccc; }
   tr.latest { background: #f0f6ff; }
+  tr.flag-high td, tr.flag-low td { background: #fff3f0; }
+  tr.latest.flag-high td, tr.latest.flag-low td { background: #ffe9e3; }
   .tag { font-size: 9px; color: #2563eb; text-transform: uppercase; }
+  .flag-tag { font-size: 9px; font-weight: bold; color: #b91c1c; border: 1px solid #b91c1c; border-radius: 3px; padding: 1px 4px; }
   .footer { margin-top: 30px; padding-top: 10px; border-top: 1px solid #ccc; font-size: 10px; color: #777; }
   @media print { .no-print { display: none; } }
 </style></head>
@@ -1774,7 +1857,7 @@ function buildBiometricsPrintHtml(
 
   ${sections || '<p style="color:#888;font-style:italic;">No biometric readings on file.</p>'}
 
-  <div class="footer">Generated by JAG Holdings — Medical Records module. Please verify all details with the patient/family before relying on this summary clinically.</div>
+  <div class="footer">Generated by JAG Holdings — Medical Records module. Reference ranges shown are general adult lab norms, not personalized to this patient — please verify against the source lab report. Please verify all details with the patient/family before relying on this summary clinically.</div>
 </body></html>`
 }
 
@@ -1840,10 +1923,19 @@ function TrackerTab() {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           {(Object.keys(latestByMetric) as MetricType[]).map(m => {
             const e = latestByMetric[m]!
+            const status = rangeStatus(m, Number(e.value))
+            const outOfRange = status === 'low' || status === 'high'
             return (
-              <div key={m} className="bg-slate-800 rounded-xl p-3">
-                <div className="text-lg">{METRIC_ICONS[m]}</div>
-                <div className="text-lg font-bold text-slate-100 mt-1">{e.value} <span className="text-sm text-slate-400">{e.unit}</span></div>
+              <div key={m} className={`bg-slate-800 rounded-xl p-3 ${outOfRange ? `border ${status === 'high' ? 'border-red-500/60' : 'border-amber-500/60'}` : ''}`}>
+                <div className="flex items-center justify-between">
+                  <div className="text-lg">{METRIC_ICONS[m]}</div>
+                  {outOfRange && (
+                    <span className={`text-[10px] font-semibold uppercase tracking-wide ${RANGE_STATUS_CLASSES[status]}`}>
+                      {t(`medical.range${status === 'high' ? 'High' : 'Low'}`, RANGE_STATUS_LABEL[status])}
+                    </span>
+                  )}
+                </div>
+                <div className={`text-lg font-bold mt-1 ${outOfRange ? RANGE_STATUS_CLASSES[status] : 'text-slate-100'}`}>{e.value} <span className="text-sm text-slate-400">{e.unit}</span></div>
                 <div className="text-xs text-slate-400 mt-0.5">{t(`lifestyle.metricTypes.${m}`, METRIC_LABELS[m])}</div>
                 <div className="text-xs text-slate-500">{fmtDate(e.entry_date)}{e.entry_time ? ` · ${fmtTime(e.entry_time)}` : ''}</div>
               </div>
@@ -1913,17 +2005,25 @@ function TrackerTab() {
             const values = history.map(h => Number(h.value)).filter(v => !Number.isNaN(v))
             const min = values.length ? Math.min(...values) : null
             const max = values.length ? Math.max(...values) : null
+            const refRange = fmtReferenceRange(m)
             return (
               <div key={metricKey} className="bg-slate-800 rounded-xl border border-slate-700 overflow-hidden">
-                <div className="flex items-center justify-between px-4 py-3 border-b border-slate-700 bg-slate-800/80">
+                <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 px-4 py-3 border-b border-slate-700 bg-slate-800/80">
                   <div className="flex items-center gap-2">
                     <span className="text-base">{METRIC_ICONS[m]}</span>
                     <span className="font-semibold text-slate-100">{t(`lifestyle.metricTypes.${m}`, METRIC_LABELS[m])}</span>
                     <span className="text-xs text-slate-500">({history.length})</span>
                   </div>
-                  {min !== null && max !== null && min !== max && (
-                    <span className="text-xs text-slate-400">{t('medical.rangeLabel', 'Range')}: {min} – {max} {history[0].unit}</span>
-                  )}
+                  <div className="flex items-center gap-3">
+                    {refRange && (
+                      <span className="text-xs text-slate-400" title={t('medical.rangeDisclaimer', 'General adult reference range — not personalized. Confirm with the source lab report or a treating clinician.')}>
+                        {t('medical.referenceRange', 'Reference')}: {refRange}
+                      </span>
+                    )}
+                    {min !== null && max !== null && min !== max && (
+                      <span className="text-xs text-slate-500">{t('medical.observedRangeLabel', 'Observed')}: {min} – {max} {history[0].unit}</span>
+                    )}
+                  </div>
                 </div>
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
@@ -1937,12 +2037,21 @@ function TrackerTab() {
                     <tbody>
                       {history.map((e, i) => {
                         const isLatest = i === history.length - 1
+                        const status = rangeStatus(m, Number(e.value))
+                        const outOfRange = status === 'low' || status === 'high'
                         return (
                           <tr key={e.id} className={`border-b border-slate-700/30 last:border-0 ${isLatest ? 'bg-blue-900/20' : ''}`}>
                             <td className="px-4 py-2 text-slate-300 whitespace-nowrap">
                               {fmtDate(e.entry_date)}{e.entry_time && <span className="text-slate-500"> · {fmtTime(e.entry_time)}</span>}{isLatest && <span className="text-xs text-blue-400 ml-2">{t('medical.latest', 'latest')}</span>}
                             </td>
-                            <td className="px-4 py-2 font-semibold text-white whitespace-nowrap">{e.value} <span className="text-slate-400 font-normal">{e.unit}</span></td>
+                            <td className={`px-4 py-2 font-semibold whitespace-nowrap ${outOfRange ? RANGE_STATUS_CLASSES[status] : 'text-white'}`}>
+                              {e.value} <span className={outOfRange ? '' : 'text-slate-400 font-normal'}>{e.unit}</span>
+                              {outOfRange && (
+                                <span className={`ml-2 text-[10px] font-semibold uppercase tracking-wide ${RANGE_STATUS_CLASSES[status]}`}>
+                                  {t(`medical.range${status === 'high' ? 'High' : 'Low'}`, RANGE_STATUS_LABEL[status])}
+                                </span>
+                              )}
+                            </td>
                             <td className="px-4 py-2 text-slate-400 text-xs">
                               {e.notes || (e.source ? t('lifestyle.viaSource', { source: e.source }) : '')}
                             </td>
