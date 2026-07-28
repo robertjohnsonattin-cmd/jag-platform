@@ -1,98 +1,96 @@
 import PDFDocument from 'pdfkit';
 
 export function generateApplicationFormPDF(): InstanceType<typeof PDFDocument> {
-  const doc = new PDFDocument({ size: 'A4', margin: 30 });
+  const doc = new PDFDocument({ size: 'A4', margin: 20 });
 
-  const pageWidth = doc.page.width;
-  const margins = 30;
-  const contentWidth = pageWidth - 2 * margins;
+  const margins = 20;
+  const colWidth = 90;
+  const smallFont = 7;
+  const labelFont = 8;
 
-  // Compact field helper
-  function field(y: number, label: string, width = contentWidth, height = 16) {
-    doc.fontSize(8).fillColor('#333').text(label, margins, y);
-    doc.rect(margins, y + 12, width, height).stroke();
-    return y + height + 20;
+  let y = 20;
+
+  // Title
+  doc.fontSize(12).font('Helvetica-Bold').fillColor('#1a3a52').text('RENTAL APPLICATION', margins, y);
+  y += 14;
+  doc.fontSize(7).fillColor('#666').text('JAG Properties — Robert Johnson-Attin', margins, y);
+  y += 10;
+
+  // Helper to draw a small field
+  function smallField(label: string, xPos: number, yPos: number, width = 75) {
+    doc.fontSize(labelFont).fillColor('#333').text(label, xPos, yPos, { width: width, height: 10 });
+    doc.rect(xPos, yPos + 9, width, 12).stroke();
+    return yPos + 24;
   }
 
-  // Two-column field
-  function twoColField(y: number, label1: string, label2: string) {
-    const colWidth = (contentWidth - 8) / 2;
-    doc.fontSize(8).fillColor('#333').text(label1, margins, y);
-    doc.rect(margins, y + 12, colWidth, 16).stroke();
-    doc.fontSize(8).fillColor('#333').text(label2, margins + colWidth + 8, y);
-    doc.rect(margins + colWidth + 8, y + 12, colWidth, 16).stroke();
-    return y + 36;
-  }
+  // Section 1: Personal (3 columns)
+  doc.fontSize(9).font('Helvetica-Bold').fillColor('#1a3a52').text('APPLICANT', margins, y);
+  y += 10;
+  y = smallField('Name *', margins, y, 110);
 
-  // Header
-  doc.fontSize(14).font('Helvetica-Bold').fillColor('#1a3a52').text('RENTAL APPLICATION', margins, 20);
-  doc.fontSize(8).fillColor('#666').text('JAG Properties — Robert Johnson-Attin', margins, 36);
+  y -= 24;
+  y = smallField('DOB *', margins + 115, y, 60);
 
-  let yPos = 50;
+  y -= 24;
+  y = smallField('Phone *', margins + 180, y, 85);
 
-  // Applicant Info (compact)
-  doc.fontSize(9).font('Helvetica-Bold').fillColor('#1a3a52').text('APPLICANT INFORMATION', margins, yPos);
-  yPos += 14;
+  y = smallField('Email', margins, y, 110);
+  y -= 24;
+  y = smallField('National ID *', margins + 115, y, 60);
+  y -= 24;
+  y = smallField('Employment *', margins + 180, y, 85);
 
-  yPos = field(yPos, 'Full Name *');
-  yPos = twoColField(yPos, 'Date of Birth *', 'National ID *');
-  yPos = twoColField(yPos, 'Phone (WhatsApp) *', 'Email');
+  // Section 2: Address (2 columns)
+  doc.fontSize(9).font('Helvetica-Bold').fillColor('#1a3a52').text('ADDRESS', margins, y);
+  y += 10;
+  y = smallField('Street *', margins, y, 130);
+  y -= 24;
+  y = smallField('City *', margins + 135, y, 115);
 
-  // Current Address (compact)
-  doc.fontSize(9).font('Helvetica-Bold').fillColor('#1a3a52').text('CURRENT ADDRESS', margins, yPos);
-  yPos += 14;
-  yPos = field(yPos, 'Street Address *');
-  yPos = twoColField(yPos, 'City *', 'Postal Code');
+  // Section 3: Work (3 columns)
+  doc.fontSize(9).font('Helvetica-Bold').fillColor('#1a3a52').text('WORK', margins, y);
+  y += 10;
+  y = smallField('Employer', margins, y, 95);
+  y -= 24;
+  y = smallField('Title', margins + 100, y, 75);
+  y -= 24;
+  y = smallField('Income (TTD) *', margins + 180, y, 85);
 
-  // Employment (compact)
-  doc.fontSize(9).font('Helvetica-Bold').fillColor('#1a3a52').text('EMPLOYMENT & INCOME', margins, yPos);
-  yPos += 14;
+  // Section 4: Household (4 columns)
+  doc.fontSize(9).font('Helvetica-Bold').fillColor('#1a3a52').text('HOUSEHOLD', margins, y);
+  y += 10;
 
-  doc.fontSize(8).fillColor('#333').text('Employment Status *', margins, yPos);
-  doc.fontSize(7).text('☐ Employed  ☐ Self-Emp  ☐ Retired  ☐ Other', margins + 80, yPos);
-  yPos += 18;
+  doc.fontSize(labelFont).text('Adults *', margins, y);
+  doc.rect(margins, y + 9, 35, 12).stroke();
 
-  yPos = twoColField(yPos, 'Employer Name', 'Job Title *');
-  yPos = twoColField(yPos, 'Monthly Income (TTD) *', 'Work Phone');
+  doc.fontSize(labelFont).text('Children', margins + 40, y);
+  doc.rect(margins + 40, y + 9, 35, 12).stroke();
 
-  // Household (compact)
-  doc.fontSize(9).font('Helvetica-Bold').fillColor('#1a3a52').text('HOUSEHOLD', margins, yPos);
-  yPos += 14;
+  doc.fontSize(labelFont).text('Pets? *', margins + 80, y);
+  doc.fontSize(6).text('☐Yes ☐No', margins + 80, y + 10);
 
-  doc.fontSize(8).fillColor('#333').text('Adults', margins, yPos);
-  doc.rect(margins, yPos + 12, 40, 16).stroke();
-  doc.fontSize(8).text('Children', margins + 48, yPos);
-  doc.rect(margins + 48, yPos + 12, 40, 16).stroke();
-  doc.fontSize(8).text('Pets?', margins + 96, yPos);
-  doc.fontSize(7).text('☐ Yes ☐ No', margins + 96, yPos + 13);
-  yPos += 36;
+  doc.fontSize(labelFont).text('Move-in *', margins + 135, y);
+  doc.rect(margins + 135, y + 9, 60, 12).stroke();
 
-  doc.fontSize(8).fillColor('#333').text('Smoker?', margins, yPos);
-  doc.fontSize(7).text('☐ Yes ☐ No', margins + 40, yPos);
-  doc.fontSize(8).text('Move-in Date *', margins + 100, yPos);
-  doc.rect(margins + 140, yPos + 12, 90, 16).stroke();
-  yPos += 36;
+  y += 24;
 
-  // References (compact - 1 column only)
-  doc.fontSize(9).font('Helvetica-Bold').fillColor('#1a3a52').text('REFERENCES & EMERGENCY', margins, yPos);
-  yPos += 14;
+  // Section 5: References (2 rows, compact)
+  doc.fontSize(9).font('Helvetica-Bold').fillColor('#1a3a52').text('REFERENCES', margins, y);
+  y += 10;
 
-  yPos = field(yPos, 'Reference 1: Name / Phone / Relation *', contentWidth, 14);
-  yPos = field(yPos, 'Reference 2: Name / Phone / Relation *', contentWidth, 14);
-  yPos = field(yPos, 'Emergency Contact: Name / Phone / Relation *', contentWidth, 14);
+  doc.fontSize(labelFont).text('Ref 1: Name / Phone / Relation *', margins, y);
+  doc.rect(margins, y + 9, 255, 12).stroke();
+  y += 24;
 
-  // Declarations (compact)
-  doc.fontSize(9).font('Helvetica-Bold').fillColor('#1a3a52').text('DECLARATIONS', margins, yPos);
-  yPos += 14;
+  doc.fontSize(labelFont).text('Ref 2 / Emergency: Name / Phone / Relation *', margins, y);
+  doc.rect(margins, y + 9, 255, 12).stroke();
+  y += 24;
 
-  doc.fontSize(7).fillColor('#333').text('☐ I certify all information is true and complete.', margins, yPos);
-  yPos += 12;
-  doc.fontSize(7).text('☐ I consent to background/rental history verification.', margins, yPos);
-  yPos += 12;
-  doc.fontSize(7).text('☐ I have not been evicted or broken a lease in past 5 years.', margins, yPos);
-  yPos += 18;
+  // Declarations (tiny text to fit on one page)
+  doc.fontSize(6).fillColor('#333').text('☐ All information is true and complete  ☐ I consent to background check  ☐ No evictions/broken leases', margins, y);
+  y += 10;
 
-  doc.fontSize(8).fillColor('#333').text('Signature: _____________________________     Date: __________', margins, yPos);
+  doc.fontSize(6).text('Signature: ________________________  Date: __________', margins, y);
 
   return doc;
 }
