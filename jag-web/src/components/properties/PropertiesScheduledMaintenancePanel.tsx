@@ -140,6 +140,8 @@ export default function PropertiesScheduledMaintenancePanel() {
         from, to, property_id: printForm.property_id || undefined,
       })
       setPreviewHtml(buildMaintenanceSchedulePrintHtml(occurrences as Record<string, unknown>[], from, to))
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Failed to load schedule.')
     } finally {
       setPrinting(false)
     }

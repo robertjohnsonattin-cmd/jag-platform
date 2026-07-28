@@ -129,8 +129,13 @@ scheduledMaintenanceRouter.get('/occurrences', async (req: Request, res: Respons
     const client = await propertiesPool.connect();
     try {
       const rows = await withOwnerRLS(client, req.rlsCtx, (c) => {
-        const conditions: string[] = [`sm.status = 'ACTIVE'`, `sm.next_due_date <= $2`];
-        const params: unknown[] = [from, to];
+        // "from" is not referenced in the SQL (occurrences before "from" are still
+        // fetched here and filtered client-side in the projection loop below, since
+        // an overdue task's next_due_date may be well before "from"). Only bind
+        // params actually used in the query text -- an unused $N leaves Postgres
+        // unable to infer its type ("could not determine data type of parameter $1").
+        const conditions: string[] = [`sm.status = 'ACTIVE'`, `sm.next_due_date <= $1`];
+        const params: unknown[] = [to];
         if (property_id) { params.push(property_id); conditions.push(`sm.property_id = $${params.length}`); }
 
         return c.query(
