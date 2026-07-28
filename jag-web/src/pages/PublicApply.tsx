@@ -210,14 +210,22 @@ export default function PublicApply() {
   return (
     <Shell>
       <div className="mb-5">
-        <h1 className="text-lg font-semibold text-slate-100">Rental Application</h1>
-        {data && (
-          <p className="text-sm text-slate-400 mt-1">
-            {data.property_name}{data.unit_number ? ` — Unit ${data.unit_number}` : ''}
-            {data.area ? ` · ${data.area}` : ''}
-          </p>
-        )}
-        <p className="text-xs text-slate-500 mt-1">All fields <span className="text-rose-400">*</span> are required. If something doesn't apply to you, write "N/A".</p>
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h1 className="text-lg font-semibold text-slate-100">Rental Application</h1>
+            {data && (
+              <p className="text-sm text-slate-400 mt-1">
+                {data.property_name}{data.unit_number ? ` — Unit ${data.unit_number}` : ''}
+                {data.area ? ` · ${data.area}` : ''}
+              </p>
+            )}
+            <p className="text-xs text-slate-500 mt-1">All fields <span className="text-rose-400">*</span> are required. If something doesn't apply to you, write "N/A".</p>
+          </div>
+          <a href="/api/v1/properties/applications/form.pdf" download="JAG_Properties_Application.pdf"
+            className="px-3 py-1.5 text-xs bg-slate-700 hover:bg-slate-600 text-slate-100 border border-slate-600 rounded whitespace-nowrap">
+            📄 PDF Form
+          </a>
+        </div>
       </div>
 
       <div className="space-y-5">

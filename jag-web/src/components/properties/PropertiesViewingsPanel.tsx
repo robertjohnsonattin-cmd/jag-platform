@@ -38,7 +38,11 @@ export default function PropertiesViewingsPanel() {
           {['SCHEDULED','CONFIRMED','COMPLETED','NO_SHOW','CANCELLED','RESCHEDULED'].map(s =>
             <option key={s} value={s}>{s.replace(/_/g,' ')}</option>)}
         </select>
-        <p className="text-xs text-slate-500 ml-auto">{t('tenancy.calendarNote', 'Availability managed in Google Calendar. Book via /book/:slug page.')}</p>
+        <a href="/api/v1/properties/applications/form.pdf" download="JAG_Properties_Application.pdf"
+          className="ml-auto px-3 py-1.5 text-xs bg-slate-700 hover:bg-slate-600 text-slate-100 border border-slate-600 rounded">
+          📄 Download Application Form
+        </a>
+        <p className="text-xs text-slate-500">{t('tenancy.calendarNote', 'For prospects without WhatsApp')}</p>
       </div>
 
       {viewings.length === 0 && <p className="text-sm text-slate-500 py-6 text-center">{t('tenancy.noViewings', 'No viewings scheduled.')}</p>}

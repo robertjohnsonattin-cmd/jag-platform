@@ -6,6 +6,7 @@
 // POST   /api/v1/properties/applications/:id/upload-doc
 // GET    /api/v1/properties/applications/:id/documents
 // POST   /api/v1/properties/applications/:id/create-tenant
+// GET    /api/v1/properties/applications/form.pdf
 
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import { z } from 'zod';
@@ -16,6 +17,7 @@ import { logger } from '../../lib/logger';
 import { ok, err } from '../../lib/response';
 import { minioClient, getObjectStream, getObjectStat, ensureBucket, mediaObjectKey, BUCKET_DOCUMENTS } from '../../lib/minio';
 import { sendTemplate } from '../../lib/whatsapp';
+import { generateApplicationFormPDF } from '../../lib/application-form-pdf';
 
 export const applicationsRouter = Router();
 
@@ -422,4 +424,15 @@ applicationsRouter.post('/:id/create-tenant', async (req: Request, res: Response
     if (ex.status === 409) return void res.status(409).json(err(ex.message, ex.code ?? 'CONFLICT'));
     next(e);
   }
+});
+
+// ── Static PDF application form (public, no auth required) ──────────────────────
+applicationsRouter.get('/form.pdf', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const doc = generateApplicationFormPDF();
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'attachment; filename="JAG_Properties_Rental_Application.pdf"');
+    doc.pipe(res);
+    doc.end();
+  } catch (e) { next(e); }
 });
