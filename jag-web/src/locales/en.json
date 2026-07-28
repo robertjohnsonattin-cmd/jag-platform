@@ -1499,6 +1499,112 @@
         "tenancy_agreement": "Tenancy Agreement",
         "other": "Other"
       }
+    },
+    "tabs": {
+      "overview": "Overview",
+      "tenancy": "Tenancy",
+      "money": "Money",
+      "maintenance": "Maintenance",
+      "documents": "Documents",
+      "messages": "Messages"
+    },
+    "lifecycle": {
+      "title": "Tenancy status",
+      "nextUp": "Next",
+      "unknown": "no phone on file",
+      "enquiry": "Enquiry",
+      "viewing": "Viewing",
+      "application": "Application",
+      "approved": "Approved",
+      "deposit": "Deposit",
+      "lease": "Lease",
+      "handover": "Handover",
+      "leaseEnded": "ended",
+      "statusCurrent": "Current tenant",
+      "statusFormer": "Former tenant — no active lease",
+      "statusApproved": "Approved — no lease created yet",
+      "statusApplicant": "Applicant — awaiting a decision",
+      "statusEnquiry": "Enquiry — no application yet",
+      "statusNone": "No tenancy activity recorded",
+      "nextEnquiry": "No enquiry on file — log one, or add the tenancy directly.",
+      "nextViewing": "Schedule a viewing for this prospect.",
+      "nextApplication": "No application yet — send the application link, or record one.",
+      "nextApproved": "Application is awaiting a decision — approve or reject it.",
+      "nextDeposit": "Record the security deposit in Money → Deposits.",
+      "nextLease": "Create the lease — this is what starts the rent schedule.",
+      "nextHandover": "Do the move-in (ENTRY) handover checklist and issue keys."
+    },
+    "overview": {
+      "atAGlance": "At a glance",
+      "leases": "leases",
+      "deposits": "deposits",
+      "applications": "applications",
+      "handovers": "handovers",
+      "onFile": "on file",
+      "recorded": "recorded"
+    },
+    "messages": {
+      "title": "Messages",
+      "none": "No WhatsApp messages with this number yet. Threads appear here once the tenant messages the business number, or once a reminder or reply is sent to them.",
+      "noPhone": "No phone number on file, so there is no WhatsApp thread to show. Add one on the tenant record.",
+      "goTo": "Go to WhatsApp inbox →",
+      "received": "Received",
+      "sent": "Sent"
+    },
+    "section": {
+      "loadFailed": "Couldn't load this section.",
+      "loadFailedHint": "This is a fault, not an empty record — nothing has been lost."
+    },
+    "openInList": "Open in list →",
+    "noPhone": "No phone",
+    "addedOn": "Added",
+    "selectTenant": "Select a tenant to see their full record",
+    "leases": {
+      "title": "Leases",
+      "btn": "Leases",
+      "ongoing": "ongoing",
+      "none": "No lease has been created for this tenant yet. The lease is what starts the rent schedule and links the deposit, so create it once the application is approved and the deposit is in."
+    },
+    "deposits": {
+      "title": "Deposits",
+      "btn": "Deposits",
+      "unit": "Unit",
+      "goTo": "Go to Deposits →",
+      "receiptFailed": "Could not open the receipt.",
+      "none": "No deposits linked to this tenant. Deposits recorded without naming a tenant stay unlinked — open the deposit in Money → Deposits and pick the tenant to attach it."
+    },
+    "applications": {
+      "title": "Applications",
+      "btn": "Applications",
+      "submitted": "Submitted",
+      "decided": "Decided",
+      "income": "Income",
+      "none": "No application on file. Tenants added straight from the Tenants list have no application behind them — only those created from an approved application are linked back here."
+    },
+    "maintenance": {
+      "title": "Maintenance",
+      "btn": "Maintenance",
+      "goTo": "Go to Tickets →",
+      "none": "No maintenance tickets for this tenant. A ticket is attached to whoever holds the unit — pick the tenant on the ticket form if the unit has no active lease."
+    },
+    "renewals": {
+      "title": "Renewals",
+      "btn": "Renewals",
+      "none": "No renewal notices. These are raised against a lease as it nears its end date — 60, 30 and 14 days out — so there is nothing here until this tenant holds a lease approaching expiry."
+    },
+    "handover": {
+      "title": "Handover",
+      "btn": "Handover",
+      "keys": "Keys",
+      "returned": "returned",
+      "completed": "Completed",
+      "goTo": "Go to Handover →",
+      "none": "No handover recorded. An ENTRY checklist is done at move-in and an EXIT one at move-out, so this stays empty until the tenant takes the keys."
+    },
+    "rentSchedule": {
+      "title": "Rent Schedule",
+      "btn": "Rent",
+      "none": "No rent schedule yet. Periods are generated from the lease, so this fills in once a lease exists for this tenant."
     }
   },
   "pipeline": {

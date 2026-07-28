@@ -1498,6 +1498,112 @@
         "tenancy_agreement": "租赁协议",
         "other": "其他"
       }
+    },
+    "tabs": {
+      "overview": "概览",
+      "tenancy": "租赁",
+      "money": "款项",
+      "maintenance": "维修",
+      "documents": "文件",
+      "messages": "消息"
+    },
+    "lifecycle": {
+      "title": "租赁状态",
+      "nextUp": "下一步",
+      "unknown": "未登记电话",
+      "enquiry": "咨询",
+      "viewing": "看房",
+      "application": "申请",
+      "approved": "已批准",
+      "deposit": "押金",
+      "lease": "租约",
+      "handover": "交接",
+      "leaseEnded": "已结束",
+      "statusCurrent": "现租客",
+      "statusFormer": "前租客 — 无有效租约",
+      "statusApproved": "已批准 — 尚未创建租约",
+      "statusApplicant": "申请人 — 等待审批",
+      "statusEnquiry": "咨询 — 尚未提交申请",
+      "statusNone": "暂无租赁记录",
+      "nextEnquiry": "无咨询记录 — 请登记一条，或直接建立租赁。",
+      "nextViewing": "为该潜在租客安排看房。",
+      "nextApplication": "尚无申请 — 发送申请链接，或手动登记。",
+      "nextApproved": "申请等待审批 — 请批准或拒绝。",
+      "nextDeposit": "在「款项 → 押金」中登记保证金。",
+      "nextLease": "创建租约 — 租金计划由此生成。",
+      "nextHandover": "完成入住（ENTRY）交接清单并交付钥匙。"
+    },
+    "overview": {
+      "atAGlance": "概要",
+      "leases": "租约",
+      "deposits": "押金",
+      "applications": "申请",
+      "handovers": "交接",
+      "onFile": "在档",
+      "recorded": "已记录"
+    },
+    "messages": {
+      "title": "消息",
+      "none": "尚无与该号码的 WhatsApp 消息。租客发消息到企业号码，或系统发出提醒或回复后，对话将显示在此。",
+      "noPhone": "未登记电话号码，因此没有可显示的 WhatsApp 对话。请在租客记录中添加。",
+      "goTo": "前往 WhatsApp 收件箱 →",
+      "received": "收到",
+      "sent": "已发送"
+    },
+    "section": {
+      "loadFailed": "无法加载此部分。",
+      "loadFailedHint": "这是一个故障，而不是空记录 — 没有任何数据丢失。"
+    },
+    "openInList": "在列表中打开 →",
+    "noPhone": "无电话",
+    "addedOn": "添加于",
+    "selectTenant": "选择一位租客以查看完整记录",
+    "leases": {
+      "title": "租约",
+      "btn": "租约",
+      "ongoing": "进行中",
+      "none": "尚未为该租客创建租约。租约是租金计划的起点，并关联押金 — 申请获批且押金到账后即可创建。"
+    },
+    "deposits": {
+      "title": "押金",
+      "btn": "押金",
+      "unit": "单元",
+      "goTo": "前往押金 →",
+      "receiptFailed": "无法打开收据。",
+      "none": "没有与该租客关联的押金。登记时未指定租客的押金不会关联 — 请在「款项 → 押金」中打开该押金并选择租客。"
+    },
+    "applications": {
+      "title": "申请",
+      "btn": "申请",
+      "submitted": "提交于",
+      "decided": "审批于",
+      "income": "收入",
+      "none": "无申请记录。直接从租客列表添加的租客没有对应申请 — 只有由已批准申请创建的租客才会关联到此处。"
+    },
+    "maintenance": {
+      "title": "维修",
+      "btn": "维修",
+      "goTo": "前往工单 →",
+      "none": "该租客没有维修工单。工单归属于持有该单元的租客 — 若该单元没有有效租约，请在工单表单中选择租客。"
+    },
+    "renewals": {
+      "title": "续约",
+      "btn": "续约",
+      "none": "无续约通知。续约通知在租约临近到期时发出 — 到期前 60、30 和 14 天 — 因此在该租客持有临近到期的租约之前此处为空。"
+    },
+    "handover": {
+      "title": "交接",
+      "btn": "交接",
+      "keys": "钥匙",
+      "returned": "已归还",
+      "completed": "已完成",
+      "goTo": "前往交接 →",
+      "none": "无交接记录。入住时填写 ENTRY 清单，退租时填写 EXIT 清单，因此在租客拿到钥匙之前此处为空。"
+    },
+    "rentSchedule": {
+      "title": "租金计划",
+      "btn": "租金",
+      "none": "尚无租金计划。计划期数由租约生成，因此该租客有租约后此处会自动填充。"
     }
   },
   "pipeline": {

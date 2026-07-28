@@ -63,15 +63,37 @@ enquiriesRouter.get('/', async (req: Request, res: Response, next: NextFunction)
 
     const unitId = req.query['unit_id'] as string | undefined;
     const stage  = req.query['stage'] as string | undefined;
+    const phone  = req.query['phone'] as string | undefined;
+
+    // An enquiry predates the tenant record, so it carries no tenant_id -- the
+    // prospect's phone number is the only link back. Tenant 360's lifecycle
+    // timeline needs it to answer "did this person enquire, and did they view?"
+    // Numbers are stored however they were typed ('+1-868-555-1234',
+    // '18685551234', '555-1234'), so match on the last 7 digits of each side
+    // rather than on equality. 7 digits is the local subscriber number in
+    // Trinidad & Tobago -- enough to be specific, short enough to survive a
+    // missing country or area code.
+    const phoneDigits = phone ? phone.replace(/\D/g, '').slice(-7) : undefined;
 
     const rows = await withOwnerRLS(propertiesPool, ownerId, async client => {
       const conds: string[] = [];
       const vals: unknown[] = [ownerId];
-      if (unitId) { vals.push(unitId); conds.push(`unit_id = $${vals.length}`); }
-      if (stage)  { vals.push(stage);  conds.push(`stage = $${vals.length}`); }
+      if (unitId) { vals.push(unitId); conds.push(`e.unit_id = $${vals.length}`); }
+      if (stage)  { vals.push(stage);  conds.push(`e.stage = $${vals.length}`); }
+      if (phoneDigits && phoneDigits.length >= 7) {
+        vals.push(phoneDigits);
+        conds.push(`right(regexp_replace(e.prospect_phone, '\\D', '', 'g'), 7) = $${vals.length}`);
+      } else if (phoneDigits) {
+        // Too short to identify anyone -- match nothing rather than everyone.
+        conds.push('FALSE');
+      }
       const where = conds.length ? ' AND ' + conds.join(' AND ') : '';
       const { rows: r } = await client.query(
-        `SELECT e.*, u.unit_number, p.name AS property_name
+        // latest_viewing_at lets a caller answer "has this prospect actually
+        // viewed?" without a second round trip; prop_viewings joins to the
+        // enquiry, never to a tenant.
+        `SELECT e.*, u.unit_number, p.name AS property_name,
+                (SELECT max(v.scheduled_at) FROM prop_viewings v WHERE v.enquiry_id = e.id) AS latest_viewing_at
          FROM prop_enquiries e
          LEFT JOIN prop_units u ON u.id = e.unit_id
          LEFT JOIN prop_properties p ON p.id = e.property_id

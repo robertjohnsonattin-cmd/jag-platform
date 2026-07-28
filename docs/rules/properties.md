@@ -63,3 +63,37 @@ rent recorded in Tenancy Ops → Rent did not move the Dashboard arrears figure,
 `prop_rent_payments`. Consolidating onto `prop_rent_schedule` under STD-13. Until the
 contract step drops `prop_rent_payments`, treat `prop_rent_schedule` as authoritative and
 do not add new readers of `prop_rent_payments`.
+
+### Phone is the join key for anything that predates the tenant record (session 51)
+`prop_enquiries` and `prop_viewings` carry **no `tenant_id`** — they exist before a tenant
+record does, and nothing back-fills a link when the tenant is finally created. The
+prospect's phone number is the only join available.
+
+Phones are stored in whatever format they arrived in: `prop_enquiries.prospect_phone` holds
+both `18682912786` and `251-6802` in real data, and tenants are typed by hand as
+`+1-868-…`. **Never match phone numbers with `=`.** `GET /properties/enquiries?phone=`
+compares the last 7 digits of each side
+(`right(regexp_replace(prospect_phone,'\D','','g'), 7)`) — 7 is the T&T local subscriber
+number, specific enough to identify a person and short enough to survive a missing country
+or area code. A shorter input matches nothing rather than everything.
+
+WhatsApp is the other direction of the same problem: `prop_whatsapp_messages` stores the
+E.164 digits Meta sent (`18682912786`) and `GET /wa-inbox/:phone` matches
+`from_number`/`to_number` **exactly**, so a tenant phone must be normalised before it is
+used as a thread key — see `waNumber()` in `components/properties/TenantDetail.tsx`
+(7 digits → prefix `1868`, 10 → prefix `1`, 11 already E.164). Without it every tenant's
+Messages tab renders an empty thread that looks like "no messages" rather than "wrong key".
+That empty state deliberately prints the number it searched, so a future mismatch is
+diagnosable instead of silent.
+
+### Lifecycle state is derived, and "unknown" is not "not yet" (session 51)
+Nothing in the schema records where a tenant sits between enquiry and handover.
+`deriveLifecycle()` in `components/properties/TenantTimeline.tsx` computes it from records
+the detail pane has already fetched — it adds no queries and stores nothing, so it cannot
+drift from the data.
+
+It distinguishes four step states, and the fourth is the point: `UNKNOWN` means the
+evidence is unreachable (no phone on file, so we cannot tell whether this person enquired),
+which is **not** the same as `PENDING` ("hasn't happened yet"). Collapsing the two would
+state a guess as a fact — the same failure as rendering loading, failed and empty with one
+shared message, which is what hid the dead `GET /leases` route for six sessions.

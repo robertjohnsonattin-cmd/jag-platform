@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import PropertiesPanel from '../components/properties/PropertiesPanel'
@@ -87,6 +87,18 @@ export default function Properties() {
   const startTab: TabId = initialTab && VALID_TAB_IDS.has(initialTab as TabId) ? (initialTab as TabId) : 'properties'
   const [tab, setTab] = useState<TabId>(startTab)
   const [group, setGroup] = useState<GroupId>(TAB_TO_GROUP.get(startTab)!)
+
+  // `useState` reads its initial value once, so a `?tab=` that arrives while
+  // this page is already mounted used to change the URL and nothing else. That
+  // is the case for every cross-reference link out of Tenant 360 (and for the
+  // notification bell when Properties is already open). Follow the URL when it
+  // moves; the tab row still drives itself through setTab for ordinary clicks.
+  useEffect(() => {
+    if (initialTab && VALID_TAB_IDS.has(initialTab as TabId)) {
+      setTab(initialTab as TabId)
+      setGroup(TAB_TO_GROUP.get(initialTab as TabId)!)
+    }
+  }, [initialTab])
 
   const activeGroup = GROUPS.find(g => g.id === group)!
 

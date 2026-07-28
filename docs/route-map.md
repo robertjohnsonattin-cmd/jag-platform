@@ -39,6 +39,23 @@
 | Pending-review → Transactions | `components/finance/TransactionsPanel.tsx` | AI `suggested_category`/`confidence` surfaced in review modal; orphaned `fin_pending_review_queue` row closed on PATCH |
 | IMS photo 401 fix | `components/AuthedImg.tsx` + `api/client.ts` `objectUrl()` | Auth-gated streaming `<img>` now Bearer-fetched → blob (see implementation rule above) |
 
+### Tenant 360 — Properties → Tenants (session 51, 2026-07-28)
+
+Properties restructure **Phase 2**. Replaced the tenants table (whose last column carried ten
+buttons, eight of which opened a near-identical modal) with a master-detail pane on the same
+pattern as `PropertiesPanel`.
+
+| Piece | File | Notes |
+|---|---|---|
+| Tenant list + detail shell | `components/properties/TenantsPanel.tsx` | Master-detail: list is a `w-72` sidebar on md+, full-width on mobile until a tenant is picked, then the detail pane takes over with a `← Back` button. Retains only `AddTenantModal` / `EditTenantModal` / `ConfirmDeleteModal`; creating a tenant now selects it. ~1130 → ~330 lines |
+| Detail pane | `components/properties/TenantDetail.tsx` | Six tabs — **Overview · Tenancy · Money · Maintenance · Documents · Messages**. Every section keeps the `tenant_id`-filtered query it already had, gated with `enabled: tab === '…'`; the five the timeline reads are also enabled on Overview. Exports `tenantDisplayName()` and `waNumber()` |
+| Lifecycle timeline | `components/properties/TenantTimeline.tsx` | Enquiry → Viewing → Application → Approved → Deposit → Lease → Handover, **derived, never stored** — this state was previously stated nowhere in the app. Exports `deriveLifecycle()` (pure, unit-testable) + a `Translate` type. `UNKNOWN` is deliberately distinct from `PENDING`: with no phone on file we cannot know whether someone enquired, and saying "not yet" would be a guess stated as fact |
+| Deep links | `pages/Properties.tsx` | `?tab=` is now followed via `useEffect`, not only read at mount — `useState` reads its initial value once, so every cross-reference link out of Tenant 360 changed the URL and nothing else. Also fixes the notification bell when Properties is already open. Panels that accept `focusId` (applications, maintenance) get it; the rest just land on the right tab |
+
+**Naming collision:** "Maintenance" is a tab *inside* Tenant 360 (that tenant's reactive tickets),
+a top-level Properties tab (all tickets), a separate Properties **Scheduled** Maintenance tab
+(preventive), and an Inventory/VMS PM schedule. Four different things.
+
 ### Mobile density / navigation cleanup (session 46, 2026-07-24)
 Robert flagged Properties (most-fleshed-out module) as hard to use on mobile. Fixed platform-wide, not just Properties — see the three new bullets under "Mobile responsive patterns" above for the reusable rules (`min-w-0` on master-detail list panes, `overflow-x-auto` on tab bars, grouped tabs over ~6 items). Concretely: grouped nav on Properties (17→5 sections), Finance (11→3), HR (9→4); wrapped 21 bare `<table>`s in `overflow-x-auto` (Purchasing, NLCB, JournalEntries, DragonBridge, Inventory); added `overflow-x-auto` to 14 previously-unwrapped tab bars; fixed the `min-w-0` gap on 12 master-detail screens (this was the real bug — Inventory's Items filter row was silently clipped off-screen with no scrollbar, not just "cramped"). Deployed via `./deploy.sh --frontend-only` (commit `9f691a9`). **Note:** `deploy.sh`'s git-snapshot step does `git add -A`, so an unrelated frontend-only deploy can sweep up any stray untracked files sitting in the repo at deploy time — worth a `git status` glance before deploying if you know there's WIP lying around.
 
@@ -92,7 +109,7 @@ Robert flagged Properties (most-fleshed-out module) as hard to use on mobile. Fi
 | Internal MinIO audit webhook | `routes/internal/minio-audit.ts` | Receives MinIO `audit_webhook:loki` POSTs; validates `Bearer $MINIO_AUDIT_TOKEN`; logs to Loki via structured logger; mounted at `/internal/minio-audit` (no Keycloak, Docker-network-only) |
 | Properties vendor invoices | `routes/properties/vendor-invoices.ts` | **Registered 2026-07-28 — existed since well before, undocumented.** `prop_vendor_invoices` CRUD + approve; `prop_vendor_invoice_allocations` splits one invoice across units (migration 058); `linked_expense_id` bridges to a Finance expense (060); `settlement_journal_entry_id` writes back the GL entry on settlement (061). Mounted at `/:propertyId/vendor-invoices`. **Frontend surface:** only property detail → Invoices tab in `PropertiesPanel.tsx` — there is no top-level Invoices tab. Not to be confused with JABCO's payment certificates or DragonBridge invoices |
 | Tenancy leases (flat list) | `routes/properties/leases.ts` | **Session 50 (2026-07-28)** — `GET /properties/leases` with optional `tenant_id`/`property_id`/`unit_id`/`status`. Was previously declared inside `properties.ts` *after* `GET /:id`, so Express matched `/:id` first and every call 422'd — the tenant Leases modal had never worked, it just rendered its empty state. **Rule: a flat `/properties/x` route must be mounted from `index.ts` ahead of `propRoutes`, never declared in `properties.ts` below `GET /:id`.** Tenant columns match `GET /:propertyId/leases` exactly so both feed the same frontend `Lease` type |
-| Tenancy enquiries | `routes/properties/enquiries.ts` | Prospect enquiry CRUD + WhatsApp reply; stage lifecycle |
+| Tenancy enquiries | `routes/properties/enquiries.ts` | Prospect enquiry CRUD + WhatsApp reply; stage lifecycle. **Session 51 (2026-07-28):** `GET /properties/enquiries` gained a `phone` filter and a `latest_viewing_at` column. An enquiry predates the tenant record and carries **no `tenant_id`** — the prospect's phone is the only link — so Tenant 360's lifecycle timeline reaches Enquiry/Viewing through it. Matching is on the **last 7 digits** of `prospect_phone` (`right(regexp_replace(…,'\D','','g'),7)`), because numbers are stored however they were typed: real rows include both `18682912786` and `251-6802`. A `phone` shorter than 7 digits matches nothing rather than everything |
 | Tenancy viewings | `routes/properties/viewings.ts` | Viewing scheduling, Google Calendar events, status PATCH; `/send-reminders` + `/send-post-viewing-links` batch; public booking router (`/public/book/:slug`) |
 | Tenancy applications | `routes/properties/applications.ts` | Application CRUD + decide (APPROVE/REJECT) + generate tenancy agreement PDF |
 | Tenancy deposits | `routes/properties/deposits.ts` | Deposit CRUD + receipt PDF + refund workflow |

@@ -13,7 +13,13 @@ function qs(params?: Record<string, string | number | undefined>): string {
 
 export const tenancyApi = {
   // ── Enquiries ────────────────────────────────────────────
-  getEnquiries: (params?: { unit_id?: string; stage?: string }) =>
+  /**
+   * `phone` matches on the last 7 digits of `prospect_phone`, since numbers are
+   * stored in whatever format they arrived in. An enquiry has no tenant_id --
+   * it predates the tenant record -- so phone is the only way to reach a
+   * tenant's enquiries and viewings. Rows carry `latest_viewing_at`.
+   */
+  getEnquiries: (params?: { unit_id?: string; stage?: string; phone?: string }) =>
     api.get<Row[]>(`/properties/enquiries${qs(params)}`),
 
   getEnquiry: (id: string) =>
