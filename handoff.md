@@ -4,7 +4,7 @@
 
 - **Date:** 2026-07-27
 - **Project path:** `C:\Users\rober\Documents\Claude\Projects\JAG Holdings`
-- **Git branch:** `main` — **history rewrite in progress**, see §5. Before the rewrite began, `main` was pushed and in sync with `origin/main` at `a118d9c`.
+- **Git branch:** `main` — in sync with `origin/main`. **History was rewritten and force-pushed this session** (see §5); all SHAs from 2026-07-26 onward changed. Anyone holding an older clone must re-clone, not pull.
 - **Context estimate:** moderate. This session did doc/memory restructuring plus a git history rewrite; no application code was touched and no deploy was run.
 
 ## 2. Current Objective
@@ -33,10 +33,8 @@ Cut the token cost of *starting* a session on this project (231.6k tokens before
 
 ## 5. Immediate Next Steps
 
-1. **Finish and verify the history rewrite.** `git filter-repo` was running on the mirror at `C:\Users\rober\jag-rw.git` when this note was written; it had exceeded 10 minutes and was backgrounded. When it finishes: re-run the clinical-term grep across **every** commit (`git rev-list --all` + `git grep -I -l -i -E '<terms>' $c`) and confirm zero hits before pushing anything.
-2. **Force-push the rewritten history**, then reset the local working repo to match (`git fetch origin && git reset --hard origin/main`), and re-check the four agent worktree branches, which the rewrite also rewrites.
-3. **Understand what a force-push does and does not achieve.** GitHub retains unreachable objects; old commits can stay reachable by direct SHA until GitHub garbage-collects. The only complete remediation is to **delete and recreate the GitHub repo**, or ask GitHub Support to purge. Robert has not been asked about this yet — it is the honest last step of the purge and should be raised.
-4. **Remove the unused plugins** via the desktop app's Directory → Plugins panel (⚙ gear = installed, ➕ plus = not installed). Uninstall `Engineering`, `Sales`, `PDF Viewer`, `product-tracking-skills`, `cowork-plugin-management` — all 0–1 uses. **Keep `anthropic-skills`** (33 uses).
+1. **DELETE AND RECREATE THE GITHUB REPO — the purge is not finished without this.** The rewrite, force-push, and local `gc` are all done and verified (0 of 203 commits on the live remote contain clinical terms). **But GitHub still serves the pre-rewrite commits by direct SHA** — this was tested, not assumed: `git fetch origin 968c892f29a0ad8c594dbdc5c853441fd26789a1` against the live remote **succeeded** after the force-push. GitHub retains unreachable objects until it garbage-collects, which it does not do on demand. The two real remediations are (a) delete the `robertjohnsonattin-cmd/jag-platform` repo on GitHub and push the current clean history to a fresh one, or (b) open a GitHub Support ticket asking them to GC the repo. Option (a) is fully under Robert's control and is the recommendation. **Robert must do the deletion himself** — repo deletion is permanent and is his account action to take. Afterwards, `git remote set-url origin <new>` and `git push -u origin main` restores the backup.
+2. **Remove the unused plugins** via the desktop app's Directory → Plugins panel (⚙ gear = installed, ➕ plus = not installed). Uninstall `Engineering`, `Sales`, `PDF Viewer`, `product-tracking-skills`, `cowork-plugin-management` — all 0–1 uses. **Keep `anthropic-skills`** (33 uses).
 5. **Verify in a NEW session and report real numbers.** Plugin and memory changes cannot affect a running session; tool and skill lists are assembled at startup.
 
 ## 6. Key Patterns & Constraints
