@@ -16,8 +16,10 @@ export const scheduledMaintenanceRouter = Router();
 
 const IdParam = z.object({ id: z.string().uuid() });
 
-const FrequencyEnum = z.enum(['WEEKLY', 'MONTHLY', 'QUARTERLY', 'BIANNUAL', 'ANNUAL', 'ONE_TIME']);
-const StatusEnum    = z.enum(['ACTIVE', 'PAUSED', 'COMPLETED', 'CANCELLED']);
+const FrequencyEnum   = z.enum(['WEEKLY', 'MONTHLY', 'QUARTERLY', 'BIANNUAL', 'ANNUAL', 'ONE_TIME']);
+const StatusEnum      = z.enum(['ACTIVE', 'PAUSED', 'COMPLETED', 'CANCELLED']);
+const PriorityEnum    = z.enum(['LOW', 'MED', 'HIGH']);
+const ResponsibleEnum = z.enum(['IN_HOUSE', 'CONTRACTOR', 'TENANT', 'OFFICE']);
 
 function advanceDueDate(from: string, frequency: z.infer<typeof FrequencyEnum>): string {
   const d = new Date(`${from}T00:00:00`);
@@ -42,6 +44,11 @@ const CreateSchema = z.object({
   assigned_contractor_id:   z.string().uuid().nullable().optional(),
   estimated_cost_ttd:       z.number().positive().nullable().optional(),
   notes:                    z.string().max(5000).nullable().optional(),
+  category:                 z.string().max(30).nullable().optional(),
+  priority:                 PriorityEnum.nullable().optional(),
+  responsible:              ResponsibleEnum.nullable().optional(),
+  trade:                    z.string().max(50).nullable().optional(),
+  est_hours:                z.number().positive().max(999).nullable().optional(),
 }).strict();
 
 const PatchSchema = z.object({
@@ -53,6 +60,11 @@ const PatchSchema = z.object({
   estimated_cost_ttd:       z.number().positive().nullable().optional(),
   status:                   StatusEnum.optional(),
   notes:                    z.string().max(5000).nullable().optional(),
+  category:                 z.string().max(30).nullable().optional(),
+  priority:                 PriorityEnum.nullable().optional(),
+  responsible:              ResponsibleEnum.nullable().optional(),
+  trade:                    z.string().max(50).nullable().optional(),
+  est_hours:                z.number().positive().max(999).nullable().optional(),
 }).strict();
 
 const CompleteSchema = z.object({
@@ -96,6 +108,67 @@ scheduledMaintenanceRouter.get('/', async (req: Request, res: Response, next: Ne
         ).then(r => r.rows);
       });
       ok(res, rows);
+    } finally { client.release(); }
+  } catch (e) { next(e); }
+});
+
+// ── GET /occurrences — project forward task occurrences within a date range ──
+// Registered before GET /:id so "occurrences" is never swallowed as an :id param.
+scheduledMaintenanceRouter.get('/occurrences', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const QuerySchema = z.object({
+      from:        z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      to:          z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      property_id: z.string().uuid().optional(),
+    });
+    const parsed = QuerySchema.safeParse(req.query);
+    if (!parsed.success) { err(res, 422, 'VALIDATION_ERROR', 'from/to (YYYY-MM-DD) are required.'); return; }
+    const { from, to, property_id } = parsed.data;
+    if (from > to) { err(res, 422, 'VALIDATION_ERROR', '"from" must not be after "to".'); return; }
+
+    const client = await propertiesPool.connect();
+    try {
+      const rows = await withOwnerRLS(client, req.rlsCtx, (c) => {
+        const conditions: string[] = [`sm.status = 'ACTIVE'`, `sm.next_due_date <= $2`];
+        const params: unknown[] = [from, to];
+        if (property_id) { params.push(property_id); conditions.push(`sm.property_id = $${params.length}`); }
+
+        return c.query(
+          `SELECT sm.id, sm.title, sm.frequency, sm.next_due_date::text AS next_due_date,
+                  sm.category, sm.priority, sm.responsible, sm.trade, sm.est_hours, sm.notes,
+                  p.name AS property_name, u.unit_number, ct.name AS contractor_name
+           FROM prop_scheduled_maintenance sm
+           JOIN prop_properties p ON p.id = sm.property_id
+           LEFT JOIN prop_units u ON u.id = sm.unit_id
+           LEFT JOIN prop_contractors ct ON ct.id = sm.assigned_contractor_id
+           WHERE ${conditions.join(' AND ')}`,
+          params,
+        ).then(r => r.rows);
+      });
+
+      // Project forward: for each task, advance next_due_date by its frequency
+      // while <= "to", collecting every occurrence that falls within [from, to].
+      // ONE_TIME tasks contribute at most their single next_due_date.
+      type Occ = { occurrence_date: string; [key: string]: unknown };
+      const occurrences: Occ[] = [];
+      for (const row of rows as Array<Record<string, unknown>>) {
+        const frequency = row['frequency'] as z.infer<typeof FrequencyEnum>;
+        let date = row['next_due_date'] as string;
+        const guardLimit = 200; // safety valve against a runaway loop
+        let iterations = 0;
+        while (date <= to && iterations < guardLimit) {
+          if (date >= from) {
+            const { next_due_date: _next_due_date, ...rest } = row;
+            occurrences.push({ ...rest, occurrence_date: date });
+          }
+          if (frequency === 'ONE_TIME') break;
+          date = advanceDueDate(date, frequency);
+          iterations++;
+        }
+      }
+      occurrences.sort((a, b) => a.occurrence_date.localeCompare(b.occurrence_date));
+
+      ok(res, occurrences);
     } finally { client.release(); }
   } catch (e) { next(e); }
 });
@@ -149,10 +222,12 @@ scheduledMaintenanceRouter.post('/', async (req: Request, res: Response, next: N
         c.query(
           `INSERT INTO prop_scheduled_maintenance
              (owner_id, property_id, unit_id, title, description, frequency,
-              next_due_date, assigned_contractor_id, estimated_cost_ttd, notes)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
+              next_due_date, assigned_contractor_id, estimated_cost_ttd, notes,
+              category, priority, responsible, trade, est_hours)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING *`,
           [ownerId, b.property_id, b.unit_id ?? null, b.title, b.description ?? null, b.frequency,
-           b.next_due_date, b.assigned_contractor_id ?? null, b.estimated_cost_ttd ?? null, b.notes ?? null],
+           b.next_due_date, b.assigned_contractor_id ?? null, b.estimated_cost_ttd ?? null, b.notes ?? null,
+           b.category ?? null, b.priority ?? null, b.responsible ?? null, b.trade ?? null, b.est_hours ?? null],
         ).then(r => r.rows[0]),
       );
       logger.info({ entity: 'PROPERTIES', action: 'SCHEDULED_MAINTENANCE_CREATED', record_id: task.id, user_id: ownerId });
@@ -182,6 +257,11 @@ scheduledMaintenanceRouter.patch('/:id', async (req: Request, res: Response, nex
     if (b.estimated_cost_ttd      !== undefined) sets.push(`estimated_cost_ttd = ${push(b.estimated_cost_ttd)}`);
     if (b.status                  !== undefined) sets.push(`status = ${push(b.status)}`);
     if (b.notes                   !== undefined) sets.push(`notes = ${push(b.notes)}`);
+    if (b.category                !== undefined) sets.push(`category = ${push(b.category)}`);
+    if (b.priority                !== undefined) sets.push(`priority = ${push(b.priority)}`);
+    if (b.responsible             !== undefined) sets.push(`responsible = ${push(b.responsible)}`);
+    if (b.trade                   !== undefined) sets.push(`trade = ${push(b.trade)}`);
+    if (b.est_hours               !== undefined) sets.push(`est_hours = ${push(b.est_hours)}`);
     sets.push(`updated_at = NOW()`);
 
     if (sets.length === 1) { err(res, 422, 'VALIDATION_ERROR', 'No fields to update.'); return; }

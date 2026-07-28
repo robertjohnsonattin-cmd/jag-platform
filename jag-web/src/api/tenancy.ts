@@ -157,6 +157,9 @@ export const tenancyApi = {
   completeScheduledMaintenance: (id: string, body: { completed_date: string; actual_cost_ttd?: number; completed_by?: string; notes?: string }) =>
     api.post<Row>(`/properties/scheduled-maintenance/${id}/complete`, body),
 
+  getScheduledMaintenanceOccurrences: (params: { from: string; to: string; property_id?: string }) =>
+    api.get<Row[]>(`/properties/scheduled-maintenance/occurrences${qs(params)}`),
+
   // ── Rent ↔ Bank Reconciliation (Phase 1, link-only) ──────
   getReconciliationCandidates: () =>
     api.get<{
