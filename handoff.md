@@ -11,7 +11,9 @@
 
 ## 2. Current Objective
 
-Cut the token cost of *starting* a session on this project, which was 231.6k tokens before any work began and was burning the weekly usage limit on material irrelevant to most sessions. Three levers were identified: the 226 KB `CLAUDE.md` (done in the prior session), the 324 KB memory directory (done this session), and unused auto-installed plugins carrying 17 unauthenticated MCP servers (**still outstanding — needs UI action from Robert**). A fourth thread opened mid-session and took priority: family clinical data had been written into the git repo and pushed to GitHub, and needed removing.
+Cut the token cost of *starting* a session on this project, which was 231.6k tokens before any work began and was burning the weekly usage limit on material irrelevant to most sessions. Three levers were identified: the 226 KB `CLAUDE.md` (done in the prior session), the 324 KB memory directory (done this session), and unused auto-installed plugins carrying 17 unauthenticated MCP servers (done by Robert 2026-07-28). A fourth thread opened mid-session and took priority: family clinical data had been written into the git repo and pushed to GitHub, and needed removing.
+
+**STATUS: COMPLETE.** All three levers pulled, the purge finished, and the result measured on 2026-07-28 — **231.6k → 47.7k, a 79% cut**. Full numbers and caveats in §8.
 
 ## 3. Decisions Made & Rationale
 
@@ -37,10 +39,13 @@ Cut the token cost of *starting* a session on this project, which was 231.6k tok
 
 ## 5. Immediate Next Steps
 
-1. ~~Remove the five unused plugins.~~ **Robert reported this DONE on 2026-07-28** (`Engineering`, `Sales`, `PDF Viewer`, `product-tracking-skills`, `cowork-plugin-management` removed; `anthropic-skills` kept). **Not verifiable from the filesystem** — `~/.claude.json`'s `pluginUsage` is a historical usage ledger, not an enablement list, and it still lists all six entries. No enable/disable key exists on disk; the state is app-managed. Treat this as reported-but-unconfirmed until the context panel in step 2 shows it.
-2. **Start a NEW session and capture the context panel — this is now the only open item.** Plugin and memory changes cannot affect a running session; tool and skill lists are assembled at startup, so none of this work is visible from inside the session that did it. In a fresh session check `MCP tools` (was 49.4k / 114 tools) and `Memory files` (was 101.8k), and compare total startup against the 231.6k baseline. This both measures the result and serves as the only available confirmation that the plugins are actually gone.
-3. **Delete the pre-rewrite bundle** (`C:\Users\rober\jag-platform-pre-rewrite-20260727.bundle`) once Robert confirms nothing was lost.
-4. **Optional, low value:** a few memory files still sit at 4–5.7 KB (`feedback_migration_runner`, `feedback_date_display_timezone_bug`, `project_health_connect_biometrics_sync`, `project_whatsapp_inbound_webhook_fix`, `project_cron_ropc_auth_failures`). They are durable content, just verbose. Worth maybe 10 KB total — do not prioritise this over items 1–2.
+**All of items 1–3 below are now CLOSED as of 2026-07-28. See §8 for the measured result.**
+
+1. ~~Remove the five unused plugins.~~ **DONE and now CONFIRMED** — the fresh-session panel shows 66 MCP tools, down from 114. Filesystem inspection never could have shown this (`~/.claude.json`'s `pluginUsage` is a historical usage ledger, not an enablement list, and still lists all six entries); the context panel was the only available confirmation, and it confirms.
+2. ~~Start a NEW session and capture the context panel.~~ **DONE 2026-07-28** — panel captured, numbers in §8.
+3. ~~Delete the pre-rewrite bundle.~~ **DONE** — `C:\Users\rober\jag-platform-pre-rewrite-20260727.bundle` no longer exists; no `.bundle` remains in `C:\Users\rober\`. The unpurged clinical data now has no surviving copy.
+4. **Optional, low value:** a few memory files still sit at 4–5.7 KB (`feedback_migration_runner`, `feedback_date_display_timezone_bug`, `project_health_connect_biometrics_sync`, `project_whatsapp_inbound_webhook_fix`, `project_cron_ropc_auth_failures`). They are durable content, just verbose. Worth maybe 10 KB total. With startup now at 5% of the window this is not worth doing.
+5. **Optional cleanup, Robert's call:** `C:\Users\rober\jag-rw.git` — the rewrite mirror — is still present. It holds the *rewritten* (clean) history, so it is not a data-exposure item, just clutter.
 
 ## 6. Key Patterns & Constraints
 
@@ -56,4 +61,40 @@ Cut the token cost of *starting* a session on this project, which was 231.6k tok
 
 ## 7. Resumption Instruction
 
-Read `handoff.md` in the project root. The `CLAUDE.md` split, the memory consolidation, and the git history purge are **all complete, verified and pushed** — do not redo any of them, and do not re-litigate the decision to keep clinical data out of the repo. Robert has removed the five unused plugins, so all three levers have now been pulled. One thing remains: he needs to paste the context panel from a **freshly started** session — that is the only way to measure the result, and the only available confirmation that the plugin removal took effect, since enablement is app-managed and invisible on disk. Your first action is to ask for that panel, then report the actual startup total against the 231.6k baseline, stating plainly that the earlier ~110k prediction was derived from byte counts and was never confirmed.
+Read `handoff.md` in the project root. This whole workstream is **finished**. The `CLAUDE.md` split, the memory consolidation, the git history purge, the plugin removal and the final measurement are all complete and verified — do not redo any of them, and do not re-litigate the decision to keep clinical data out of the repo. The only durable output you need from this file is §6 (the constraints that keep startup cost from regrowing) and §8 (the numbers). Start the next session on actual project work.
+
+## 8. Measured Result — 2026-07-28
+
+Captured from the context panel of a freshly started session on this project (verified as this
+project: 3 always-loaded memory files = global `CLAUDE.md` + project `CLAUDE.md` + `MEMORY.md`,
+35,662 bytes total).
+
+| Component | Before | After |
+|---|---|---|
+| **Startup total** | **231.6k / 967k (24%)** | **47.7k / 1.0M (5%)** |
+| Memory files | ~101.8k *(inferred, never measured)* | 17.8k (3 files) |
+| MCP tools | 49.4k / **114 tools** | 24.5k / **66 tools** — 7.0k loaded + 17.4k deferred |
+| System tools | not broken out in baseline | 14.7k loaded + 15.1k deferred |
+| System prompt | not broken out in baseline | 4.2k |
+| Skills | not broken out in baseline | 4.1k |
+
+**−183.9k tokens, a 79% cut.** Read honestly, three things qualify that headline:
+
+- **Part of the gain is a harness feature, not this work.** Deferred tool schemas (17.4k MCP +
+  15.1k system tools) load on demand rather than at startup. If every deferred schema were
+  counted as eager, startup would be **80.2k** — still a **65%** cut, and that is the number to
+  quote if the deferral behaviour ever changes.
+- **The memory baseline was an inference.** ~101.8k was derived from 324.6 KB at ~3.2 chars/token
+  and was never seen on a panel. The *after* number (17.8k) is measured. Actual observed density
+  on this project's markdown is ~2.0 chars/token, so the real before-figure may have been higher,
+  not lower.
+- **The window itself grew** 967k → 1.0M, so 24% → 5% slightly overstates it. The absolute token
+  numbers are the honest comparison.
+
+**The earlier ~110k prediction was wrong, and it was wrong on the optimistic side of useless** —
+it was extrapolated from byte counts, not measured, and the actual result (47.7k) beat it by more
+than half. Do not treat byte-count extrapolations as forecasts; they were off by 2.3× here even
+in the favourable direction.
+
+**Plugin removal is confirmed by the tool count, and only by that.** 114 → 66 tools is the sole
+evidence that the five plugins are gone — enablement is app-managed and leaves no on-disk trace.
