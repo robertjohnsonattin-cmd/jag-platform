@@ -35,7 +35,7 @@ Cut the token cost of *starting* a session on this project (231.6k tokens before
 
 1. **DELETE AND RECREATE THE GITHUB REPO — the purge is not finished without this.** The rewrite, force-push, and local `gc` are all done and verified (0 of 203 commits on the live remote contain clinical terms). **But GitHub still serves the pre-rewrite commits by direct SHA** — this was tested, not assumed: `git fetch origin 968c892f29a0ad8c594dbdc5c853441fd26789a1` against the live remote **succeeded** after the force-push. GitHub retains unreachable objects until it garbage-collects, which it does not do on demand. The two real remediations are (a) delete the `robertjohnsonattin-cmd/jag-platform` repo on GitHub and push the current clean history to a fresh one, or (b) open a GitHub Support ticket asking them to GC the repo. Option (a) is fully under Robert's control and is the recommendation. **Robert must do the deletion himself** — repo deletion is permanent and is his account action to take. Afterwards, `git remote set-url origin <new>` and `git push -u origin main` restores the backup.
 2. **Remove the unused plugins** via the desktop app's Directory → Plugins panel (⚙ gear = installed, ➕ plus = not installed). Uninstall `Engineering`, `Sales`, `PDF Viewer`, `product-tracking-skills`, `cowork-plugin-management` — all 0–1 uses. **Keep `anthropic-skills`** (33 uses).
-5. **Verify in a NEW session and report real numbers.** Plugin and memory changes cannot affect a running session; tool and skill lists are assembled at startup.
+3. **Verify in a NEW session and report real numbers.** Plugin and memory changes cannot affect a running session; tool and skill lists are assembled at startup.
 
 ## 6. Key Patterns & Constraints
 
@@ -49,4 +49,4 @@ Cut the token cost of *starting* a session on this project (231.6k tokens before
 
 ## 7. Resumption Instruction
 
-Read `handoff.md` in the project root. The `CLAUDE.md` split and the memory consolidation are complete, committed and pushed — do not redo either. Your first action is to check whether the `git filter-repo` run in `C:\Users\rober\jag-rw.git` completed, verify the purge by grepping every commit for clinical terms, and only then force-push and reset the local repo. Raise step 5.3 with Robert — a force-push alone does not remove the data from GitHub's servers.
+Read `handoff.md` in the project root. The `CLAUDE.md` split, the memory consolidation, and the git history purge are all complete, verified and pushed — do not redo any of them. Your first action is step 5.1: confirm with Robert whether he has deleted and recreated the GitHub repo. **Until he does, the pre-rewrite commits containing family clinical data remain fetchable from GitHub by direct SHA** — this was tested against the live remote after the force-push and it succeeded, so do not describe the purge as finished. Then step 5.2 (plugins) and 5.3 (measure a fresh session).
