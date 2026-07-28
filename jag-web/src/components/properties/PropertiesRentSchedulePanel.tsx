@@ -15,6 +15,17 @@ const STATUS_COLORS: Record<string, string> = {
 
 const cls = 'w-full bg-slate-700 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500'
 
+// due_date is a PG DATE and arrives as 'YYYY-MM-DD' or a midnight-UTC ISO
+// timestamp. Rendering it raw printed '2026-08-01T00:00:00.000Z' on screen;
+// passing it through `new Date(iso)` would instead render 31 July in Trinidad.
+// Build the local date from the Y/M/D parts explicitly.
+const fmtDue = (v: unknown): string => {
+  const s = v == null ? '' : String(v)
+  if (!s) return '—'
+  const d = new Date(`${s.slice(0, 10)}T00:00:00`)
+  return isNaN(d.getTime()) ? s : d.toLocaleDateString('en-TT', { day: 'numeric', month: 'short', year: 'numeric' })
+}
+
 export default function PropertiesRentSchedulePanel() {
   const { t } = useTranslation()
   const qc = useQueryClient()
@@ -40,13 +51,19 @@ export default function PropertiesRentSchedulePanel() {
 
   return (
     <div>
-      <div className="flex items-center gap-3 mb-4">
-        <select className="bg-slate-700 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100"
+      <div className="flex items-center gap-2 mb-4">
+        <label htmlFor="rent-status-filter" className="text-xs text-slate-400 uppercase tracking-wide">
+          {t('tenancy.filterStatus', 'Status')}
+        </label>
+        <select id="rent-status-filter" className="bg-slate-700 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100"
           value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
           <option value="">{t('tenancy.allStatuses', 'All statuses')}</option>
           {['UPCOMING','REMINDER_SENT','PAID','PARTIAL','LATE','WAIVED'].map(s =>
             <option key={s} value={s}>{s}</option>)}
         </select>
+        <span className="ml-auto text-xs text-slate-500">
+          {t('tenancy.periodCount', '{{n}} periods', { n: schedule.length })}
+        </span>
       </div>
 
       {schedule.length === 0 && <p className="text-sm text-slate-500 py-6 text-center">{t('tenancy.noSchedule', 'No rent schedule found.')}</p>}
@@ -54,27 +71,38 @@ export default function PropertiesRentSchedulePanel() {
       <table className="w-full text-sm min-w-[720px]">
         <thead>
           <tr className="text-xs text-slate-500 border-b border-slate-700">
-            <th className="text-left pb-2">{t('tenancy.tenant', 'Tenant')}</th>
-            <th className="text-left pb-2">{t('tenancy.unit', 'Unit')}</th>
-            <th className="text-left pb-2">{t('tenancy.period', 'Period')}</th>
-            <th className="text-left pb-2">{t('tenancy.dueDate', 'Due Date')}</th>
-            <th className="text-right pb-2">{t('tenancy.amountDue', 'Amount Due')}</th>
-            <th className="text-left pb-2">{t('tenancy.status', 'Status')}</th>
+            <th className="text-left pb-2 pr-4">{t('tenancy.tenant', 'Tenant')}</th>
+            <th className="text-left pb-2 pr-4">{t('tenancy.unit', 'Unit')}</th>
+            <th className="text-left pb-2 pr-4">{t('tenancy.period', 'Period')}</th>
+            <th className="text-left pb-2 pr-4">{t('tenancy.dueDate', 'Due Date')}</th>
+            <th className="text-right pb-2 pr-4">{t('tenancy.amountDue', 'Amount Due')}</th>
+            <th className="text-left pb-2 pr-4">{t('tenancy.status', 'Status')}</th>
             <th className="text-left pb-2"></th>
           </tr>
         </thead>
         <tbody>
           {schedule.map((rs: Record<string, unknown>) => (
             <tr key={String(rs['id'])} className="border-b border-slate-800 hover:bg-slate-800/50">
-              <td className="py-2 text-slate-300">{String(rs['tenant_name'])}</td>
-              <td className="py-2 text-slate-400">{String(rs['unit_number'] ?? '—')}</td>
-              <td className="py-2 text-slate-400">{String(rs['period_year'])}-{String(rs['period_month']).padStart(2,'0')}</td>
-              <td className="py-2 text-slate-400">{String(rs['due_date'])}</td>
-              <td className="py-2 text-right text-slate-200 font-mono">
+              <td className="py-2 pr-4 text-slate-300">
+                {String(rs['tenant_name'])}
+                {/* The reminder batch does `if (!row.tenant_phone) continue` — a
+                    row with no phone is skipped with no error and no log, so the
+                    only place that can ever surface it is here. */}
+                {!rs['tenant_phone'] && (
+                  <span className="ml-2 text-xs px-1.5 py-0.5 rounded border border-amber-700 text-amber-400 align-middle"
+                    title={t('tenancy.noPhoneHint', 'No phone on this row — WhatsApp rent reminders for it are skipped silently. Add a phone to the tenant record, then regenerate the schedule.')}>
+                    {t('tenancy.noPhone', 'no phone')}
+                  </span>
+                )}
+              </td>
+              <td className="py-2 pr-4 text-slate-400">{String(rs['unit_number'] ?? '—')}</td>
+              <td className="py-2 pr-4 text-slate-400">{String(rs['period_year'])}-{String(rs['period_month']).padStart(2,'0')}</td>
+              <td className="py-2 pr-4 text-slate-400 whitespace-nowrap">{fmtDue(rs['due_date'])}</td>
+              <td className="py-2 pr-4 text-right text-slate-200 font-mono whitespace-nowrap">
                 TTD ${parseFloat(String(rs['amount_due_ttd'] ?? 0)).toLocaleString('en-TT', { minimumFractionDigits: 2 })}
               </td>
-              <td className="py-2">
-                <span className={`text-xs px-2 py-0.5 rounded border ${STATUS_COLORS[String(rs['status'])] ?? ''}`}>
+              <td className="py-2 pr-4">
+                <span className={`text-xs px-2 py-0.5 rounded border whitespace-nowrap ${STATUS_COLORS[String(rs['status'])] ?? ''}`}>
                   {String(rs['status'])}
                 </span>
               </td>
