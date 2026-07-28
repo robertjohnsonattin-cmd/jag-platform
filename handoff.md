@@ -25,8 +25,8 @@ inconsistently regardless of tab arrangement. The work is a five-phase repair-th
 fix the data links, rebuild the tenant view, restructure navigation, consolidate the duplicated
 rent system, add the landing view.
 
-**Phase 1 is complete, deployed to production 2026-07-28 (session 51), and verified.
-Phase 2 (Tenant 360) is complete and committed but NOT deployed. Phases 3–5 not started.**
+**Phases 1 and 2 are complete, deployed to production 2026-07-28 (session 51), and verified.
+Phases 3–5 not started.**
 
 ## 3. Decisions Made & Rationale
 
@@ -126,20 +126,25 @@ dependency was added (none were here; skipping saved a ~90 MB upload).
 1. **Outstanding git decision:** the branch is unmerged and unpushed. Production is running Phase 1,
    so `main` and the off-site GitHub backup are both behind what is deployed. Merge to `main`
    and push, or keep the branch — Robert's call, but do not leave deployed code unbacked-up for long.
-2. **Phase 2 is built but not deployed** (commit `88ef936`). It is a large visible change to the
-   module Robert uses most, and he has not seen it yet — deploying is a decision, not a formality.
-   Nothing in it needs a migration; it is an ordinary API + frontend deploy.
+2. **Phase 2 is deployed but has never been clicked.** It typechecks, builds, its endpoint is
+   verified in production and its SQL is verified against real rows — but no human has used the
+   Tenant 360 UI. First session with Robert available should walk one tenant end-to-end.
 3. The 6 `MNT-*` maintenance tickets still have no tenant. They can only be fixed by hand in
    Properties → Maintenance using the picker Phase 1 added.
 
-**Phase 2 — DONE (commit `88ef936`).** `TenantsPanel` went master-detail (~1130 → ~330 lines);
+**Phase 2 — DONE + DEPLOYED (commit `88ef936`).** `TenantsPanel` went master-detail (~1130 → ~330 lines);
 `TenantDetail.tsx` holds the six tabs; `TenantTimeline.tsx` holds `deriveLifecycle()`, a pure
 function worth unit-testing if tests are ever added here. Two things found while building it that
 are written up in `docs/rules/properties.md`: enquiries/viewings carry no `tenant_id` and must be
 reached by **phone matched on the last 7 digits, never `=`**; and WhatsApp thread lookup is an exact
 match on E.164 digits, so tenant phones need `waNumber()` normalising or the Messages tab silently
-renders "no messages" for everyone. **Not yet verified in a browser** — it typechecks and builds,
-but no one has clicked it.
+renders "no messages" for everyone.
+
+Verified after deploy: `GET /properties/enquiries?phone=` returns 200 in all four shapes (absent,
+dashed, E.164, too-short), and the predicate matches real data across formats — typing
+`+1-868-291-2786` finds the row stored as `18682912786`, carrying `latest_viewing_at`. The portfolio
+has 29 enquiries, 12 with viewings, so the timeline's Enquiry and Viewing steps do light up for real
+tenants. **Still not verified in a browser** — nobody has clicked the UI.
 4. Phase 3 — navigation restructure. **Trap:** a new `GET /properties/units` must be registered
    before `propRoutes` in `index.ts` or it will be shadowed by `/:id` exactly like `/leases` was.
 5. Phase 4 — rent consolidation. Validate migrations 064/065 in a throwaway `postgres:18` container
