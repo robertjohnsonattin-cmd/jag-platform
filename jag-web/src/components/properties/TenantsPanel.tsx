@@ -7,6 +7,7 @@ import { api } from '../../api/client'
 import type { PropertyTenant, TenantDocument, TenantDocType, Lease } from '../../types/properties'
 import { fmtDate } from '../../lib/entities'
 import ConfirmDeleteModal from '../ui/ConfirmDeleteModal'
+import TenantSectionState from './TenantSectionState'
 
 const DEPOSIT_STATUS_COLORS: Record<string, string> = {
   HELD:               'bg-blue-900/50 text-blue-300 border-blue-700',
@@ -353,7 +354,7 @@ function TenantDocsModal({ tenant, onClose }: { tenant: PropertyTenant; onClose:
     ? (tenant.company_name ?? 'Tenant')
     : `${tenant.first_name}${tenant.last_name ? ` ${tenant.last_name}` : ''}`
 
-  const { data: docs = [], isLoading } = useQuery({
+  const { data: docs = [], isLoading, error } = useQuery({
     queryKey: ['tenant-docs', tenant.id],
     queryFn: () => propertiesApi.getTenantDocuments(tenant.id),
   })
@@ -451,10 +452,12 @@ function TenantDocsModal({ tenant, onClose }: { tenant: PropertyTenant; onClose:
 
         {/* Doc list */}
         <div className="flex-1 overflow-y-auto">
-          {isLoading && <p className="text-slate-400 text-sm">{t('common.loading')}</p>}
-          {!isLoading && docs.length === 0 && (
-            <p className="text-slate-500 text-sm text-center py-8">{t('tenants.docs.none', 'No documents uploaded yet.')}</p>
-          )}
+          <TenantSectionState
+            isLoading={isLoading}
+            error={error}
+            isEmpty={docs.length === 0}
+            reason={t('tenants.docs.none', 'No documents on file. Anything supplied with an online application is copied here automatically; otherwise upload ID, employment letter and references above.')}
+          />
           {docs.length > 0 && (
             <div className="space-y-2">
               {docs.map((doc: TenantDocument) => (
@@ -544,7 +547,7 @@ function TenantApplicationsModal({ tenant, onClose }: { tenant: PropertyTenant; 
     ? (tenant.company_name ?? 'Tenant')
     : `${tenant.first_name}${tenant.last_name ? ` ${tenant.last_name}` : ''}`
 
-  const { data: applications = [], isLoading } = useQuery({
+  const { data: applications = [], isLoading, error } = useQuery({
     queryKey: ['tenant-applications', tenant.id],
     queryFn: () => tenancyApi.getApplications({ tenant_id: tenant.id }),
   })
@@ -561,10 +564,12 @@ function TenantApplicationsModal({ tenant, onClose }: { tenant: PropertyTenant; 
         </div>
 
         <div className="flex-1 overflow-y-auto space-y-3">
-          {isLoading && <p className="text-slate-400 text-sm">{t('common.loading')}</p>}
-          {!isLoading && applications.length === 0 && (
-            <p className="text-slate-500 text-sm text-center py-8">{t('tenants.applications.none', 'No application on file for this tenant.')}</p>
-          )}
+          <TenantSectionState
+            isLoading={isLoading}
+            error={error}
+            isEmpty={applications.length === 0}
+            reason={t('tenants.applications.none', 'No application on file. Tenants added straight from the Tenants list have no application behind them — only those created from an approved application are linked back here.')}
+          />
           {applications.map((a: Record<string, unknown>) => (
             <div key={String(a['id'])} className="bg-slate-700/50 rounded-lg border border-slate-700 p-3">
               <div className="flex items-start justify-between">
@@ -607,7 +612,7 @@ function TenantMaintenanceModal({ tenant, onClose }: { tenant: PropertyTenant; o
     ? (tenant.company_name ?? 'Tenant')
     : `${tenant.first_name}${tenant.last_name ? ` ${tenant.last_name}` : ''}`
 
-  const { data: tickets = [], isLoading } = useQuery({
+  const { data: tickets = [], isLoading, error } = useQuery({
     queryKey: ['tenant-maintenance', tenant.id],
     queryFn: () => tenancyApi.getMaintenanceTickets({ tenant_id: tenant.id }),
   })
@@ -624,10 +629,12 @@ function TenantMaintenanceModal({ tenant, onClose }: { tenant: PropertyTenant; o
         </div>
 
         <div className="flex-1 overflow-y-auto space-y-3">
-          {isLoading && <p className="text-slate-400 text-sm">{t('common.loading')}</p>}
-          {!isLoading && tickets.length === 0 && (
-            <p className="text-slate-500 text-sm text-center py-8">{t('tenants.maintenance.none', 'No maintenance tickets on file for this tenant.')}</p>
-          )}
+          <TenantSectionState
+            isLoading={isLoading}
+            error={error}
+            isEmpty={tickets.length === 0}
+            reason={t('tenants.maintenance.none', 'No maintenance tickets for this tenant. A ticket is attached to whoever holds the unit — pick the tenant on the ticket form if the unit has no active lease.')}
+          />
           {tickets.map((tk: Record<string, unknown>) => (
             <div key={String(tk['id'])} className="bg-slate-700/50 rounded-lg border border-slate-700 p-3">
               <div className="flex items-start justify-between">
@@ -665,7 +672,7 @@ function TenantRentScheduleModal({ tenant, onClose }: { tenant: PropertyTenant; 
     ? (tenant.company_name ?? 'Tenant')
     : `${tenant.first_name}${tenant.last_name ? ` ${tenant.last_name}` : ''}`
 
-  const { data: periods = [], isLoading } = useQuery({
+  const { data: periods = [], isLoading, error } = useQuery({
     queryKey: ['tenant-rent-schedule', tenant.id],
     queryFn: () => tenancyApi.getRentSchedule({ tenant_id: tenant.id }),
   })
@@ -682,10 +689,12 @@ function TenantRentScheduleModal({ tenant, onClose }: { tenant: PropertyTenant; 
         </div>
 
         <div className="flex-1 overflow-y-auto space-y-3">
-          {isLoading && <p className="text-slate-400 text-sm">{t('common.loading')}</p>}
-          {!isLoading && periods.length === 0 && (
-            <p className="text-slate-500 text-sm text-center py-8">{t('tenants.rentSchedule.none', 'No rent schedule on file for this tenant.')}</p>
-          )}
+          <TenantSectionState
+            isLoading={isLoading}
+            error={error}
+            isEmpty={periods.length === 0}
+            reason={t('tenants.rentSchedule.none', 'No rent schedule yet. Periods are generated from the lease, so this fills in once a lease exists for this tenant.')}
+          />
           {periods.map((rs: Record<string, unknown>) => (
             <div key={String(rs['id'])} className="bg-slate-700/50 rounded-lg border border-slate-700 p-3">
               <div className="flex items-start justify-between">
@@ -724,7 +733,7 @@ function TenantHandoverModal({ tenant, onClose }: { tenant: PropertyTenant; onCl
     ? (tenant.company_name ?? 'Tenant')
     : `${tenant.first_name}${tenant.last_name ? ` ${tenant.last_name}` : ''}`
 
-  const { data: checklists = [], isLoading } = useQuery({
+  const { data: checklists = [], isLoading, error } = useQuery({
     queryKey: ['tenant-handover', tenant.id],
     queryFn: () => tenancyApi.getHandoverForTenant(tenant.id),
   })
@@ -741,10 +750,12 @@ function TenantHandoverModal({ tenant, onClose }: { tenant: PropertyTenant; onCl
         </div>
 
         <div className="flex-1 overflow-y-auto space-y-3">
-          {isLoading && <p className="text-slate-400 text-sm">{t('common.loading')}</p>}
-          {!isLoading && checklists.length === 0 && (
-            <p className="text-slate-500 text-sm text-center py-8">{t('tenants.handover.none', 'No handover checklists on file for this tenant.')}</p>
-          )}
+          <TenantSectionState
+            isLoading={isLoading}
+            error={error}
+            isEmpty={checklists.length === 0}
+            reason={t('tenants.handover.none', 'No handover recorded. An ENTRY checklist is done at move-in and an EXIT one at move-out, so this stays empty until the tenant takes the keys.')}
+          />
           {checklists.map((h: Record<string, unknown>) => (
             <div key={String(h['id'])} className="bg-slate-700/50 rounded-lg border border-slate-700 p-3">
               <div className="flex items-start justify-between">
@@ -785,7 +796,7 @@ function TenantRenewalsModal({ tenant, onClose }: { tenant: PropertyTenant; onCl
     ? (tenant.company_name ?? 'Tenant')
     : `${tenant.first_name}${tenant.last_name ? ` ${tenant.last_name}` : ''}`
 
-  const { data: renewals = [], isLoading } = useQuery({
+  const { data: renewals = [], isLoading, error } = useQuery({
     queryKey: ['tenant-renewals', tenant.id],
     queryFn: () => tenancyApi.getRenewals({ tenant_id: tenant.id }),
   })
@@ -802,10 +813,12 @@ function TenantRenewalsModal({ tenant, onClose }: { tenant: PropertyTenant; onCl
         </div>
 
         <div className="flex-1 overflow-y-auto space-y-3">
-          {isLoading && <p className="text-slate-400 text-sm">{t('common.loading')}</p>}
-          {!isLoading && renewals.length === 0 && (
-            <p className="text-slate-500 text-sm text-center py-8">{t('tenants.renewals.none', 'No renewal notices on file for this tenant.')}</p>
-          )}
+          <TenantSectionState
+            isLoading={isLoading}
+            error={error}
+            isEmpty={renewals.length === 0}
+            reason={t('tenants.renewals.none', 'No renewal notices. These are raised against a lease as it nears its end date — 60, 30 and 14 days out — so there is nothing here until this tenant holds a lease approaching expiry.')}
+          />
           {renewals.map((r: Record<string, unknown>) => (
             <div key={String(r['id'])} className="bg-slate-700/50 rounded-lg border border-slate-700 p-3">
               <div className="flex items-start justify-between">
@@ -844,7 +857,7 @@ function TenantLeasesModal({ tenant, onClose }: { tenant: PropertyTenant; onClos
     ? (tenant.company_name ?? 'Tenant')
     : `${tenant.first_name}${tenant.last_name ? ` ${tenant.last_name}` : ''}`
 
-  const { data: leases = [], isLoading } = useQuery({
+  const { data: leases = [], isLoading, error } = useQuery({
     queryKey: ['tenant-leases', tenant.id],
     queryFn: () => propertiesApi.getLeasesForTenant(tenant.id),
   })
@@ -861,10 +874,12 @@ function TenantLeasesModal({ tenant, onClose }: { tenant: PropertyTenant; onClos
         </div>
 
         <div className="flex-1 overflow-y-auto space-y-3">
-          {isLoading && <p className="text-slate-400 text-sm">{t('common.loading')}</p>}
-          {!isLoading && leases.length === 0 && (
-            <p className="text-slate-500 text-sm text-center py-8">{t('tenants.leases.none', 'No leases on file for this tenant.')}</p>
-          )}
+          <TenantSectionState
+            isLoading={isLoading}
+            error={error}
+            isEmpty={leases.length === 0}
+            reason={t('tenants.leases.none', 'No lease has been created for this tenant yet. The lease is what starts the rent schedule and links the deposit, so create it once the application is approved and the deposit is in.')}
+          />
           {leases.map((l: Lease) => (
             <div key={l.id} className="bg-slate-700/50 rounded-lg border border-slate-700 p-3">
               <div className="flex items-start justify-between">
@@ -902,7 +917,7 @@ function TenantDepositsModal({ tenant, onClose }: { tenant: PropertyTenant; onCl
     ? (tenant.company_name ?? 'Tenant')
     : `${tenant.first_name}${tenant.last_name ? ` ${tenant.last_name}` : ''}`
 
-  const { data: deposits = [], isLoading } = useQuery({
+  const { data: deposits = [], isLoading, error } = useQuery({
     queryKey: ['tenant-deposits', tenant.id],
     queryFn: () => tenancyApi.getDeposits({ tenant_id: tenant.id }),
   })
@@ -919,12 +934,12 @@ function TenantDepositsModal({ tenant, onClose }: { tenant: PropertyTenant; onCl
         </div>
 
         <div className="flex-1 overflow-y-auto space-y-3">
-          {isLoading && <p className="text-slate-400 text-sm">{t('common.loading')}</p>}
-          {!isLoading && deposits.length === 0 && (
-            <p className="text-slate-500 text-sm text-center py-8">
-              {t('tenants.deposits.none', 'No deposits linked to this tenant yet. A deposit only shows up here once a lease links it — record the deposit against the unit, then create the lease (or vice versa).')}
-            </p>
-          )}
+          <TenantSectionState
+            isLoading={isLoading}
+            error={error}
+            isEmpty={deposits.length === 0}
+            reason={t('tenants.deposits.none', 'No deposits linked to this tenant. Deposits recorded without naming a tenant stay unlinked — open the deposit in Money → Deposits and pick the tenant to attach it.')}
+          />
           {deposits.map((d: Record<string, unknown>) => (
             <div key={String(d['id'])} className="bg-slate-700/50 rounded-lg border border-slate-700 p-3">
               <div className="flex items-start justify-between">

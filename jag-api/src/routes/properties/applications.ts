@@ -84,7 +84,7 @@ applicationsRouter.get('/', async (req: Request, res: Response, next: NextFuncti
       if (tenantId) { vals.push(tenantId); conds.push(`a.tenant_id = $${vals.length}`); }
       const where = conds.length ? ' AND ' + conds.join(' AND ') : '';
       const { rows: r } = await client.query(
-        `SELECT a.*, u.unit_number, p.name AS property_name
+        `SELECT a.*, u.unit_number, u.property_id, p.name AS property_name
          FROM prop_applications a
          JOIN prop_units u ON u.id = a.unit_id
          LEFT JOIN prop_properties p ON p.id = u.property_id
@@ -137,7 +137,7 @@ applicationsRouter.get('/:id', async (req: Request, res: Response, next: NextFun
 
     const row = await withOwnerRLS(propertiesPool, ownerId, async client => {
       const { rows } = await client.query(
-        `SELECT a.*, u.unit_number, p.name AS property_name
+        `SELECT a.*, u.unit_number, u.property_id, p.name AS property_name
          FROM prop_applications a
          JOIN prop_units u ON u.id = a.unit_id
          LEFT JOIN prop_properties p ON p.id = u.property_id

@@ -31,6 +31,10 @@ export const propertiesApi = {
   getLeasesForTenant: (tenantId: string) =>
     api.get<Lease[]>(`/properties/leases${qs({ tenant_id: tenantId })}`),
 
+  /** Flat cross-property lease list. All filters optional — omit them for every lease. */
+  listLeases: (params?: { tenant_id?: string; property_id?: string; unit_id?: string; status?: string }) =>
+    api.get<Lease[]>(`/properties/leases${qs(params)}`),
+
   downloadLeaseAgreement: (propertyId: string, leaseId: string) =>
     api.download(`/properties/${propertyId}/leases/${leaseId}/agreement-pdf`, `lease-agreement-${leaseId}.pdf`),
 

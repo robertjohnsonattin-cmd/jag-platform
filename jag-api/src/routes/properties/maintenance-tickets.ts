@@ -63,6 +63,7 @@ const CreateTicketSchema = z.object({
   unit_id:            z.string().uuid().optional(),
   property_id:        z.string().uuid().optional(),
   lease_id:           z.string().uuid().optional(),
+  tenant_id:          z.string().uuid().optional(),
   reported_by_name:   z.string().max(200).optional(),
   reported_by_phone:  z.string().max(30).optional(),
   report_channel:     ChannelEnum.optional(),
@@ -239,17 +240,24 @@ maintenanceTicketsRouter.post('/', async (req: Request, res: Response, next: Nex
       const seq = String(parseInt(cnt.count) + 1).padStart(4, '0');
       const ticketRef = `MNT-${new Date().getFullYear()}-${seq}`;
 
-      // lease_id is accepted but the frontend form never actually collects it, so
-      // relying on it alone would leave tenant_id null for nearly every ticket.
-      // unit_id is the reliable field here (required unless the ticket is
-      // building-wide) -- resolve tenant_id from the unit's active lease.
-      let tenantId: string | null = null;
-      if (body.lease_id) {
+      // Resolve tenant_id from the most direct link available. An explicit
+      // tenant_id from the form wins -- lease_id is accepted but the frontend
+      // never collected it, and the old unit-ACTIVE-lease lookup silently
+      // resolved to null for every unit between tenancies (which, with the
+      // portfolio vacant, was every unit).
+      let tenantId: string | null = body.tenant_id ?? null;
+      if (!tenantId && body.lease_id) {
         const { rows: [la] } = await client.query(`SELECT tenant_id FROM prop_lease_agreements WHERE id = $1`, [body.lease_id]);
         tenantId = la?.tenant_id ?? null;
-      } else if (body.unit_id) {
+      }
+      if (!tenantId && body.unit_id) {
+        // Prefer the active lease; fall back to the most recent one of any status
+        // so a ticket raised just after a tenancy ends still attributes correctly.
         const { rows: [la] } = await client.query(
-          `SELECT tenant_id FROM prop_lease_agreements WHERE unit_id = $1 AND status = 'ACTIVE' LIMIT 1`,
+          `SELECT tenant_id FROM prop_lease_agreements
+           WHERE unit_id = $1
+           ORDER BY (status = 'ACTIVE') DESC, start_date DESC
+           LIMIT 1`,
           [body.unit_id],
         );
         tenantId = la?.tenant_id ?? null;

@@ -557,36 +557,10 @@ propertiesRouter.post('/:id/valuation-history', async (req: Request, res: Respon
 });
 
 // ── GET /properties/leases ──────────────────────────────────────────────────
-// Every other lease route is nested under /:propertyId/leases, so there was no
-// way to fetch "this tenant's leases" without already knowing the property --
-// same blind spot deposits had before tenant_id was added there. Leases already
-// carry tenant_id NOT NULL (see prop_lease_agreements schema), so this is a
-// missing query, not a missing link.
-
-const TenantLeasesQuery = z.object({ tenant_id: z.string().uuid() });
-
-propertiesRouter.get('/leases', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-  try {
-    const parsed = TenantLeasesQuery.safeParse(req.query);
-    if (!parsed.success) { err(res, 422, 'VALIDATION_ERROR', 'tenant_id is required and must be a valid UUID.'); return; }
-
-    const client = await propertiesPool.connect();
-    try {
-      const rows = await withOwnerRLS(client, req.rlsCtx, (c) =>
-        c.query(
-          `SELECT la.*, u.unit_number, p.name AS property_name
-           FROM   prop_lease_agreements la
-           JOIN   prop_properties p ON p.id = la.property_id
-           LEFT   JOIN prop_units u ON u.id = la.unit_id
-           WHERE  la.tenant_id = $1
-           ORDER  BY la.start_date DESC`,
-          [parsed.data.tenant_id],
-        ).then(r => r.rows),
-      );
-      ok(res, rows);
-    } finally { client.release(); }
-  } catch (e) { next(e); }
-});
+// Moved to ./leases.ts and mounted from index.ts ahead of propRoutes. Declared
+// here it sat AFTER `get('/:id')`, which matched first and 422'd every call --
+// see the note at the top of leases.ts. Do not re-add a flat /properties/x
+// route to this file.
 
 // ── GET /properties/:propertyId/leases ────────────────────────────────────────
 

@@ -24,3 +24,42 @@ Robert asked why a deposit taken right after application approval (before a leas
 **Frontend:** `TenantsPanel.tsx` gained eight per-tenant buttons/modals total — **Docs, Deposits, Leases, Applications, Maintenance, Renewals, Handover, Rent** — same modal pattern each time (fetch by `tenant_id`, status-color badge, print-receipt/download link where applicable).
 
 **Pattern worth remembering:** when a new soft-linked record type is added to the tenancy flow, check three things up front rather than finding them one at a time — (1) does it carry a durable FK back to the tenant (or a *reliable* chain to reach one — a nullable, frontend-uncollected `lease_id` doesn't count), (2) is there an API query scoped by that FK, (3) is there a Tenant-record UI surface for it. This recurred independently in 7 of 7 record types checked.
+
+### Flat `/properties/*` routes must be mounted from index.ts (session 50)
+`routes/properties/properties.ts` declares `GET /:id`. Express matches router layers in
+registration order, so **any flat route declared in that file below `GET /:id` is dead** —
+the request is captured by `/:id`, fails `UUIDParam.safeParse`, and returns
+`422 VALIDATION_ERROR`. This is not theoretical: session 44's `GET /properties/leases` was
+added at the bottom of `properties.ts` and never worked once. The frontend's `api.get`
+throws on `!res.ok`, React Query's `data` goes undefined, the `= []` default renders, and
+the user sees "No leases on file for this tenant." — a broken endpoint wearing an empty
+state's clothes.
+
+**Rule:** a new flat `/properties/x` route goes in its own file and is mounted in
+`routes/properties/index.ts` above `propertiesRouter.use('/', propRoutes)`, alongside the
+tenancy routers. The comment there already says this; obey it. `review-queue`, `arrears`
+and `lease-expiry` are safe only because they happen to sit above `GET /:id` in the file.
+
+**Corollary for UI:** never render the same message for "loading", "request failed" and
+"genuinely empty". `components/properties/TenantSectionState.tsx` is the shared component
+for this — an error shows the error, an empty section says *why* it is empty.
+
+### Tenant links must not be routed through the lease (session 50)
+Migrations 052–055 gave deposits/tickets/handover a `tenant_id`, but the resolution paths
+all assumed a lease or an application existed. With the portfolio between tenancies (every
+unit VACANT, all leases EXPIRED) the unit-`ACTIVE`-lease lookup resolved to null for every
+record, so real deposits sat unattached and invisible on the tenant record. Deposits and
+maintenance tickets now accept an explicit `tenant_id` from the form (resolution order:
+explicit → `lease_id` → `application_id` → unit's most relevant lease, ACTIVE preferred
+then most recently started). Migration `063` backfilled the historical rows.
+
+**When adding any tenancy record type: give the form a way to name the tenant directly.**
+Deriving it from a lease is a convenience, never the only path.
+
+### Rent has one source of truth: `prop_rent_schedule` (session 50)
+`prop_rent_payments` and `prop_rent_schedule` were two parallel rent systems with separate
+record-payment endpoints and separate receipt numbering, neither writing to the other —
+rent recorded in Tenancy Ops → Rent did not move the Dashboard arrears figure, which reads
+`prop_rent_payments`. Consolidating onto `prop_rent_schedule` under STD-13. Until the
+contract step drops `prop_rent_payments`, treat `prop_rent_schedule` as authoritative and
+do not add new readers of `prop_rent_payments`.

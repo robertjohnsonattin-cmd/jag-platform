@@ -21,6 +21,7 @@ const CreateDepositSchema = z.object({
   unit_id:           z.string().uuid(),
   lease_id:          z.string().uuid().optional(),
   application_id:    z.string().uuid().optional(),
+  tenant_id:         z.string().uuid().optional(),
   tenant_name:       z.string().min(1).max(200),
   amount_ttd:        z.number().positive(),
   months_equivalent: z.number().positive().optional(),
@@ -84,16 +85,23 @@ depositsRouter.post('/', async (req: Request, res: Response, next: NextFunction)
       const receiptNumber = `DEP-${new Date().getFullYear()}-${padSeq(parseInt(cnt.count) + 1)}`;
 
       // A deposit is often taken right after an application is APPROVED, before
-      // any lease exists. If a lease_id was given (older flow / retroactive entry),
-      // resolve tenant_id from it immediately rather than waiting on the lease
-      // backfill in POST /properties/:propertyId/leases. If only application_id
-      // was given, tenant_id stays null until create-tenant runs (see applications.ts).
-      let tenantId: string | null = null;
-      if (body.lease_id) {
+      // any lease exists -- and just as often for a tenant who never went through
+      // the application flow at all. Resolve tenant_id from the most direct link
+      // available: an explicit tenant, then a lease, then an application. Only if
+      // all three are absent does it stay null (and the 063 backfill or the lease
+      // backfill in POST /properties/:propertyId/leases can still recover it).
+      let tenantId: string | null = body.tenant_id ?? null;
+      if (!tenantId && body.lease_id) {
         const { rows: [la] } = await client.query(
           `SELECT tenant_id FROM prop_lease_agreements WHERE id = $1`, [body.lease_id],
         );
         tenantId = la?.tenant_id ?? null;
+      }
+      if (!tenantId && body.application_id) {
+        const { rows: [ap] } = await client.query(
+          `SELECT tenant_id FROM prop_applications WHERE id = $1`, [body.application_id],
+        );
+        tenantId = ap?.tenant_id ?? null;
       }
 
       const { rows: unitRows } = await client.query(`SELECT unit_number FROM prop_units WHERE id = $1`, [body.unit_id]);

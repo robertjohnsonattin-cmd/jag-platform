@@ -12,6 +12,7 @@ import { documentsRouter }                 from './documents';
 import { utilityAccountsRouter }          from './utility-accounts';
 import { unitsRouter }                    from './units';
 // Tenancy lifecycle modules
+import { leasesRouter }                   from './leases';
 import { enquiriesRouter }                from './enquiries';
 import { viewingsRouter }                 from './viewings';
 import { applicationsRouter }             from './applications';
@@ -35,6 +36,7 @@ propertiesRouter.use(brianPortalGate('PROPERTIES'));
 
 // ── Tenancy lifecycle flat routes (BEFORE '/' catch-all) ─────────────────────
 // These must precede propRoutes (which has GET /:id) to avoid UUID mismatch.
+propertiesRouter.use('/leases',         leasesRouter);
 propertiesRouter.use('/enquiries',      enquiriesRouter);
 propertiesRouter.use('/viewings',       viewingsRouter);
 propertiesRouter.use('/applications',   applicationsRouter);

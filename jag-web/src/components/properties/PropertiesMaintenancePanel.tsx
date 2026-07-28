@@ -40,7 +40,7 @@ export default function PropertiesMaintenancePanel({ focusId }: { focusId?: stri
   const [statusFilter, setStatusFilter] = useState('')
   const [priorityFilter, setPriorityFilter] = useState('')
   const [showCreate, setShowCreate] = useState(false)
-  const [form, setForm] = useState({ property_id: '', unit_id: '', category: 'OTHER', description: '', priority: '', reported_by_name: '', reported_by_phone: '', report_channel: 'PORTAL' })
+  const [form, setForm] = useState({ property_id: '', unit_id: '', tenant_id: '', category: 'OTHER', description: '', priority: '', reported_by_name: '', reported_by_phone: '', report_channel: 'PORTAL' })
   const [resolveForm, setResolveForm] = useState({ resolution_notes: '', cost_ttd: '' })
   const [showResolve, setShowResolve] = useState(false)
 
@@ -59,6 +59,7 @@ export default function PropertiesMaintenancePanel({ focusId }: { focusId?: stri
     mutationFn: () => tenancyApi.createMaintenanceTicket({
       ...form,
       unit_id: form.unit_id || undefined,
+      tenant_id: form.tenant_id || undefined,
       priority: form.priority || undefined,
     }),
     onSuccess: () => { setShowCreate(false); qc.invalidateQueries({ queryKey: ['maintenance'] }) },
@@ -93,6 +94,13 @@ export default function PropertiesMaintenancePanel({ focusId }: { focusId?: stri
     queryKey: ['properties', form.property_id, 'units-picker'],
     queryFn: () => propertiesApi.getUnits(form.property_id),
     enabled: showCreate && !!form.property_id,
+    staleTime: 60_000,
+  })
+
+  const { data: tenants = [] } = useQuery({
+    queryKey: ['properties', 'tenants', ''],
+    queryFn: () => propertiesApi.getTenants(),
+    enabled: showCreate,
     staleTime: 60_000,
   })
 
@@ -223,6 +231,20 @@ export default function PropertiesMaintenancePanel({ focusId }: { focusId?: stri
                     <option key={u.id} value={u.id}>{u.unit_number}</option>
                   ))}
                 </select>
+              </div>
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">{t('tenancy.tenant','Tenant')}</label>
+                <select className={cls} value={form.tenant_id} onChange={set('tenant_id')}>
+                  <option value="">{t('tenancy.tenantFromLease','— Work it out from the unit’s lease —')}</option>
+                  {tenants.map(tn => (
+                    <option key={tn.id} value={tn.id}>
+                      {tn.is_company ? (tn.company_name ?? '—') : `${tn.first_name}${tn.last_name ? ` ${tn.last_name}` : ''}`}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-slate-500 mt-1">
+                  {t('tenancy.tenantTicketHint','Set this to attach the ticket to a tenant when the unit has no active lease.')}
+                </p>
               </div>
               <div><label className="block text-xs text-slate-400 mb-1">{t('tenancy.category','Category')}</label>
                 <select className={cls} value={form.category} onChange={set('category')}>
