@@ -209,7 +209,10 @@ rentScheduleRouter.post('/send-reminders', async (req: Request, res: Response, n
          WHERE rs.owner_id = $1
            AND rs.status IN ('UPCOMING','REMINDER_SENT','LATE')
            AND (rs.reminder_d5_sent_at IS NULL OR rs.reminder_d5_sent_at < NOW() - INTERVAL '23 hours')
-           AND rs.due_date <= CURRENT_DATE + INTERVAL '3 days'`,
+           -- Was '3 days' — column name, WhatsApp template name (jag_rent_reminder_d5)
+           -- and its approved copy all say 5; only this window disagreed. Fixed
+           -- 2026-07-28 per Robert (docs/ops-scripts.md has the full history).
+           AND rs.due_date <= CURRENT_DATE + INTERVAL '5 days'`,
         [ownerId],
       );
       return rows;

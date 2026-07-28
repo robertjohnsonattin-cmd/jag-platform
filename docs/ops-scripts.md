@@ -11,7 +11,7 @@
 | `backup-databases.sh` | 02:00 | 22:00 prev. day | pg_dump all 5 DBs |
 | `fx-rates-sync.sh` | 10:00 | 06:00 | Seed USD + CNY → TTD rates from open.er-api.com |
 | `cleanup-stale-statements.sh` | 07:00 | 03:00 | Delete PENDING bank statement jobs + MinIO objects older than 7 days |
-| `rent-reminders.sh` | 07:00 | 03:00 | Two WhatsApp sends in one run: `jag_rent_reminder_d5` for periods due within **3 days** (script/column names say "D-5" — misleading, see gotcha below), resent daily until paid; `jag_rent_reminder_d1` once, the day before due |
+| `rent-reminders.sh` | 07:00 | 03:00 | Two WhatsApp sends in one run: `jag_rent_reminder_d5` for periods due within **5 days** (fixed session 52, see below), resent daily until paid; `jag_rent_reminder_d1` once, the day before due |
 | `rent-missed-d1.sh` | 09:00 | 05:00 | `jag_rent_missed_d1` — periods whose due date was yesterday and still show no payment recorded; dedup via `missed_d1_sent_at` |
 | `viewing-reminders.sh` | 00:00 * | 20:00 * | Hourly — send WhatsApp viewing reminders for viewings in next 2h |
 | `post-viewing-app-link.sh` | 00:30 * | 20:30 * | Hourly (at :30) — send application link to COMPLETED viewings in last 24h |
@@ -22,15 +22,19 @@
 | `setup-minio-policy.sh` | one-time | — | Create `jag-app-buckets` IAM policy + attach to jag_app user; re-run after MinIO data wipe |
 | `fdw-rotate-password.sh` | manual | — | Resync FDW USER MAPPING passwords after jag_app PG credential rotation |
 
-**"D-5" rent reminder is actually D-3 (found session 52, 2026-07-28).** `rent-reminders.sh`'s own
-header comment says `jag_rent_reminder_d5 — 5 days before due date`, the WhatsApp template is named
-`jag_rent_reminder_d5`, and the DB column is `reminder_d5_sent_at` — three independent places all
-say 5. The endpoint's actual `WHERE` clause (`routes/properties/rent-schedule.ts` → `POST
-/send-reminders`) checks `rs.due_date <= CURRENT_DATE + INTERVAL '3 days'`. It has always been 3,
-the naming is just wrong everywhere and nobody has renamed it since. **Do not trust the name — read
-the SQL** if a rent-reminder timing question ever depends on the exact day count. Left as-is rather
-than "fixed" because renaming a column/template used by a live cron job and template registration is
-a bigger change than the naming mismatch warrants; flag it to Robert if he wants it corrected properly.
+**"D-5" rent reminder was actually D-3 — fixed (found + fixed session 52, 2026-07-28).**
+`rent-reminders.sh`'s own header comment said `jag_rent_reminder_d5 — 5 days before due date`, the
+WhatsApp template is named `jag_rent_reminder_d5`, and the DB column is `reminder_d5_sent_at` —
+three independent places all said 5, but the endpoint's actual `WHERE` clause
+(`routes/properties/rent-schedule.ts` → `POST /send-reminders`) checked
+`rs.due_date <= CURRENT_DATE + INTERVAL '3 days'`. Found while checking whether Ashante Charles
+(first payment due 2026-08-01) would get a reminder in time, and whether the WhatsApp message text
+itself says "5 days" as static approved copy — it does not carry a dynamic day-count variable, so
+any day-count language in the approved template is fixed text that cannot track the real trigger
+window. Robert chose to standardize on 5 (matching the name/template/column) rather than rename
+everything to 3. **Fixed to `INTERVAL '5 days'`, deployed same day.** No backfill/manual catch-up
+needed — the daily cron hadn't yet run against the old code for the newly-relevant window, so the
+very next scheduled run already used the corrected 5-day rule for every tenant, not just Ashante.
 
 ### Local Extraction Script (`scripts/doc-import/`)
 Path 2 local extraction — reads PDFs from local hard drive, Ollama extracts, posts to API. **File never uploaded to cloud.**
