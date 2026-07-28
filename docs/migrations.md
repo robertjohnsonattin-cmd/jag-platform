@@ -2,6 +2,39 @@
 
 > Split out of CLAUDE.md. **Every new migration gets an entry here the moment the file is created — see the registration rule in CLAUDE.md.**
 
+## How to check this file is complete — do NOT grep by number alone
+
+Migration numbers **collide across the five databases**. `033`, `035`, `036`, `037` and `038` all
+exist in both `jag_properties` and another DB. Grepping `` `038_ `` and getting a hit proves only
+that *some* database documents a 038 — on 2026-07-28 that false signal hid five undocumented
+`jag_properties` migrations for weeks, because the hits were jag_commercial's `038_gps_battery_log`
+and jag_family's `038_lifestyle_tracker_health_connect`.
+
+Compare **per DB, by filename, against the directory listing**:
+
+```bash
+DB=jag_properties
+awk -v db="($DB)" 'index($0,"### ")==1 { on = (index($0,db)>0); next } on' docs/migrations.md \
+  | grep -oE '^\| `?[0-9]{3}' | grep -oE '[0-9]{3}' | sort -u > /tmp/doc.txt
+ls "jag-infra/migrations/$DB/" | grep -oE '^[0-9]{3}' | sort -u > /tmp/disk.txt
+comm -13 /tmp/doc.txt /tmp/disk.txt      # on disk but undocumented (baseline numbers expected)
+```
+
+**Known coverage as of 2026-07-28** — `jag_properties` is complete (verified by the diff above).
+The others are **not**, and this is unfinished work, not a decision:
+
+| DB | Documented | On disk | Undocumented (excluding pre-Phase-7 baseline) |
+|---|---|---|---|
+| `jag_properties` | 60 | 60 | **none** — complete |
+| `jag_commercial` | 25 | 41 | `024`–`027`, `038`–`041` (plus baseline `000`–`008`) |
+| `jag_family` | 25 | 37 | `014`, `015`, `020`–`024` (plus baseline `001`–`006`) |
+| `jag_core` | — | 9 | **no table exists in this file at all** |
+| `jag_entertainment` | — | 6 | **no table exists in this file at all** |
+
+The three tables below are headed "Phase 7" and deliberately start after each DB's baseline schema
+(`jag_properties` at 003, `jag_commercial` at 009), so the lowest numbers are out of scope by
+convention rather than missing.
+
 ### Phase 7 Migrations (jag_commercial)
 
 | File | Changes |
@@ -98,9 +131,24 @@
 | `031_unit_photos.sql` | `listing_description TEXT` on prop_units; `prop_unit_photos` table (owner_id, unit_id FK, object_key, display_order, caption) — MinIO `jag-photos` bucket; RLS |
 | `032_inspection_calendar_event_id.sql` | `calendar_event_id TEXT` on `prop_inspections` — stores Google Calendar event ID for inspection_date |
 | `034_drop_prop_insurance.sql` | **Session 28** — `DROP TABLE IF EXISTS prop_insurance`; insurance consolidated into `fin_insurance_policies` (jag_family) |
+| `033_tenant_documents.sql` | **Backfilled 2026-07-28** (was missing) — creates `prop_application_documents` and `prop_tenant_documents` (both owner-scoped, RLS `NULLIF(current_setting('app.current_owner_id',true),'')::uuid`, MinIO object keys). This is the table behind Tenant 360 → Documents and the `from app` badge. **Do not confuse with jag_commercial's `033_vms_compliance_docs.sql`** — same number, different DB |
+| `035_consolidate_maintenance_requests.sql` | **Backfilled 2026-07-28** (was missing) — merges the old `prop_maintenance_requests` into `prop_maintenance_tickets`: drops `NOT NULL` on `unit_id`, widens the category CHECK, and copies legacy rows in with refs `MNT-LEGACY-NNNN`. **This migration is why those four tickets have no unit and no lease — it inserts `NULL` for `unit_id` by design**, so migration 063's backfill could not resolve them and left them for manual linking. Not the same as jag_commercial's `035_item_disposal_columns.sql` |
+| `036_drop_prop_maintenance_requests.sql` | **Backfilled 2026-07-28** (was missing) — drops the FK from `prop_vendor_invoices` then `DROP TABLE prop_maintenance_requests`; the contract step of the 035 consolidation. Not jag_commercial's `036_gps_trackers.sql` |
+| `037_maintenance_category_expansion.sql` | **Backfilled 2026-07-28** (was missing) — widens the `prop_maintenance_tickets` category CHECK from 11 to 19 values (adds FLOORING, DOORS_WINDOWS, LOCKS_KEYS, FENCING, DRAINAGE, WASTE_DISPOSAL, SMOKE_DETECTOR, CLEANING). Not jag_commercial's `037_gps_battery_log.sql` |
+| `038_unit_asking_rent.sql` | **Backfilled 2026-07-28** (was missing) — `rent_amount NUMERIC(12,2)` on `prop_units`, the asking rent used by the listing pipeline and the Gemini rent suggestion. Not jag_family's `038_lifestyle_tracker_health_connect.sql` |
 | `043_esignature.sql` | **Session 38** — DocuSeal-era columns (`docuseal_submission_id`, `signature_status`, `signed_pdf_object_key`, `agreement_signed_at`) on `prop_lease_agreements` + `prop_handover_checklists`; DocuSeal itself replaced by Documenso in session 39 (see `044`), these columns left dead/unused |
 | `044_documenso_columns.sql` | **Session 39** — adds `documenso_document_id` to `prop_lease_agreements` + `prop_handover_checklists` (additive per STD-13; old `docuseal_submission_id` columns from `043` untouched) |
 | `045_enquiry_application_token.sql` | **Session 40** — adds `application_token`/`application_token_expires_at`/`application_submitted_at` to `prop_enquiries`; backs the public `/apply/<token>` Stage-2 rental application form |
+| `039_enquiry_screening_answers.sql` | **Backfilled 2026-07-28** (was missing) — `screening_answers JSONB` on `prop_enquiries`; stores the prospect's answers to the pre-viewing screening questions. Applied 2026-07-06 |
+| `040_unit_floor_area_sqft.sql` | **Backfilled 2026-07-28** (was missing) — `floor_area_sqft NUMERIC(10,2)` on `prop_units`, backfilled from `floor_area_sqm × 10.7639`. **Both columns still exist** — sqm is the original, sqft was added because listings quote sqft locally. Applied 2026-07-06 |
+| `041_enquiry_screening_gate.sql` | **Backfilled 2026-07-28** (was missing) — `schedule_token` (UNIQUE, indexed) + `schedule_token_expires_at` + `screening_reviewed_at` + `screening_reviewed_by` on `prop_enquiries`. Backs the screening gate: a prospect only receives a booking token once their screening answers are approved (`enquiries.ts` `/screening-decision`, stages `SCREENING → APPROVED`). Applied 2026-07-06 |
+| `042_late_fee_template_defaults.sql` | **Backfilled 2026-07-28** (was missing) — sets `prop_lease_agreements` late-fee column DEFAULTs to PERCENT / 5 / 4 grace days, and retro-applies them to ACTIVE+PENDING leases that were still on the all-zero "NONE" defaults. **Data-modifying, not just a DDL default.** Applied 2026-07-07 |
+| `046_tenant_application_carryover.sql` | **Backfilled 2026-07-28** (was missing) — `date_of_birth`, `employer_name`, `employment_type` on `prop_property_tenants`, so approved-application details survive onto the tenant record instead of being dropped at conversion. Applied 2026-07-12 |
+| `047_application_schedule_fields.sql` | **Backfilled 2026-07-28** (was missing) — 11 columns on `prop_applications` (nationality, permanent_address, occupation, work_address, work_telephone, whatsapp_alt, occupants_count, occupants_detail, emergency_contact_name/phone/relation) and 9 mirrored onto `prop_property_tenants`. The mirroring is deliberate — the tenant record must stand alone once the application is archived. Applied 2026-07-12 |
+| `048` | **Number never used.** No file has ever existed at 048 in any of the five DBs — not a missing migration, a skipped number |
+| `049_second_emergency_contact.sql` | **Backfilled 2026-07-28** (was missing) — `emergency_contact_2_name/phone/relation` on both `prop_applications` and `prop_property_tenants`, same mirroring rationale as 047. Applied 2026-07-12 |
+| `050_rent_schedule_proration.sql` | **Backfilled 2026-07-28** (was missing) — `period_start_date`, `period_end_date`, `is_prorated` on `prop_rent_schedule`; supports part-month rent when a tenancy starts mid-period. Note this is `prop_rent_schedule`, the surviving rent table — **not** `prop_rent_payments` (see the rent single-source-of-truth rule in `docs/rules/properties.md`). Applied 2026-07-13 |
+| `051_lease_signed_copy_token.sql` | **Backfilled 2026-07-28** (was missing) — `signed_copy_token UUID` on `prop_lease_agreements`; lets a tenant fetch their signed lease copy without an authenticated session. Applied 2026-07-13 |
 | `052_deposit_application_tenant_link.sql` | **Session 44** — adds `application_id` + `tenant_id` (both nullable FK, ON DELETE SET NULL) to `prop_deposits`. Deposits previously only resolved to a tenant via `lease_id -> prop_lease_agreements.tenant_id`, so a deposit taken right after application approval (before any lease existed) neither sent its WhatsApp receipt nor showed under the Tenant record. `tenant_id` is now set immediately when a `lease_id` is given, or backfilled by `create-tenant` (via `application_id`) or by lease creation (see "Tenant record — deposit/lease/application linking" below) |
 | `053_application_tenant_link.sql` | **Session 44** — adds `tenant_id` (nullable FK, ON DELETE SET NULL) to `prop_applications`. `create-tenant` only ever read FROM the application to build the tenant row; it never wrote a link back, so the trail from tenant -> originating application dead-ended the moment the tenant existed. Backfilled by `create-tenant` itself now. Ran via `sudo -u postgres psql` (jag_app not owner of `prop_applications`, same as `012_credit_cards_categories.sql`/`fin_expenses`) — migrations are **not** auto-applied on container start; every migration on this project has always been a manual step, confirmed this session after wrongly suspecting otherwise |
 | `054_maintenance_ticket_tenant_link.sql` | **Session 44** — adds `tenant_id` (nullable FK, ON DELETE SET NULL) to `prop_maintenance_tickets`. Had a nullable `lease_id` the frontend never actually sends; `tenant_id` resolved from `lease_id` if given, else the unit's active lease, at ticket-creation time. Ran via `sudo -u postgres psql` (same ownership pattern as `053`) |
