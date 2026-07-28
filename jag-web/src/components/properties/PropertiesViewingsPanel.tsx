@@ -38,7 +38,7 @@ export default function PropertiesViewingsPanel() {
           {['SCHEDULED','CONFIRMED','COMPLETED','NO_SHOW','CANCELLED','RESCHEDULED'].map(s =>
             <option key={s} value={s}>{s.replace(/_/g,' ')}</option>)}
         </select>
-        <a href="/api/v1/properties/applications/form.pdf" download="JAG_Properties_Application.pdf"
+        <a href="/api/v1/public/applications/form.pdf" download="JAG_Properties_Application.pdf"
           className="ml-auto px-3 py-1.5 text-xs bg-slate-700 hover:bg-slate-600 text-slate-100 border border-slate-600 rounded">
           📄 Download Application Form
         </a>

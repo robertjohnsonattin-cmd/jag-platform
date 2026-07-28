@@ -221,7 +221,7 @@ export default function PublicApply() {
             )}
             <p className="text-xs text-slate-500 mt-1">All fields <span className="text-rose-400">*</span> are required. If something doesn't apply to you, write "N/A".</p>
           </div>
-          <a href="/api/v1/properties/applications/form.pdf" download="JAG_Properties_Application.pdf"
+          <a href="/api/v1/public/applications/form.pdf" download="JAG_Properties_Application.pdf"
             className="px-3 py-1.5 text-xs bg-slate-700 hover:bg-slate-600 text-slate-100 border border-slate-600 rounded whitespace-nowrap">
             📄 PDF Form
           </a>

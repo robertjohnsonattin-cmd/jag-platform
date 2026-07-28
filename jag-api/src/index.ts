@@ -150,10 +150,22 @@ import { publicBookingRouter, publicScheduleRouter } from './routes/properties/v
 import { publicApplyRouter } from './routes/properties/public-apply';
 import { publicLeaseCopyRouter } from './routes/properties/public-lease-copy';
 import { bookPreviewRouter } from './routes/properties/book-preview';
+import { generateApplicationFormPDF } from './lib/application-form-pdf';
 app.use('/api/v1/public/book', express.json(), publicBookingRouter);
 app.use('/api/v1/public/schedule', express.json(), publicScheduleRouter);
 app.use('/api/v1/public/apply', express.json(), publicApplyRouter);
 app.use('/api/v1/public/lease-copy', express.json(), publicLeaseCopyRouter);
+
+// Public PDF application form (no auth required)
+app.get('/api/v1/public/applications/form.pdf', (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    const doc = generateApplicationFormPDF();
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'attachment; filename="JAG_Properties_Rental_Application.pdf"');
+    doc.pipe(res);
+    doc.end();
+  } catch (e) { next(e); }
+});
 
 // Crawler-only preview for shared booking links — Caddy routes ONLY known
 // crawler User-Agents at /book/* here (see Caddyfile); real browsers hit the

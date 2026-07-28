@@ -425,14 +425,3 @@ applicationsRouter.post('/:id/create-tenant', async (req: Request, res: Response
     next(e);
   }
 });
-
-// ── Static PDF application form (public, no auth required) ──────────────────────
-applicationsRouter.get('/form.pdf', async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const doc = generateApplicationFormPDF();
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', 'attachment; filename="JAG_Properties_Rental_Application.pdf"');
-    doc.pipe(res);
-    doc.end();
-  } catch (e) { next(e); }
-});
