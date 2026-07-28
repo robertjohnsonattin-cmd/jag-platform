@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import type { TFunction } from 'i18next'
 import { propertiesApi } from '../../api/properties'
+import { tenancyApi } from '../../api/tenancy'
 import { financeApi } from '../../api/finance'
 import { expensesApi } from '../../api/expenses'
 import { filesApi } from '../../api/files'
@@ -2346,12 +2347,29 @@ function PropertyDetail({ property, onDeleted }: { property: Property; onDeleted
   const [chargingLateFee, setChargingLateFee] = useState<RentPayment | null>(null)
   const [deletingLease, setDeletingLease] = useState<Lease | null>(null)
   const [sendingLeaseId, setSendingLeaseId] = useState<string | null>(null)
+  const [generatingScheduleId, setGeneratingScheduleId] = useState<string | null>(null)
   const qc = useQueryClient()
 
   const { data: leases = [] } = useQuery({
     queryKey: ['properties', property.id, 'leases'],
     queryFn: () => propertiesApi.getLeases(property.id),
     enabled: detailTab === 'leases',
+  })
+  // How many rent periods each lease actually has. A lease with no schedule
+  // produces no reminders, no arrears and nothing on the dashboard, and that is
+  // invisible from the lease row itself — so read the real count rather than
+  // assuming a signed lease was billed. `GET /rent-schedule` has no property
+  // filter, so this is one request per lease (a handful) inside one query key.
+  const leaseIds = leases.map(l => l.id)
+  const { data: scheduleCounts, isError: scheduleCountsFailed } = useQuery({
+    queryKey: ['properties', property.id, 'lease-schedule-counts', leaseIds.join(',')],
+    queryFn: async () => {
+      const entries = await Promise.all(
+        leaseIds.map(async id => [id, (await tenancyApi.getRentSchedule({ lease_id: id })).length] as const),
+      )
+      return Object.fromEntries(entries) as Record<string, number>
+    },
+    enabled: detailTab === 'leases' && leaseIds.length > 0,
   })
   const { data: payments = [] } = useQuery({
     queryKey: ['properties', property.id, 'payments'],
@@ -2555,7 +2573,12 @@ function PropertyDetail({ property, onDeleted }: { property: Property; onDeleted
             </div>
             {leases.length === 0 ? <Empty /> : (
               <div className="space-y-3">
-                {leases.map(l => (
+                {leases.map(l => {
+                  // undefined while the counts are still in flight — do not fall
+                  // back to 0, that would offer "Generate" for a lease that has
+                  // a schedule already.
+                  const schedCount = scheduleCounts?.[l.id]
+                  return (
                   <div key={l.id} className="p-3 bg-slate-700/30 rounded">
                     <div className="flex justify-between items-start mb-1">
                       <p className="text-sm font-medium text-slate-100">
@@ -2591,6 +2614,47 @@ function PropertyDetail({ property, onDeleted }: { property: Property; onDeleted
                           className="text-xs px-2 py-0.5 bg-blue-700 hover:bg-blue-600 disabled:opacity-50 text-white rounded border border-blue-600 transition-colors"
                           title="Send for e-signature">
                           {sendingLeaseId === l.id ? '…' : '✍ Send for Signature'}
+                        </button>
+                        {/* Rent schedule. Amber when the lease has none: no schedule
+                            means no reminders, no arrears and no dashboard entry. */}
+                        <button onClick={async () => {
+                            setGeneratingScheduleId(l.id)
+                            try {
+                              const { generated } = await tenancyApi.generateRentSchedule(l.id)
+                              void qc.invalidateQueries({ queryKey: ['properties', property.id, 'lease-schedule-counts'] })
+                              // Money → Rent (PropertiesRentSchedulePanel) and the
+                              // tenant's Rent Schedule card both read their own keys.
+                              void qc.invalidateQueries({ queryKey: ['rent-schedule'] })
+                              void qc.invalidateQueries({ queryKey: ['tenant-rent-schedule'] })
+                              alert(generated > 0
+                                ? t('propertiesPanel.scheduleGenerated', '{{n}} rent period(s) created for this lease.', { n: generated })
+                                : t('propertiesPanel.scheduleUpToDate', 'No new periods — this lease is already fully scheduled.'))
+                            } catch (e) {
+                              alert(`${t('propertiesPanel.scheduleFailed', 'Could not generate the rent schedule.')} ${(e as Error).message}`)
+                            } finally {
+                              setGeneratingScheduleId(null)
+                            }
+                          }}
+                          disabled={generatingScheduleId === l.id || (schedCount === undefined && !scheduleCountsFailed)}
+                          className={`text-xs px-2 py-0.5 rounded border transition-colors disabled:opacity-50 ${
+                            schedCount === 0
+                              ? 'bg-amber-800 hover:bg-amber-700 text-amber-100 border-amber-600'
+                              : 'bg-slate-700 hover:bg-slate-600 text-slate-300 border-slate-600'
+                          }`}
+                          title={schedCount === 0
+                            ? t('propertiesPanel.scheduleGenerateHint', 'Create the monthly rent periods for this lease')
+                            : t('propertiesPanel.scheduleTopUpHint', 'Add any missing monthly rent periods')}>
+                          {generatingScheduleId === l.id ? '🗓 …'
+                            : schedCount === undefined
+                              // Counts unknown: still loading (disabled, "…") or the
+                              // count request failed. On failure say so rather than
+                              // implying zero — the action itself is still safe to run.
+                              ? (scheduleCountsFailed
+                                  ? `🗓 ${t('propertiesPanel.generateSchedule', 'Generate Rent Schedule')} (?)`
+                                  : '🗓 …')
+                            : schedCount === 0
+                              ? `🗓 ${t('propertiesPanel.generateSchedule', 'Generate Rent Schedule')}`
+                              : `🗓 ${t('propertiesPanel.schedulePeriods', '{{n}} periods', { n: schedCount })}`}
                         </button>
                         <button onClick={() => void propertiesApi.downloadLeaseAgreement(property.id, l.id).catch(() => alert('Could not download the lease agreement.'))}
                           className="text-xs px-2 py-0.5 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded border border-slate-600 transition-colors"
@@ -2628,7 +2692,8 @@ function PropertyDetail({ property, onDeleted }: { property: Property; onDeleted
                       </div>
                     )}
                   </div>
-                ))}
+                  )
+                })}
               </div>
             )}
           </div>
@@ -3375,7 +3440,12 @@ export default function PropertiesPanel() {
 }
 
 // ─── Manage Listing Modal ─────────────────────────────────────────────────────
-function ManageListingModal({ unit, propertyId, onClose, onChanged }: {
+// Exported so UnitsPanel (the flat cross-property unit list) can open the same
+// modal instead of duplicating ~250 lines of listing form. `propertyId` is used
+// only to invalidate that property's nested units query; callers outside this
+// file pass the unit's own `property_id` and invalidate their own key in
+// `onChanged`.
+export function ManageListingModal({ unit, propertyId, onClose, onChanged }: {
   unit: Unit; propertyId: string; onClose: () => void; onChanged: () => void
 }) {
   const qc = useQueryClient()

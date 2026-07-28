@@ -89,11 +89,20 @@ enquiriesRouter.get('/', async (req: Request, res: Response, next: NextFunction)
       }
       const where = conds.length ? ' AND ' + conds.join(' AND ') : '';
       const { rows: r } = await client.query(
-        // latest_viewing_at lets a caller answer "has this prospect actually
-        // viewed?" without a second round trip; prop_viewings joins to the
-        // enquiry, never to a tenant.
+        // prop_viewings joins to the enquiry, never to a tenant, so both of
+        // these save a round trip. They are NOT interchangeable:
+        //   latest_viewing_at    — the newest *scheduled* slot, past or future,
+        //                          whatever its status. "A viewing is on the books."
+        //   completed_viewing_at — the newest slot actually marked COMPLETED.
+        //                          "This prospect has actually seen the unit."
+        // The timeline originally used latest_viewing_at for "has viewed", which
+        // marked the step done for a viewing booked next week — and for
+        // CANCELLED and NO_SHOW rows too. Anything asserting that a viewing
+        // *happened* must read completed_viewing_at.
         `SELECT e.*, u.unit_number, p.name AS property_name,
-                (SELECT max(v.scheduled_at) FROM prop_viewings v WHERE v.enquiry_id = e.id) AS latest_viewing_at
+                (SELECT max(v.scheduled_at) FROM prop_viewings v WHERE v.enquiry_id = e.id) AS latest_viewing_at,
+                (SELECT max(v.scheduled_at) FROM prop_viewings v
+                  WHERE v.enquiry_id = e.id AND v.status = 'COMPLETED')            AS completed_viewing_at
          FROM prop_enquiries e
          LEFT JOIN prop_units u ON u.id = e.unit_id
          LEFT JOIN prop_properties p ON p.id = e.property_id

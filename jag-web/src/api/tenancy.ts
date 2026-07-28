@@ -92,8 +92,16 @@ export const tenancyApi = {
   getRentPeriod: (id: string) =>
     api.get<Row>(`/properties/rent-schedule/${id}`),
 
+  /**
+   * Creates one `prop_rent_schedule` row per calendar month the lease covers,
+   * prorating the first/last partial months. Idempotent -- the insert is
+   * `ON CONFLICT (lease_id, period_year, period_month) DO NOTHING` -- so calling
+   * it again on a lease that already has a schedule fills gaps and returns
+   * `{ generated: 0 }` when there are none. Returns the envelope's `data`, i.e.
+   * the count inserted, NOT the rows.
+   */
   generateRentSchedule: (leaseId: string) =>
-    api.post<Row[]>('/properties/rent-schedule/generate', { lease_id: leaseId }),
+    api.post<{ generated: number }>('/properties/rent-schedule/generate', { lease_id: leaseId }),
 
   recordRentPayment: (id: string, body: Row) =>
     api.post<Row>(`/properties/rent-schedule/${id}/record-payment`, body),

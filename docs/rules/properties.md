@@ -44,6 +44,50 @@ and `lease-expiry` are safe only because they happen to sit above `GET /:id` in 
 "genuinely empty". `components/properties/TenantSectionState.tsx` is the shared component
 for this — an error shows the error, an empty section says *why* it is empty.
 
+**Third instance, session 52:** `GET /properties/units` hit the same trap by construction and
+was mounted correctly from the start (`routes/properties/units-list.ts`). Two things that make
+this one safe to copy: mounting `propertiesRouter.use('/units', unitsListRouter)` above
+`propRoutes` does **not** break the pre-existing `POST /units/alert-stale` or `/units/:id`
+listing routes registered further down, because the new router declares only `GET '/'` and
+everything else falls through; and multi-segment paths like `/units/:id/photos` were never at
+risk from `/:id` in the first place — only single-segment ones are.
+
+### "A row exists" is not "the thing happened" (session 52)
+Robert opened Tenant 360 and saw a **13 July handover that has not happened**. The lifecycle
+timeline marked the step DONE because a `prop_handover_checklists` row existed, and labelled it
+with that row's `created_at` — i.e. the day the checklist was *drafted*, rendered as the day the
+tenant took possession. The table has had `completed_at`, `tenant_signed_at` and
+`manager_signed_at` since migration 018; the timeline read none of them.
+
+The same defect sat one step earlier and nobody had hit it yet: `latest_viewing_at` is
+`max(v.scheduled_at)` over **all** `prop_viewings` rows regardless of `status`, so a viewing
+booked for next week — or one already `CANCELLED` / `NO_SHOW` — marked Viewing as done.
+`enquiries.ts` now also returns `completed_viewing_at` (`status = 'COMPLETED'` only); they are not
+interchangeable, and anything asserting a viewing *happened* must read the completed one.
+
+**Rule:** before a derived step claims something is done, find the column that records
+*completion* and read that. If the table has no such column, the step cannot be marked done —
+show the draft/booking with a label that says so ("checklist started 13 Jul", "booked 4 Aug")
+rather than a bare date, because a bare date under a step reads as the date it completed. Same
+family as `UNKNOWN` vs `PENDING` and the utilities-scoring rule below: the timeline is only worth
+having if every mark on it is evidence, not inference.
+
+### Do not score a field whose "unset" is indistinguishable from its default (session 52)
+`UnitsPanel`'s listing-readiness column scores photos, description and rent — not utilities.
+`wasa_included`, `electricity_included` and `internet_included` are `BOOLEAN DEFAULT FALSE`
+(migration 022), so "this unit does not include WASA" and "nobody has filled this in yet" are
+the same stored value. A ✗ there would look like a fact and be a guess. Same rule as the
+Tenant 360 timeline's `UNKNOWN` vs `PENDING`. Before adding a field to any completeness or
+readiness score, check whether its schema can actually represent "not answered".
+
+### Properties tab ids are a public contract (session 52)
+`?tab=` on `/properties` is consumed by the notification bell, WhatsApp deep links and
+whatever Robert has bookmarked. Renaming a tab id without an alias silently drops every one
+of those callers onto the default tab — a failure with no error message. `pages/Properties.tsx`
+carries `LEGACY_TAB_IDS` + `resolveTab()`; add an entry there whenever an id changes, and note
+that it must be applied both at mount **and** inside the `?tab=` `useEffect`, since a deep link
+can arrive while the page is already open.
+
 ### Tenant links must not be routed through the lease (session 50)
 Migrations 052–055 gave deposits/tickets/handover a `tenant_id`, but the resolution paths
 all assumed a lease or an application existed. With the portfolio between tenancies (every
@@ -63,6 +107,19 @@ rent recorded in Tenancy Ops → Rent did not move the Dashboard arrears figure,
 `prop_rent_payments`. Consolidating onto `prop_rent_schedule` under STD-13. Until the
 contract step drops `prop_rent_payments`, treat `prop_rent_schedule` as authoritative and
 do not add new readers of `prop_rent_payments`.
+
+### Creating a lease does NOT create its rent schedule (session 52)
+`prop_rent_schedule` rows are only ever written by `generateRentSchedule()`, and nothing
+calls it on lease creation. Its callers are `renewals.ts` (on renewal) and — since session
+52 — the **Generate Rent Schedule** button on the lease row in property detail → Leases.
+Before that button existed there was no UI path at all, and a signed, active, ACTIVE-status
+lease with an empty schedule looked completely normal from every screen while silently
+producing no reminders, no arrears and no dashboard figure. **When a lease is created by
+any route, check the schedule exists.** The generator is idempotent
+(`ON CONFLICT (lease_id, period_year, period_month) DO NOTHING`), so re-running it is the
+cheap way to be sure. Note also that `GET /properties/rent-schedule` filters by
+`lease_id` / `unit_id` / `tenant_id` / `status` / `year` but **not by property** — a
+per-property view has to fan out per lease.
 
 ### Phone is the join key for anything that predates the tenant record (session 51)
 `prop_enquiries` and `prop_viewings` carry **no `tenant_id`** — they exist before a tenant

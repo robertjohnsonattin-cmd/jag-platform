@@ -3,7 +3,7 @@ import type {
   Property, PropertyTenant, PipelineItem,
   RentPayment, RentReceipt, UtilityBill, VendorInvoice, VendorInvoiceAllocation, ExpiringDocument, Lease, Mortgage,
   PropertyTaxRecord, Inspection, ArrearsRecord, LeaseExpiryRecord,
-  FinancialSummary, PropertyDocument, UtilityAccount, Unit, UnitPhoto, PropertyValuationHistory,
+  FinancialSummary, PropertyDocument, UtilityAccount, Unit, UnitListRow, UnitPhoto, PropertyValuationHistory,
   TenantDocument, TenantDocType,
 } from '../types/properties'
 
@@ -246,6 +246,10 @@ export const propertiesApi = {
   // ── Units ────────────────────────────────────────────────────────────────────
   getUnits: (propertyId: string) =>
     api.get<Unit[]>(`/properties/${propertyId}/units`),
+
+  /** Flat cross-property unit list. All filters optional — omit them for every unit. */
+  listUnits: (params?: { property_id?: string; listing_status?: string; is_rented?: 'true' | 'false' }) =>
+    api.get<UnitListRow[]>(`/properties/units${qs(params)}`),
 
   createUnit: (propertyId: string, body: Record<string, unknown>) =>
     api.post<Unit>(`/properties/${propertyId}/units`, body),

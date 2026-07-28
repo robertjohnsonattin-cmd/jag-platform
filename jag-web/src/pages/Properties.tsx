@@ -18,38 +18,56 @@ import PropertiesHandoverPanel from '../components/properties/PropertiesHandover
 import PropertiesRenewalsPanel from '../components/properties/PropertiesRenewalsPanel'
 import PropertiesWhatsAppPanel from '../components/properties/PropertiesWhatsAppPanel'
 import PropertiesWaApprovalsPanel from '../components/properties/PropertiesWaApprovalsPanel'
+import UnitsPanel from '../components/properties/UnitsPanel'
+import LeasesPanel from '../components/properties/LeasesPanel'
 
 // Tabs are grouped into short sections so the nav fits two shallow rows
 // instead of one 17-wide scroll strip — the flat list was unusable on mobile.
+//
+// Restructured in Phase 3: acquisitions moved out of Leasing (buying a property
+// is not part of letting one), the whole tenancy lifecycle now reads left to
+// right inside Leasing, and the money tabs stopped being called "Tenancy Ops".
 const GROUPS = [
   {
-    id: 'overview',
-    key: 'properties.groups.overview',
+    id: 'portfolio',
+    key: 'properties.groups.portfolio',
     tabs: [
-      { id: 'properties', key: 'properties.tabs.properties' },
-      { id: 'tenants',    key: 'properties.tabs.tenants' },
-      { id: 'doc_expiry', key: 'tenancy.tabs.docExpiry' },
+      { id: 'properties',   key: 'properties.tabs.properties' },
+      { id: 'units',        key: 'properties.tabs.units' },
+      { id: 'acquisitions', key: 'properties.tabs.acquisitions' },
     ],
   },
   {
     id: 'leasing',
     key: 'properties.groups.leasing',
     tabs: [
-      { id: 'pipeline',     key: 'properties.tabs.pipeline' },
       { id: 'enquiries',    key: 'tenancy.tabs.enquiries' },
       { id: 'viewings',     key: 'tenancy.tabs.viewings' },
       { id: 'applications', key: 'tenancy.tabs.applications' },
+      { id: 'leases',       key: 'tenancy.tabs.leases' },
+      { id: 'handover',     key: 'tenancy.tabs.handover' },
       { id: 'renewals',     key: 'tenancy.tabs.renewals' },
     ],
   },
   {
-    id: 'tenancy_ops',
-    key: 'properties.groups.tenancyOps',
+    id: 'tenants',
+    key: 'properties.groups.tenants',
     tabs: [
-      { id: 'deposits',       key: 'tenancy.tabs.deposits' },
+      { id: 'tenants',    key: 'properties.tabs.tenant360' },
+      // The plan retired this tab in favour of a Phase 5 landing card. Phase 5
+      // is explicitly droppable, so retiring it now would make a working,
+      // deployed portfolio-wide view unreachable. It lives here — every row it
+      // shows is a tenant document — until that card actually exists.
+      { id: 'doc_expiry', key: 'tenancy.tabs.docExpiry' },
+    ],
+  },
+  {
+    id: 'money',
+    key: 'properties.groups.money',
+    tabs: [
       { id: 'rent',           key: 'tenancy.tabs.rent' },
+      { id: 'deposits',       key: 'tenancy.tabs.deposits' },
       { id: 'reconciliation', key: 'tenancy.tabs.reconciliation' },
-      { id: 'handover',       key: 'tenancy.tabs.handover' },
     ],
   },
   {
@@ -62,8 +80,8 @@ const GROUPS = [
     ],
   },
   {
-    id: 'comms',
-    key: 'properties.groups.comms',
+    id: 'inbox',
+    key: 'properties.groups.inbox',
     tabs: [
       { id: 'whatsapp',  key: 'tenancy.tabs.whatsapp' },
       { id: 'approvals', key: 'tenancy.tabs.approvals' },
@@ -79,12 +97,25 @@ const TAB_TO_GROUP = new Map<TabId, GroupId>(
 )
 const VALID_TAB_IDS = new Set(TAB_TO_GROUP.keys())
 
+// Tab ids are a public contract: the notification bell, WhatsApp deep links and
+// anything Robert has bookmarked all arrive as `?tab=`. Renaming one without an
+// alias silently drops the caller onto the default tab.
+const LEGACY_TAB_IDS: Record<string, TabId> = {
+  pipeline: 'acquisitions',
+}
+
+function resolveTab(raw: string | null): TabId | null {
+  if (!raw) return null
+  const mapped = LEGACY_TAB_IDS[raw] ?? raw
+  return VALID_TAB_IDS.has(mapped as TabId) ? (mapped as TabId) : null
+}
+
 export default function Properties() {
   const { t } = useTranslation()
   const [searchParams] = useSearchParams()
   const initialTab = searchParams.get('tab')
   const focusId = searchParams.get('focus')
-  const startTab: TabId = initialTab && VALID_TAB_IDS.has(initialTab as TabId) ? (initialTab as TabId) : 'properties'
+  const startTab: TabId = resolveTab(initialTab) ?? 'properties'
   const [tab, setTab] = useState<TabId>(startTab)
   const [group, setGroup] = useState<GroupId>(TAB_TO_GROUP.get(startTab)!)
 
@@ -94,9 +125,10 @@ export default function Properties() {
   // notification bell when Properties is already open). Follow the URL when it
   // moves; the tab row still drives itself through setTab for ordinary clicks.
   useEffect(() => {
-    if (initialTab && VALID_TAB_IDS.has(initialTab as TabId)) {
-      setTab(initialTab as TabId)
-      setGroup(TAB_TO_GROUP.get(initialTab as TabId)!)
+    const next = resolveTab(initialTab)
+    if (next) {
+      setTab(next)
+      setGroup(TAB_TO_GROUP.get(next)!)
     }
   }, [initialTab])
 
@@ -146,9 +178,11 @@ export default function Properties() {
       </div>
 
       {tab === 'properties'   && <PropertiesPanel />}
+      {tab === 'units'        && <UnitsPanel />}
+      {tab === 'acquisitions' && <PipelinePanel />}
       {tab === 'tenants'      && <TenantsPanel />}
       {tab === 'doc_expiry'   && <PropertiesDocExpiryPanel />}
-      {tab === 'pipeline'     && <PipelinePanel />}
+      {tab === 'leases'       && <LeasesPanel />}
       {tab === 'enquiries'    && <PropertiesEnquiriesPanel focusId={focusId} />}
       {tab === 'viewings'     && <PropertiesViewingsPanel />}
       {tab === 'applications' && <PropertiesApplicationsPanel focusId={focusId} />}

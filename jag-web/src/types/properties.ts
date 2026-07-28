@@ -333,6 +333,19 @@ export interface Unit {
   tenant_phone: string | null
 }
 
+/**
+ * A row from the flat `GET /properties/units` list. Superset of `Unit` — the
+ * property is not known from context there, and `photo_count` drives the
+ * listing-readiness column that the nested per-property list has no need for.
+ */
+export interface UnitListRow extends Unit {
+  property_id: string
+  property_name: string
+  property_city: string | null
+  photo_count: number
+  lease_end_date: string | null
+}
+
 export interface UnitPhoto {
   id: string
   object_key: string

@@ -39,6 +39,57 @@
 | Pending-review → Transactions | `components/finance/TransactionsPanel.tsx` | AI `suggested_category`/`confidence` surfaced in review modal; orphaned `fin_pending_review_queue` row closed on PATCH |
 | IMS photo 401 fix | `components/AuthedImg.tsx` + `api/client.ts` `objectUrl()` | Auth-gated streaming `<img>` now Bearer-fetched → blob (see implementation rule above) |
 
+### Properties navigation restructure — Phase 3 (session 52, 2026-07-28)
+
+Properties restructure **Phase 3**. Six groups instead of five, and two flat cross-property
+views that had no home before. Old ids stay valid — see the alias table below.
+
+| Group | Tabs (in order) |
+|---|---|
+| Portfolio | Properties · **Units** (new) · Acquisitions (moved out of Leasing) |
+| Leasing | Enquiries · Viewings · Applications · **Leases** (new) · Handover (moved in) · Renewals |
+| Tenants | Tenant 360 · Doc Expiry |
+| Money | Rent · Deposits · Reconciliation |
+| Maintenance | Tickets · Scheduled · Contractors |
+| Inbox | WhatsApp · Approvals |
+
+| Piece | File | Notes |
+|---|---|---|
+| Flat unit list | `components/properties/UnitsPanel.tsx` | All units across every property in one screen — its reason to exist is the listing backlog (25 units, most still missing photos/description/rent, previously only visible property-by-property). Filters: property, listing status, "needs listing content only". Reuses `ManageListingModal`, now **exported** from `PropertiesPanel.tsx`, rather than duplicating ~250 lines of listing form; callers outside that file pass the row's own `property_id` and invalidate their own query key in `onChanged` |
+| Listing-readiness scoring | `components/properties/UnitsPanel.tsx` → `readiness()` | Scores **photos / description / rent only**. Utilities are deliberately excluded: `wasa_included`, `electricity_included`, `internet_included` all default to `FALSE` in migration 022, so "not included" and "nobody has filled this in" are the same value in the DB. Scoring them would state a guess as a fact — same rule as `UNKNOWN` vs `PENDING` in the Tenant 360 timeline |
+| Flat lease list | `components/properties/LeasesPanel.tsx` | Consumes the `GET /properties/leases` that Phase 1a un-shadowed. Read-only portfolio view with property + status filters and a 60-day expiry flag; creating/editing a lease still happens under its property |
+| Flat units route | `routes/properties/units-list.ts` → `unitsListRouter` | `GET /properties/units`, mounted in `index.ts` **above** `propRoutes`. Same columns as `GET /:propertyId/units` plus `property_id` / `property_name` / `property_city` / `photo_count` / `lease_end_date`. Distinct from `routes/properties/units.ts` (`unitsRouter`), which is the nested per-property unit CRUD — two routers, two files, similar names |
+| Legacy tab aliases | `pages/Properties.tsx` → `LEGACY_TAB_IDS` + `resolveTab()` | Tab ids are a public contract (notification bell, WhatsApp deep links, bookmarks). `?tab=pipeline` → `acquisitions`. Applied at mount **and** in the `?tab=` `useEffect`, so both paths honour the alias |
+
+**Route-shadowing hazard, third instance:** `GET /properties/units` is a single path segment, so
+`GET /:id` inside `properties.ts` captures it, fails its UUID parse and returns `422` — exactly how
+`GET /properties/leases` stayed dead for six sessions. It is mounted from `index.ts` ahead of
+`propRoutes`. Mounting `/units` there is safe alongside the existing `POST /units/alert-stale` and
+`/units/:id` (listing) routes further down: `unitsListRouter` declares only `GET '/'`, so everything
+else falls through.
+
+**Deviation from the approved plan:** the plan retired the Doc Expiry tab in favour of a Phase 5
+landing card. Phase 5 is explicitly droppable, so retiring the tab now would make a working,
+deployed portfolio-wide view unreachable. It sits under Tenants (every row it shows is a tenant
+document) until that card actually exists.
+
+**Naming collision:** "Units" is now a top-level Properties tab (all units, cross-property), a
+sub-tab inside each property's detail pane (that property's units), and unrelated to Inventory's
+stock units. "Leases" is likewise both a top-level tab and a property-detail sub-tab.
+
+### Generate Rent Schedule button — Properties → Portfolio → *property* → Leases (session 52, 2026-07-28)
+
+| Piece | File | Notes |
+|---|---|---|
+| Generate / top-up rent schedule | `components/properties/PropertiesPanel.tsx` → lease action row | First and only UI caller of `tenancyApi.generateRentSchedule()` → `POST /properties/rent-schedule/generate`. Sits beside **Send for Signature** on each lease row in the property-detail **Leases** sub-tab. Idempotent (`ON CONFLICT (lease_id, period_year, period_month) DO NOTHING`), so pressing it again fills gaps instead of duplicating |
+| Per-lease period count | same file → `lease-schedule-counts` query | One `GET /properties/rent-schedule?lease_id=` per lease of that property, batched inside a single query key. `GET /rent-schedule` has **no property filter**, which is why it is N requests; lease counts per property are small. The button is **disabled while the count is undefined** — falling back to 0 would offer "Generate" for a lease that already has a schedule |
+
+The button is **amber when the count is 0** and a plain `🗓 {n} periods` badge otherwise. A lease
+with no rent schedule produces no WhatsApp reminders, no arrears, and nothing on the dashboard, and
+until this button existed there was **no way to create one from the UI at all** — the endpoint's
+only other caller is `renewals.ts`, which generates on renewal. `LeasesPanel` (the flat
+cross-property list) stays read-only by design; this action lives with the other lease actions.
+
 ### Tenant 360 — Properties → Tenants (session 51, 2026-07-28)
 
 Properties restructure **Phase 2**. Replaced the tenants table (whose last column carried ten
@@ -110,6 +161,7 @@ Robert flagged Properties (most-fleshed-out module) as hard to use on mobile. Fi
 | Internal MinIO audit webhook | `routes/internal/minio-audit.ts` | Receives MinIO `audit_webhook:loki` POSTs; validates `Bearer $MINIO_AUDIT_TOKEN`; logs to Loki via structured logger; mounted at `/internal/minio-audit` (no Keycloak, Docker-network-only) |
 | Properties vendor invoices | `routes/properties/vendor-invoices.ts` | **Registered 2026-07-28 — existed since well before, undocumented.** `prop_vendor_invoices` CRUD + approve; `prop_vendor_invoice_allocations` splits one invoice across units (migration 058); `linked_expense_id` bridges to a Finance expense (060); `settlement_journal_entry_id` writes back the GL entry on settlement (061). Mounted at `/:propertyId/vendor-invoices`. **Frontend surface:** only property detail → Invoices tab in `PropertiesPanel.tsx` — there is no top-level Invoices tab. Not to be confused with JABCO's payment certificates or DragonBridge invoices |
 | Tenancy leases (flat list) | `routes/properties/leases.ts` | **Session 50 (2026-07-28)** — `GET /properties/leases` with optional `tenant_id`/`property_id`/`unit_id`/`status`. Was previously declared inside `properties.ts` *after* `GET /:id`, so Express matched `/:id` first and every call 422'd — the tenant Leases modal had never worked, it just rendered its empty state. **Rule: a flat `/properties/x` route must be mounted from `index.ts` ahead of `propRoutes`, never declared in `properties.ts` below `GET /:id`.** Tenant columns match `GET /:propertyId/leases` exactly so both feed the same frontend `Lease` type |
+| Properties units (flat list) | `routes/properties/units-list.ts` | **Session 52 (2026-07-28)** — `GET /properties/units` with optional `property_id`/`listing_status`/`is_rented`. Same columns as the nested `GET /:propertyId/units` plus `property_id`, `property_name`, `property_city`, `photo_count` and `lease_end_date`. Mounted from `index.ts` ahead of `propRoutes` (single-segment path → would otherwise be captured by `GET /:id` and 422, same bug as `/leases`). **Distinct from `routes/properties/units.ts` (`unitsRouter`)**, which is the nested per-property unit CRUD — two files, two routers, near-identical names. Declares only `GET '/'`, so `POST /units/alert-stale` and `/units/:id/*` (listing router) still reach their handlers |
 | Tenancy enquiries | `routes/properties/enquiries.ts` | Prospect enquiry CRUD + WhatsApp reply; stage lifecycle. **Session 51 (2026-07-28):** `GET /properties/enquiries` gained a `phone` filter and a `latest_viewing_at` column. An enquiry predates the tenant record and carries **no `tenant_id`** — the prospect's phone is the only link — so Tenant 360's lifecycle timeline reaches Enquiry/Viewing through it. Matching is on the **last 7 digits** of `prospect_phone` (`right(regexp_replace(…,'\D','','g'),7)`), because numbers are stored however they were typed: real rows include both `18682912786` and `251-6802`. A `phone` shorter than 7 digits matches nothing rather than everything |
 | Tenancy viewings | `routes/properties/viewings.ts` | Viewing scheduling, Google Calendar events, status PATCH; `/send-reminders` + `/send-post-viewing-links` batch; public booking router (`/public/book/:slug`) |
 | Tenancy applications | `routes/properties/applications.ts` | Application CRUD + decide (APPROVE/REJECT) + generate tenancy agreement PDF |

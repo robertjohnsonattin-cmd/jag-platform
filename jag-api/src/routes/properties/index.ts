@@ -11,6 +11,7 @@ import { inspectionsRouter }               from './inspections';
 import { documentsRouter }                 from './documents';
 import { utilityAccountsRouter }          from './utility-accounts';
 import { unitsRouter }                    from './units';
+import { unitsListRouter }                from './units-list';
 // Tenancy lifecycle modules
 import { leasesRouter }                   from './leases';
 import { enquiriesRouter }                from './enquiries';
@@ -37,6 +38,9 @@ propertiesRouter.use(brianPortalGate('PROPERTIES'));
 // ── Tenancy lifecycle flat routes (BEFORE '/' catch-all) ─────────────────────
 // These must precede propRoutes (which has GET /:id) to avoid UUID mismatch.
 propertiesRouter.use('/leases',         leasesRouter);
+// Flat cross-property unit list. Only declares GET '/', so /units/:id/... and
+// POST /units/alert-stale fall straight through to their handlers further down.
+propertiesRouter.use('/units',          unitsListRouter);
 propertiesRouter.use('/enquiries',      enquiriesRouter);
 propertiesRouter.use('/viewings',       viewingsRouter);
 propertiesRouter.use('/applications',   applicationsRouter);

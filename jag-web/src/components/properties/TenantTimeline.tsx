@@ -72,10 +72,19 @@ export function deriveLifecycle(
 ): TenantLifecycle {
   const { hasPhone, enquiries, applications, deposits, leases, handover } = data
 
-  const viewed = enquiries.filter(e => e['latest_viewing_at'])
+  // A record existing is not the same as the thing having happened. Every step
+  // below that asserts "this is done" must key off evidence of *completion*,
+  // not off the presence of a row:
+  //   - a viewing booked for next week is not a viewing that happened, and
+  //     neither is a CANCELLED or NO_SHOW one;
+  //   - a handover checklist can be drafted weeks before the tenant moves in.
+  // Both of those shipped as "done" in the first cut and were wrong on screen.
+  const viewedDone   = enquiries.filter(e => e['completed_viewing_at'])
+  const viewBooked   = enquiries.filter(e => e['latest_viewing_at'])
   const approvedApps = applications.filter(a => String(a['status']) === 'APPROVED')
-  const activeLease = leases.find(l => l.status === 'ACTIVE') ?? null
+  const activeLease  = leases.find(l => l.status === 'ACTIVE') ?? null
   const entryHandover = handover.filter(h => String(h['type']) === 'ENTRY')
+  const entryDone     = entryHandover.filter(h => h['completed_at'])
 
   // A step is DONE when its evidence exists. CURRENT is assigned afterwards to
   // the first step that is not DONE, so exactly one step is ever CURRENT.
@@ -90,9 +99,15 @@ export function deriveLifecycle(
     {
       id: 'viewing',
       label: t('tenants.lifecycle.viewing', 'Viewing'),
-      done: hasAny(viewed),
+      done: hasAny(viewedDone),
       unknown: !hasPhone,
-      detail: hasAny(viewed) ? fmtDate(String(viewed[0]['latest_viewing_at'])) : undefined,
+      // A booked-but-not-completed viewing is shown as a booking, never as a
+      // completed one — the date alone would read as "they viewed on this day".
+      detail: hasAny(viewedDone)
+        ? fmtDate(String(viewedDone[0]['completed_viewing_at']))
+        : hasAny(viewBooked)
+          ? t('tenants.lifecycle.viewingBooked', 'booked {{d}}', { d: fmtDate(String(viewBooked[0]['latest_viewing_at'])) })
+          : undefined,
     },
     {
       id: 'application',
@@ -131,10 +146,14 @@ export function deriveLifecycle(
     {
       id: 'handover',
       label: t('tenants.lifecycle.handover', 'Handover'),
-      done: hasAny(entryHandover),
-      detail: hasAny(entryHandover) && entryHandover[0]['created_at']
-        ? fmtDate(String(entryHandover[0]['created_at']))
-        : undefined,
+      // `created_at` is when the checklist row was made, which is not when the
+      // tenant took possession. Only `completed_at` says the handover happened.
+      done: hasAny(entryDone),
+      detail: hasAny(entryDone)
+        ? fmtDate(String(entryDone[0]['completed_at']))
+        : hasAny(entryHandover) && entryHandover[0]['created_at']
+          ? t('tenants.lifecycle.handoverDrafted', 'checklist started {{d}}', { d: fmtDate(String(entryHandover[0]['created_at'])) })
+          : undefined,
     },
   ]
 
@@ -173,7 +192,9 @@ export function deriveLifecycle(
     approved:    t('tenants.lifecycle.nextApproved', 'Application is awaiting a decision — approve or reject it.'),
     deposit:     t('tenants.lifecycle.nextDeposit', 'Record the security deposit in Money → Deposits.'),
     lease:       t('tenants.lifecycle.nextLease', 'Create the lease — this is what starts the rent schedule.'),
-    handover:    t('tenants.lifecycle.nextHandover', 'Do the move-in (ENTRY) handover checklist and issue keys.'),
+    handover:    hasAny(entryHandover)
+      ? t('tenants.lifecycle.nextHandoverFinish', 'The ENTRY handover checklist is started but not signed off — complete it to record the move-in.')
+      : t('tenants.lifecycle.nextHandover', 'Do the move-in (ENTRY) handover checklist and issue keys.'),
   }
 
   const current = steps.find(s => s.state === 'CURRENT')

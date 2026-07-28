@@ -280,7 +280,7 @@ Only genuinely-open work lives here. Everything completed is in **`docs/CHANGELO
 
 - **Leases (B3)** — PENDING: all leases expired; need monthly rent amounts per unit from Robert to create new leases (moved from above, still outstanding)
 
-- **Unit listing content** — IN PROGRESS: 25 units all VACANT; Apt C1 (45 Eleventh Street) fully listed 2026-07-06 as the first real end-to-end listing (photos, description, rent, utilities, public booking link) — see "Tenancy listing pipeline" below for the infra work this uncovered. Remaining 24 units still need photos/descriptions/rent/utilities filled in manually via Properties → Units → Listing button.
+- **Unit listing content** — IN PROGRESS: 25 units all VACANT; Apt C1 (45 Eleventh Street) fully listed 2026-07-06 as the first real end-to-end listing (photos, description, rent, utilities, public booking link) — see "Tenancy listing pipeline" below for the infra work this uncovered. Remaining 24 units still need photos/descriptions/rent/utilities filled in manually. Since session 52 the whole backlog is visible in one screen at **Properties → Portfolio → Units** (filter "needs listing content only"), with the same Listing button — no longer property-by-property.
 
 - **Money Manager reconciliation import** — PENDING: `scripts/mm-import/` not yet built; all-source reconciliation (MM Excel + second Excel report + bank PDFs/CSVs) → single clean import into fin_transactions; 54 existing Scotia rows will be enriched not duplicated; RBC eSavings (`ffa985f6`, last4 3841, $53,755.57 TTD opening balance) and RBC Rewards Visa Platinum (`077b8014`, last4 0512) accounts already created in JAG; Cash account still needs creating; second Excel report contents TBD
 
