@@ -28,6 +28,7 @@ context small. Splitting happened 2026-07-27; nothing was deleted, only moved.
 | Add or debug a cron job / local script | `docs/ops-scripts.md` |
 | Add or change UI strings | `docs/i18n.md` |
 | Find out how something came to be, or if a bug was already fixed | `docs/CHANGELOG.md` |
+| Need the fuller blow-by-blow of one past piece of work than CHANGELOG gives | `docs/memory-archive/` (frozen 2026-07-27, read-only) |
 
 **These are not optional reads.** A denial ("no such feature") or a design decision made
 without opening the relevant file above is exactly how this project has repeatedly shipped
