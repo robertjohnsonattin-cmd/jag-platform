@@ -1,66 +1,57 @@
-# Session Handoff
+# Session Handoff — Context/token reduction
 
 ## 1. Metadata
 
-- **Date:** 2026-07-25
+- **Date:** 2026-07-27
 - **Project path:** `C:\Users\rober\Documents\Claude\Projects\JAG Holdings`
-- **Git branch:** `main`
-- **Context estimate:** Long session — built two major features end-to-end (full Fitness module, then AI Fitness Coach) with extensive live deploy/debug/browser-verification cycles. Likely near or past typical compaction range; treat this handoff as authoritative over re-reading the raw transcript.
+- **Git branch:** `main` — **ahead of `origin/main` by 1 commit (unpushed)**
+- **Context estimate:** moderate. This session did config inspection and scripted file splits rather than large file reads; no compaction occurred. The *starting* context of the session that prompted this work was 231.6k/967k (24%), which is the problem being solved.
 
 ## 2. Current Objective
 
-Build a full Fitness module for the JAG platform, then layer an AI-driven "coach" on top of it (Gemini) that asks about goals, body specifics, and daily mood/readiness before suggesting a workout — factoring in real health data, not just generic profile fields. Both are done and deployed. The live thread now is Robert's stated next direction: expand the Lifestyle Health Tracker into a fuller personal medical record (tentatively "Medical Record Tracker") by having Claude read a folder of his medical documents and extract structured data from them — **he has not yet provided the folder path.**
+Cut the token cost of *starting* a session on this project, which was 231.6k tokens before any work began and was burning the weekly usage limit on material irrelevant to most sessions. Two levers were identified: the 226 KB `CLAUDE.md` (done) and unused auto-installed plugins carrying 17 unauthenticated MCP servers (not done — needs UI action from Robert). Robert asked explicitly for a *structural* fix that prevents recurrence, not a one-time cleanup.
 
 ## 3. Decisions Made & Rationale
 
-- **Metric units (kg/cm) throughout the Fitness module, not imperial.** Initially defaulted exercise-weight logging to `lb`/`mi`. Robert explicitly corrected this mid-session ("let's use metric throughout instead") to match the pre-existing Health Tracker's `WEIGHT_KG` convention. Fixed via migration + Zod default + frontend state default, all flipped to kg/km. Full detail: [[feedback-ai-coach-design-preferences]] memory.
-- **Reused the existing Gemini integration pattern (`listing.ts`'s `suggest-price`) rather than building new AI infra.** Plain `fetch`, `responseSchema` for structured JSON, same env vars. Zero new AI infrastructure.
-- **AI-suggested workouts are NOT a separate data structure.** `POST /ai/suggest` inserts a normal `fam_workout_programs` (flagged `ai_generated = true`) + `fam_program_workouts` + `fam_program_exercises` row set, so the existing Programs/Log Workout/Progress/PR pipeline works on them unchanged. "Start This Workout" just calls the existing session-start endpoint.
-- **AI is never asked to suggest a target weight per exercise.** No reliable way for a model to guess a person's actual working weight — left null, the person sets it based on how the previous set felt.
-- **Server-side validates every AI-returned `exercise_id` against the real library** before insert — never trust the model to only emit real IDs it was shown.
-- **AI Coach tab is the default landing tab** on the Fitness page (not "Log Workout") — it's meant to be the primary daily entry point.
-- **Exercise library expanded from 38 → 80**, specifically matched to Robert's real home gym (photo he shared: cable multi-gym, dumbbells, barbell, adjustable bench w/ leg developer, treadmill, upright + recumbent bikes) rather than staying generic — Robert flagged that generic exercises + low variety per muscle group would make AI suggestions monotonous.
-- **AI coach prompt explicitly moderates intensity for elevated health readings** (resting HR, cholesterol, triglycerides, glucose) even when stated energy is high — verified live with a real Gemini call. Framed as general fitness-programming judgment, not medical advice/diagnosis.
-- **Health Tracker lab-marker expansion (cholesterol/triglycerides/glucose) done proactively** as the first step toward Robert's "full medical record" direction, before he's provided the actual documents.
-- **CLAUDE.md and the auto-memory system were both updated** at the end of this session (user asked to "update the memory and records") — CLAUDE.md now has a full "Fitness module + AI Fitness Coach (session 48)" writeup, migration table rows, and an OPEN ITEMS entry; auto-memory has `project_fitness_ai_coach.md` and `feedback_ai_coach_design_preferences.md`. **Do not re-document this build from scratch in a future session — read CLAUDE.md's session-48 section first.**
+- **Split `CLAUDE.md` into an index + `docs/` tree rather than deleting content.** The content was genuinely valuable, just not needed *every* session — e.g. the Traccar GPS writeup loaded during medical-records work. Detail is now one `Read` away instead of always resident.
+- **A `TOP GOTCHAS` section stays inline in `CLAUDE.md`.** About a dozen rules have each caused real production breakage more than once (`set_config` vs `SET LOCAL`, `NULLIF` in RLS policies, `req.rlsCtx` not `req.user`, the docker-compose env-wiring gap, `scp -r` stalls, date-only timezone shift). These must not depend on remembering to open a file, so they're one-line entries with pointers to full detail.
+- **The routing rule is the actual fix, not the split.** `CLAUDE.md` grew ~5–8 KB/session because sessions appended full narratives; 99 of 104 `OPEN ITEMS` bullets were completed work. Without the new `KEEPING THIS FILE SMALL` section it would return to 226 KB by roughly October. A finished item now moves to `docs/CHANGELOG.md` and is deleted from `CLAUDE.md`.
+- **The split was done with Python scripts, not by retyping.** 226 KB is far too much to reproduce by hand without transcription error.
+- **Verified by line-by-line diff, not byte totals.** All 764 substantive lines of the original were checked for presence in the new set. This caught a 3-line Phase 7 preamble the extraction had silently dropped, which byte-count accounting would have missed (the new set is *larger* than the original because of added index text). Only 2 lines differ, both deliberately rewritten to point at `docs/`.
+- **`docs/CHANGELOG.md` content was NOT re-verified against the running system.** It was converted from what `CLAUDE.md` claimed about itself. Anything mis-recorded before today is still mis-recorded, merely relocated — `CLAUDE.md` already warns in several places that a "DONE" entry reflects intent at write-time, not necessarily current VM reality.
+- **Plugin keep/drop decided on measured usage, not guesswork.** `~/.claude.json` → `pluginUsage`: `anthropic-skills` 33 uses (keep), `engineering` 1, `sales` 0, `product-tracking-skills` 0, `cowork-plugin-management` 0, `pdf-viewer` 0. Also `officialMarketplaceAutoInstalled: true` — Robert never chose these; they were auto-installed at setup.
+- **Plugin enablement is app-managed and cannot be changed from the filesystem.** Confirmed by checking `~/.claude/settings.json`, `~/.claude.json`, `~/.claude/plugins/`, and the Electron `Local Storage/leveldb` store — no enable/disable key exists in any of them. It requires the desktop app's Directory UI or an interactive `claude` terminal.
 
 ## 4. Active & Critical Files
 
-All below are **deployed to production and verified working**, but **not yet committed to git** (working tree is dirty — see git status). User has been asked twice this session whether to commit; hasn't answered yet.
-
-- `jag-infra/migrations/jag_family/025_fitness_module.sql` — exercise library, programs, sessions, PRs. Applied to prod DB.
-- `jag-infra/migrations/jag_family/026_ai_fitness_coach.sql` — fitness profiles, checkins, `ai_generated` flag. Applied.
-- `jag-infra/migrations/jag_family/027_exercise_variety_and_health_context.sql` — 38→80 exercises, `biological_sex`, kg default fix. Applied.
-- `jag-infra/migrations/jag_family/028_health_tracker_lab_markers.sql` — cholesterol/triglycerides/glucose metric types. Applied.
-- `jag-api/src/routes/lifestyle/fitness.ts` — new file, full Fitness CRUD + PR auto-detection. Deployed.
-- `jag-api/src/routes/lifestyle/ai-coach.ts` — new file, Gemini-backed suggestion endpoint + profile/checkin CRUD. Deployed.
-- `jag-api/src/routes/lifestyle/index.ts` — `MetricEnum` extended with lab markers. Deployed.
-- `jag-web/src/pages/Fitness.tsx` — new page, 6 tabs (AI Coach, Exercises, Programs, Log Workout, History, Progress, Records). Deployed.
-- `jag-web/src/api/fitness.ts`, `jag-web/src/types/fitness.ts` — new. Deployed.
-- `jag-web/src/api/lifestyle.ts`, `jag-web/src/pages/Lifestyle.tsx` — `MetricType` + label/icon/unit maps extended for lab markers. Deployed.
-- `jag-web/src/auth/AuthProvider.tsx` — StrictMode double-init bug fixed (useRef guard). Deployed; this was a real pre-existing bug, not new-feature code.
-- `jag-web/src/api/client.ts` — added `api.put()` method (needed for profile upsert). Deployed.
-- `jag-infra/docker-compose.yml` — `GEMINI_API_KEY`/`GEMINI_MODEL` added to `api.environment` block (was missing entirely — also silently broke the pre-existing Properties rent-suggestion feature). Deployed + force-recreated on VM.
-- `CLAUDE.md` — updated this session, see Decisions above. Not committed.
-- `handoff.md` (this file) — new, written just now.
+- `CLAUDE.md` — rewritten as a 22 KB index (was 226,563 bytes). Committed and merged to `main`. Contains new `DOCUMENTATION MAP`, `TOP GOTCHAS`, and `KEEPING THIS FILE SMALL` sections; `OPEN ITEMS` reduced to the 6 genuinely-open entries.
+- `docs/CHANGELOG.md` — 98 completed items moved out of `OPEN ITEMS`. New, committed. Never auto-loaded.
+- `docs/route-map.md`, `docs/migrations.md` — routes/UI and the five DBs' migration tables. New, committed. These are the files to read before answering "does feature X exist".
+- `docs/rules/*.md` — 9 files (`db-rls`, `deploy-infra`, `storage-minio`, `finance`, `properties`, `frontend`, `api-conventions`, `vehicles-gps`, `health-medical`). New, committed.
+- `docs/mobile-app.md`, `docs/ops-scripts.md`, `docs/i18n.md` — new, committed.
+- `C:\Users\rober\.claude\projects\C--Users-rober-Documents-Claude-Projects-JAG-Holdings\memory\feedback_claude_md_stays_an_index.md` — new memory entry recording the split and the routing rule, plus a pointer line added to `MEMORY.md`. Written, outside the repo.
+- `handoff.md` — this file; overwrote a stale one from session 48 (2026-07-25, Fitness/AI-Coach).
+- Branch `docs/split-claude-md` — merged into `main`, now redundant and safe to delete.
+- No application code was touched this session. No deploy was run.
 
 ## 5. Immediate Next Steps
 
-1. **Ask the user whether to commit** the accumulated working-tree changes (everything above) — this has been asked twice and not yet answered. Don't assume; ask again if picking this up fresh.
-2. **Wait for Robert to provide the folder path** to his local medical documents. Do not proceed on the "Medical Record Tracker" expansion without it — nothing else is actionable there yet.
-3. **When the folder is provided:** read its actual contents first before designing anything. The shape of what's there (lab report PDFs vs. scanned prescriptions vs. narrative doctor's notes vs. a structured export) should drive the data model — likely a combination of (a) document storage in a DocVault-style MinIO vault tagged per family member, and (b) structured value extraction into `fam_lifestyle_tracker` or a new dedicated table for data that doesn't fit a simple metric/value/unit shape (medications, diagnosed conditions, visit notes).
-4. If picking this up as a fresh session with no memory of the above, read CLAUDE.md's "Fitness module + AI Fitness Coach (session 48)" section and OPEN ITEMS entry of the same name before doing anything else — full architecture and bug history is there, don't rediscover it.
+1. **Push `main` to the off-site backup** — it is 1 commit ahead of `origin/main`. The project convention is that "deployed" and "saved off-site" happen together; this commit is currently only local.
+2. **Remove the unused plugins** via the desktop app's Directory → Plugins panel. In that UI a **⚙ gear means installed** and a **➕ plus means not installed**. As of the last screenshot, `Engineering`, `Sales`, and `PDF Viewer` still showed gears. Click the gear on **Engineering** and **Sales** and uninstall/disable; scroll for `product-tracking-skills` and `cowork-plugin-management` (also 0 uses) and do the same. **Do not remove `anthropic-skills`** — 33 uses.
+3. **Verify in a NEW session** — plugin and memory changes cannot affect an already-running session, because the tool and skill lists are assembled at startup. In a fresh session check the context panel for: `Memory files` ≈ 18k (was 101.8k) and `MCP tools` well below 49.4k / 114 tools.
+4. **Report the measured numbers.** Predicted: startup ~148k after the `CLAUDE.md` split alone, ~110k once plugins are removed, versus 231.6k before. These are estimates derived from byte counts and have not been confirmed against a real context panel.
+5. **Delete the merged branch** `docs/split-claude-md` once the push is confirmed.
+6. Optionally run `/consolidate-memory` — `MEMORY.md` is 19.5 KB with 60+ index lines, several duplicating what's now in `docs/`. Worth ~3–4k tokens, low priority next to the above.
 
 ## 6. Key Patterns & Constraints
 
-- **This project has no staging tier.** Every deploy this session went straight to production (`jagcorporate.com` / VM at `150.136.151.64`). Migrations are always applied manually via `sudo -u postgres psql` over SSH — never auto-applied. See CLAUDE.md's deploy pattern notes if deploying again.
-- **`deploy.sh --api-only --no-commit --no-push`** and **`--frontend-only --no-commit --no-push`** were used throughout — the `--no-commit`/`--no-push` flags matter because `deploy.sh`'s default behavior auto-commits (`git add -A`) after a successful deploy, which would have committed this work without being asked.
-- **The `prod_modules/node_modules` tar-compression step in `deploy.sh` was unusually slow this session** (4-8 minutes vs. the ~6 seconds documented elsewhere in CLAUDE.md) — confirmed via direct process/file-size monitoring that it was genuinely progressing, not hung. Environmental, not a real problem, but don't assume a stall next time without checking `tasklist | findstr tar.exe` and watching the temp `.tar.gz` file grow before intervening.
-- **Local frontend dev (`npm run dev` in `jag-web`) proxies `/api` straight to production** (`api.jagcorporate.com`) — there's no local backend. This only actually got exercised for the first time this session (see the StrictMode bug above).
-- **Always grep `docker-compose.yml` before assuming a new `process.env.X` var is wired**, even if `.env` has it — 4th time this exact gap has bitten this project (see CLAUDE.md).
-- **Test data hygiene:** every test performed against production (fitness profiles, checkins, sessions, logs, PRs, health tracker entries) was deleted via direct SQL after verification, using `WHERE family_member_id = '<Robert's UUID>'` scoping. Continue this pattern — never leave synthetic data attributed to a real person in production.
-- **i18n convention on this project:** build in English first with inline fallback strings (`t('key', 'English fallback')`), translate to zh-CN in the same pass when reasonable, missing keys degrade gracefully. Followed throughout.
+- **`CLAUDE.md` must stay roughly flat in size.** Route new writeups per the `KEEPING THIS FILE SMALL` table: routes → `docs/route-map.md`, migrations → `docs/migrations.md`, gotchas → `docs/rules/*.md`, narratives and finished items → `docs/CHANGELOG.md`. If an edit to `CLAUDE.md` would add more than a few lines, it belongs in `docs/` with a pointer.
+- **Feature registration is unchanged in force, only in destination.** It still happens the moment a route/migration/component file is created — it now lands in `docs/`. When adding a migration, grep the entire table for that DB to confirm no numbered file is missing an entry.
+- **Before answering "does feature X exist", read `docs/route-map.md` and `docs/migrations.md`, then grep the code.** Never answer from recall; the docs have known gaps, so treat a denial as provisional.
+- **`deploy.sh` step 8 runs `git add -A`.** Check `git status` before deploying if there is unrelated WIP in the tree.
+- **Robert asks for structural fixes, not one-time cleanups.** When he says "so this does not happen again," a fix that leaves the recurrence mechanism intact is not an answer.
+- **Don't claim something is done without verifying it.** This session's line-by-line diff caught a real 3-line loss that byte accounting hid; the plugin state was reported honestly as unconfirmed rather than assumed. This matches a documented recurring failure mode on this project where "documented as deployed" did not match VM reality.
 
 ## 7. Resumption Instruction
 
-Read `handoff.md` in the project root before doing anything else. The Fitness module and AI Fitness Coach are fully built, deployed, and verified — do not rebuild them. The working tree has uncommitted changes; ask the user whether to commit before touching git. The one open thread is Robert's plan to expand the Health Tracker into a fuller medical record by having you read a folder of his medical documents — if he hasn't given you that folder path yet, that's the only thing actually blocking forward progress, so ask for it rather than guessing at next steps.
+Read `handoff.md` in the project root. The `CLAUDE.md` split is complete, verified, and merged to `main` — do not redo it. Your first action is to push `main` to `origin` (it is 1 commit ahead and the off-site backup is stale), then confirm with Robert whether he has removed the `Engineering`, `Sales`, `PDF Viewer`, `product-tracking-skills`, and `cowork-plugin-management` plugins via the desktop Directory panel; if he has, ask him to paste the context panel from a freshly-started session so the actual token reduction can be measured against the predicted ~110k.
