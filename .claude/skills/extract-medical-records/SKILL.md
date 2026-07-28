@@ -5,7 +5,7 @@ description: End-to-end workflow for reading a folder of a family member's medic
 
 # Extract medical records into JAG Medical Records
 
-Full workflow developed processing Phillip Ajack Johnson-Attin's medical folder (session 49, 2026-07-26/27) — ~50 source documents (chronology PDFs, clinic cards, lab reports, prescriptions, X-ray/ultrasound photos) turned into 72 structured records, 122 biometric trend entries across 47 metric types, a synthesized clinical-overview profile, and 9 clinic registrations. See [[project_medical_records_module]] and [[feedback_pdf_extraction_at_scale]] in memory for the full incident history behind the rules below — several were learned the hard way after gaps were caught by the user.
+Full workflow developed processing a family member's medical folder (session 49, 2026-07-26/27) — ~50 source documents (chronology PDFs, clinic cards, lab reports, prescriptions, X-ray/ultrasound photos) turned into 72 structured records, 122 biometric trend entries across 47 metric types, a synthesized clinical-overview profile, and 9 clinic registrations. See [[project_medical_records_module]] and [[feedback_pdf_extraction_at_scale]] in memory for the full incident history behind the rules below — several were learned the hard way after gaps were caught by the user.
 
 **No local-model or automated pipeline exists for this.** This is a one-time-per-folder manual process: Claude reads every source document directly (same vision capability as this chat) and writes structured extractions via direct SQL. Source documents **never leave the local machine** — nothing gets uploaded to MinIO or anywhere else. Only extracted structured data goes into JAG. See [[feedback_medical_extraction_approach]] for why (tested worse on local vision models than Claude's own vision, and this isn't a recurring job that would justify building pipeline infrastructure).
 
@@ -13,7 +13,7 @@ Full workflow developed processing Phillip Ajack Johnson-Attin's medical folder 
 
 **Do this proactively, every time — not as a reactive fix after something looks incomplete:**
 
-[clinical detail purged from history 2026-07-27 - see docs/rules/health-medical.md]
+1. `find <folder> -type f` (recursively) to list every file in every subfolder **before** reading anything. Know the full scope up front. A folder structured like `Medical/<Specialty>/<Sub-specialty>/<file>.pdf` easily hides a nested subfolder that's easy to miss if you only browse top-level files.
 2. Read every page of every document — never rely on a first-page skim or an extraction tool's page cap as a shortcut.
 3. Before declaring the batch done, diff the full recursive file list against `SELECT DISTINCT source_file_name FROM fam_medical_records WHERE family_member_id = '<id>'` on the VM. Anything in the folder listing with no matching `source_file_name` substring was never opened.
 
@@ -90,7 +90,7 @@ While reading through clinic cards, collect facility name + registration number 
 
 This is a **narrative synthesis Claude writes by reading across the approved/extracted records** — never mechanically auto-computed by SQL, the underlying data is too heterogeneous. Fields: `active_diagnoses`/`current_medications`/`allergies`/`care_team` (JSONB arrays) + `blood_type` (migration 035 — **always include this**, pull it from a Blood Group & Rh Typing record if one exists) + `summary_notes` (narrative text).
 
-[clinical detail purged from history 2026-07-27 - see docs/rules/health-medical.md]
+**Critical judgment call**: when a source document uses a diagnostic label in passing (e.g. "condition X secondary to condition Y"), check whether the underlying test evidence in the *other* records actually supports it before repeating it as settled fact. A clinician's shorthand in a referral letter is not the same as a confirmed diagnosis — if the evidence is mixed or a biopsy was never done, frame it as "clinicians' working label, not confirmed" rather than asserting it. This was caught by the user pushing back once; don't repeat the overclaim on other findings.
 
 Keep `summary_notes` as a clean clinical narrative for a reader (including a doctor, via the Print-for-Doctor view) — don't let session/extraction process commentary ("found on page 47 during re-review...") leak into the narrative itself; that provenance detail belongs in the individual record's `notes` field, not the profile summary.
 
