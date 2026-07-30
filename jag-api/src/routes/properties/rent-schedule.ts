@@ -221,6 +221,13 @@ rentScheduleRouter.post('/send-reminders', async (req: Request, res: Response, n
     for (const row of rows) {
       if (!row['tenant_phone']) continue;
       try {
+        // Approved template body (Meta, id 1241349158007686) is only 2 placeholders —
+        // "Hi {{1}}, ... your rent for {{2}} is due in 5 days. We'll send full payment
+        // details closer to the date." — it never mentions an amount. A 3rd `currency`
+        // parameter was being sent here with no matching {{3}} in the template, which
+        // Meta rejects outright (#132000 "number of params does not match"), so this
+        // send has never once succeeded — every "d5_complete" cron log line reporting
+        // sent:0 was this, not (only) the wrong-owner-context bug it was found next to.
         await sendTemplate({
           to: String(row['tenant_phone']),
           templateName: 'jag_rent_reminder_d5',
@@ -228,7 +235,6 @@ rentScheduleRouter.post('/send-reminders', async (req: Request, res: Response, n
           components: [{ type: 'body', parameters: [
             { type: 'text', text: String(row['tenant_name'] ?? '') },
             { type: 'text', text: `${row['period_year']}/${String(row['period_month']).padStart(2,'0')}` },
-            { type: 'currency', currency: { fallback_value: `TTD ${parseFloat(String(row['amount_due_ttd'] ?? 0)).toFixed(2)}`, code: 'TTD', amount_1000: Math.round(parseFloat(String(row['amount_due_ttd'] ?? 0)) * 1000) } },
           ]}],
         });
         await withOwnerRLS(propertiesPool, ownerId, async client => {
