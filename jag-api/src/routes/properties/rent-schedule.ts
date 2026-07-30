@@ -1,8 +1,10 @@
 // GET    /api/v1/properties/rent-schedule
 // POST   /api/v1/properties/rent-schedule/generate
 // GET    /api/v1/properties/rent-schedule/:id
+// GET    /api/v1/properties/rent-schedule/:id/payment-slip
 // POST   /api/v1/properties/rent-schedule/:id/record-payment
 // GET    /api/v1/properties/rent-schedule/:id/receipt
+// POST   /api/v1/properties/rent-schedule/:id/dismiss-ocr
 // POST   /api/v1/properties/rent-schedule/:id/waive
 
 import { Router, type Request, type Response, type NextFunction } from 'express';
@@ -13,6 +15,7 @@ import { logger } from '../../lib/logger';
 import { ok, err } from '../../lib/response';
 import { sendTemplate } from '../../lib/whatsapp';
 import { getPaymentDetails } from '../../lib/payment-config';
+import { BUCKET_DOCUMENTS, getObjectStream, getObjectStat } from '../../lib/minio';
 
 export const rentScheduleRouter = Router();
 
@@ -31,6 +34,120 @@ const RecordPaymentSchema = z.object({
   account_received:  z.string().max(200).optional(),
   idempotency_key:   z.string().min(1).max(100),
 }).strict();
+
+// Extra fields only ever set by the WhatsApp-OCR auto-record path (never by the
+// manual form) — kept optional and separate from RecordPaymentSchema so the
+// owner-facing API surface doesn't grow OCR-only fields.
+export interface RecordPaymentInput {
+  paid_amount_ttd: number;
+  paid_date: string;
+  payment_method: 'BANK_TRANSFER' | 'CHEQUE' | 'CASH';
+  payment_reference?: string;
+  account_received?: string;
+  idempotency_key: string;
+  payment_source?: 'MANUAL' | 'WHATSAPP_OCR';
+  ocr_extracted_amount_ttd?: number;
+  ocr_extracted_date?: string;
+  ocr_confidence?: 'HIGH' | 'MEDIUM' | 'LOW';
+  payment_slip_object_key?: string;
+}
+
+// Shared by the owner-facing POST /:id/record-payment route below and the
+// WhatsApp payment-slip OCR auto-record path (whatsapp-webhook.ts) — both need
+// identical status/receipt-number logic and the identical receipt WhatsApp
+// send, so there is exactly one place that can record a rent payment. Throws
+// on failure (including the 23505 idempotency-key conflict); callers decide
+// how to handle that per their own context.
+export async function recordRentPayment(
+  ownerId: string, scheduleId: string, body: RecordPaymentInput,
+): Promise<Record<string, unknown> | null> {
+  const row = await withOwnerRLS(propertiesPool, ownerId, async client => {
+    const { rows: [existing] } = await client.query(
+      `SELECT * FROM prop_rent_schedule WHERE id = $1 AND owner_id = $2`, [scheduleId, ownerId],
+    );
+    if (!existing) return null;
+
+    const isPartial = parseFloat(String(body.paid_amount_ttd)) < parseFloat(String(existing.amount_due_ttd));
+    const newStatus = isPartial ? 'PARTIAL' : 'PAID';
+
+    const { rows: [cnt] } = await client.query(
+      `SELECT COUNT(*) FROM prop_rent_schedule WHERE owner_id = $1`, [ownerId],
+    );
+    const receiptNumber = `RNT-${new Date().getFullYear()}-${String(parseInt(cnt.count)).padStart(6, '0')}`;
+
+    // Robert confirming a WhatsApp-OCR-flagged period through the plain manual
+    // form (RecordPaymentSchema, no OCR fields) must not lose the OCR audit
+    // trail — default payment_source from whether the row already carries a
+    // slip, and COALESCE the extract fields rather than overwriting with null.
+    const paymentSource = body.payment_source ?? (existing.payment_slip_object_key ? 'WHATSAPP_OCR' : 'MANUAL');
+
+    const { rows } = await client.query(
+      `WITH updated AS (
+         UPDATE prop_rent_schedule
+         SET status = $1, paid_amount_ttd = $2, paid_date = $3, payment_method = $4,
+             payment_reference = $5, account_received = $6, receipt_number = $7,
+             payment_source = $8,
+             ocr_extracted_amount_ttd = COALESCE($9, ocr_extracted_amount_ttd),
+             ocr_extracted_date       = COALESCE($10, ocr_extracted_date),
+             ocr_confidence           = COALESCE($11, ocr_confidence),
+             payment_slip_object_key  = COALESCE($12, payment_slip_object_key),
+             ocr_review_needed = false
+         WHERE id = $13 AND owner_id = $14 RETURNING *
+       )
+       SELECT updated.*, u.unit_number, p.name AS property_name
+       FROM updated
+       JOIN prop_units u ON u.id = updated.unit_id
+       LEFT JOIN prop_properties p ON p.id = u.property_id`,
+      [newStatus, body.paid_amount_ttd, body.paid_date, body.payment_method,
+       body.payment_reference ?? null, body.account_received ?? null, receiptNumber,
+       paymentSource, body.ocr_extracted_amount_ttd ?? null,
+       body.ocr_extracted_date ?? null, body.ocr_confidence ?? null,
+       body.payment_slip_object_key ?? null,
+       scheduleId, ownerId],
+    );
+    return rows[0];
+  });
+  if (!row) return null;
+
+  const isPartial = parseFloat(String(row.paid_amount_ttd)) < parseFloat(String(row.amount_due_ttd));
+  const balance   = parseFloat(String(row.amount_due_ttd)) - parseFloat(String(row.paid_amount_ttd));
+  const penalty   = parseFloat(String(row.amount_due_ttd)) * 0.05;
+
+  if (row.tenant_phone) {
+    if (isPartial) {
+      // JAG_RENT_004 — partial payment received
+      sendTemplate({
+        to: row.tenant_phone,
+        templateName: 'jag_rent_partial_payment',
+        components: [{ type: 'body', parameters: [
+          { type: 'text', text: row.tenant_name ?? '' },
+          { type: 'text', text: row.unit_number ?? '' },
+          { type: 'text', text: `TTD $${parseFloat(String(row.paid_amount_ttd)).toFixed(2)}` },
+          { type: 'text', text: `TTD $${balance.toFixed(2)}` },
+          { type: 'text', text: row.paid_date },
+          { type: 'text', text: `TTD $${penalty.toFixed(2)}` },
+          { type: 'text', text: process.env.JAG_MANAGER_PHONE ?? '' },
+        ]}],
+      }).catch(e => logger.warn({ entity: 'PROPERTIES', action: 'WA_PARTIAL_FAILED', error_message: (e as Error).message }));
+    } else {
+      // JAG_RENT_003 — full receipt
+      sendTemplate({
+        to: row.tenant_phone,
+        templateName: 'jag_rent_receipt_full_v2',
+        components: [{ type: 'body', parameters: [
+          { type: 'text', text: row.tenant_name ?? '' },
+          { type: 'text', text: row.receipt_number },
+          { type: 'text', text: row.paid_date },
+          { type: 'text', text: `TTD $${parseFloat(String(row.paid_amount_ttd)).toFixed(2)}` },
+          { type: 'text', text: row.payment_method ?? '' },
+          { type: 'text', text: row.unit_number ?? '' },
+          { type: 'text', text: `${row.period_year}-${String(row.period_month).padStart(2, '0')}` },
+        ]}],
+      }).catch(e => logger.warn({ entity: 'PROPERTIES', action: 'WA_RECEIPT_FAILED', error_message: (e as Error).message }));
+    }
+  }
+  return row;
+}
 
 const WaiveSchema = z.object({
   reason: z.string().min(1),
@@ -146,11 +263,12 @@ rentScheduleRouter.get('/', async (req: Request, res: Response, next: NextFuncti
     const ownerId = req.rlsCtx.userId;
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
 
-    const unitId   = req.query['unit_id'] as string | undefined;
-    const leaseId  = req.query['lease_id'] as string | undefined;
-    const status   = req.query['status'] as string | undefined;
-    const year     = req.query['year'] as string | undefined;
-    const tenantId = req.query['tenant_id'] as string | undefined;
+    const unitId    = req.query['unit_id'] as string | undefined;
+    const leaseId   = req.query['lease_id'] as string | undefined;
+    const status    = req.query['status'] as string | undefined;
+    const year      = req.query['year'] as string | undefined;
+    const tenantId  = req.query['tenant_id'] as string | undefined;
+    const needsOcrReview = req.query['ocr_review_needed'] as string | undefined;
 
     const rows = await withOwnerRLS(propertiesPool, ownerId, async client => {
       const conds: string[] = [];
@@ -162,6 +280,7 @@ rentScheduleRouter.get('/', async (req: Request, res: Response, next: NextFuncti
       // rent schedule has no tenant_id of its own -- lease_id is NOT NULL, so
       // tenant_id is always reachable via the lease (same as leases/renewals).
       if (tenantId) { vals.push(tenantId); conds.push(`l.tenant_id = $${vals.length}`); }
+      if (needsOcrReview === 'true') { conds.push(`rs.ocr_review_needed = true`); }
       const where = conds.length ? ' AND ' + conds.join(' AND ') : '';
       const { rows: r } = await client.query(
         `SELECT rs.*, u.unit_number, p.name AS property_name
@@ -458,6 +577,34 @@ rentScheduleRouter.get('/:id', async (req: Request, res: Response, next: NextFun
   } catch (e) { next(e); }
 });
 
+// Streams the tenant's WhatsApp payment-slip photo for a period flagged
+// ocr_review_needed — same auth-gated streaming pattern as GET
+// /wa-inbox/media/:id, keyed here by rent_schedule.id instead of the WhatsApp
+// message id since that's what the Record Payment review UI has on hand.
+rentScheduleRouter.get('/:id/payment-slip', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const ownerId = req.rlsCtx.userId;
+    if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
+    const { id } = IdParam.parse(req.params);
+
+    const key = await withOwnerRLS(propertiesPool, ownerId, async client => {
+      const { rows } = await client.query<{ payment_slip_object_key: string | null }>(
+        `SELECT payment_slip_object_key FROM prop_rent_schedule WHERE id = $1 AND owner_id = $2`,
+        [id, ownerId],
+      );
+      return rows[0]?.payment_slip_object_key ?? null;
+    });
+    if (!key) return void res.status(404).json(err('No payment slip on this period', 'NOT_FOUND'));
+
+    const [stream, stat] = await Promise.all([
+      getObjectStream(BUCKET_DOCUMENTS, key),
+      getObjectStat(BUCKET_DOCUMENTS, key),
+    ]);
+    res.set({ 'Content-Type': stat.contentType, 'Cache-Control': 'private, no-cache' });
+    stream.pipe(res);
+  } catch (e) { next(e); }
+});
+
 rentScheduleRouter.post('/:id/record-payment', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const ownerId = req.rlsCtx.userId;
@@ -465,76 +612,10 @@ rentScheduleRouter.post('/:id/record-payment', async (req: Request, res: Respons
     const { id } = IdParam.parse(req.params);
     const body = RecordPaymentSchema.parse(req.body);
 
-    const row = await withOwnerRLS(propertiesPool, ownerId, async client => {
-      const { rows: [existing] } = await client.query(
-        `SELECT * FROM prop_rent_schedule WHERE id = $1 AND owner_id = $2`, [id, ownerId],
-      );
-      if (!existing) return null;
-
-      const isPartial = parseFloat(String(body.paid_amount_ttd)) < parseFloat(String(existing.amount_due_ttd));
-      const newStatus = isPartial ? 'PARTIAL' : 'PAID';
-
-      const { rows: [cnt] } = await client.query(
-        `SELECT COUNT(*) FROM prop_rent_schedule WHERE owner_id = $1`, [ownerId],
-      );
-      const receiptNumber = `RNT-${new Date().getFullYear()}-${String(parseInt(cnt.count)).padStart(6, '0')}`;
-
-      const { rows } = await client.query(
-        `WITH updated AS (
-           UPDATE prop_rent_schedule
-           SET status = $1, paid_amount_ttd = $2, paid_date = $3, payment_method = $4,
-               payment_reference = $5, account_received = $6, receipt_number = $7
-           WHERE id = $8 AND owner_id = $9 RETURNING *
-         )
-         SELECT updated.*, u.unit_number, p.name AS property_name
-         FROM updated
-         JOIN prop_units u ON u.id = updated.unit_id
-         LEFT JOIN prop_properties p ON p.id = u.property_id`,
-        [newStatus, body.paid_amount_ttd, body.paid_date, body.payment_method,
-         body.payment_reference ?? null, body.account_received ?? null, receiptNumber,
-         id, ownerId],
-      );
-      return rows[0];
-    });
+    // No payment_source here — recordRentPayment infers WHATSAPP_OCR vs MANUAL
+    // from whether this period already carries a slip (see its own comment).
+    const row = await recordRentPayment(ownerId, id, body);
     if (!row) return void res.status(404).json(err('Rent period not found', 'NOT_FOUND'));
-
-    if (row.tenant_phone) {
-      const isPartial = parseFloat(String(row.paid_amount_ttd)) < parseFloat(String(row.amount_due_ttd));
-      const balance   = parseFloat(String(row.amount_due_ttd)) - parseFloat(String(row.paid_amount_ttd));
-      const penalty   = parseFloat(String(row.amount_due_ttd)) * 0.05;
-
-      if (isPartial) {
-        // JAG_RENT_004 — partial payment received
-        sendTemplate({
-          to: row.tenant_phone,
-          templateName: 'jag_rent_partial_payment',
-          components: [{ type: 'body', parameters: [
-            { type: 'text', text: row.tenant_name ?? '' },
-            { type: 'text', text: row.unit_number ?? '' },
-            { type: 'text', text: `TTD $${parseFloat(String(row.paid_amount_ttd)).toFixed(2)}` },
-            { type: 'text', text: `TTD $${balance.toFixed(2)}` },
-            { type: 'text', text: row.paid_date },
-            { type: 'text', text: `TTD $${penalty.toFixed(2)}` },
-            { type: 'text', text: process.env.JAG_MANAGER_PHONE ?? '' },
-          ]}],
-        }).catch(e => logger.warn({ entity: 'PROPERTIES', action: 'WA_PARTIAL_FAILED', error_message: (e as Error).message }));
-      } else {
-        // JAG_RENT_003 — full receipt
-        sendTemplate({
-          to: row.tenant_phone,
-          templateName: 'jag_rent_receipt_full_v2',
-          components: [{ type: 'body', parameters: [
-            { type: 'text', text: row.tenant_name ?? '' },
-            { type: 'text', text: row.receipt_number },
-            { type: 'text', text: row.paid_date },
-            { type: 'text', text: `TTD $${parseFloat(String(row.paid_amount_ttd)).toFixed(2)}` },
-            { type: 'text', text: row.payment_method ?? '' },
-            { type: 'text', text: row.unit_number ?? '' },
-            { type: 'text', text: `${row.period_year}-${String(row.period_month).padStart(2, '0')}` },
-          ]}],
-        }).catch(e => logger.warn({ entity: 'PROPERTIES', action: 'WA_RECEIPT_FAILED', error_message: (e as Error).message }));
-      }
-    }
     res.json(ok(row));
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code === '23505') {
@@ -566,6 +647,29 @@ rentScheduleRouter.get('/:id/receipt', async (req: Request, res: Response, next:
     const html = generateRentReceiptHtml(row);
     res.setHeader('Content-Type', 'text/html');
     res.send(html);
+  } catch (e) { next(e); }
+});
+
+// Clears an ocr_review_needed flag without recording a payment — for a false
+// positive (Gemini misread an unrelated photo as a payment slip) or a slip
+// that turned out not to belong to this period. Leaves the extracted values
+// on the row for reference; only the review flag is cleared.
+rentScheduleRouter.post('/:id/dismiss-ocr', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const ownerId = req.rlsCtx.userId;
+    if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
+    const { id } = IdParam.parse(req.params);
+
+    const row = await withOwnerRLS(propertiesPool, ownerId, async client => {
+      const { rows } = await client.query(
+        `UPDATE prop_rent_schedule SET ocr_review_needed = false
+         WHERE id = $1 AND owner_id = $2 AND ocr_review_needed = true RETURNING *`,
+        [id, ownerId],
+      );
+      return rows[0] ?? null;
+    });
+    if (!row) return void res.status(404).json(err('No pending OCR review on this period', 'NOT_FOUND'));
+    res.json(ok(row));
   } catch (e) { next(e); }
 });
 

@@ -284,6 +284,8 @@ Only genuinely-open work lives here. Everything completed is in **`docs/CHANGELO
 
 - **Money Manager reconciliation import** — PENDING: `scripts/mm-import/` not yet built; all-source reconciliation (MM Excel + second Excel report + bank PDFs/CSVs) → single clean import into fin_transactions; 54 existing Scotia rows will be enriched not duplicated; RBC eSavings (`ffa985f6`, last4 3841, $53,755.57 TTD opening balance) and RBC Rewards Visa Platinum (`077b8014`, last4 0512) accounts already created in JAG; Cash account still needs creating; second Excel report contents TBD
 
+- **WhatsApp rent-payment-slip OCR — auto-send is intentionally OFF** (built 2026-07-30, not yet deployed): every OCR'd slip requires Robert to confirm in Tenant → Rent before the receipt is sent — no auto-posting, however confident the read. Robert: "only until I gain confidence on the process and the correctness of the OCR reading." Do not flip this to auto-send without being asked — see `docs/rules/properties.md`
+
 ---
 
 ---

@@ -90,7 +90,7 @@ export const tenancyApi = {
     api.delete<{ deleted: boolean }>(`/properties/applications/${id}`),
 
   // ── Rent Schedule ─────────────────────────────────────────
-  getRentSchedule: (params?: { lease_id?: string; status?: string; unit_id?: string; year?: string; tenant_id?: string }) =>
+  getRentSchedule: (params?: { lease_id?: string; status?: string; unit_id?: string; year?: string; tenant_id?: string; ocr_review_needed?: string }) =>
     api.get<Row[]>(`/properties/rent-schedule${qs(params)}`),
 
   getRentPeriod: (id: string) =>
@@ -116,6 +116,10 @@ export const tenancyApi = {
 
   waiveRentPeriod: (id: string, body: { waive_reason: string }) =>
     api.post<void>(`/properties/rent-schedule/${id}/waive`, body),
+
+  /** Clears ocr_review_needed without recording a payment (false-positive OCR read). */
+  dismissRentOcrReview: (id: string) =>
+    api.post<Row>(`/properties/rent-schedule/${id}/dismiss-ocr`, {}),
 
   // ── Deposits ──────────────────────────────────────────────
   getDeposits: (params?: { lease_id?: string; status?: string; unit_id?: string; tenant_id?: string }) =>

@@ -12,6 +12,8 @@ import { withOwnerRLS } from '../../middleware/rls';
 import { sendTemplate, sendList, sendText, verifyWebhookSignature, downloadMedia, mimeToExt } from '../../lib/whatsapp';
 import { enqueueNotification } from '../../lib/notifications';
 import { minioClient, ensureBucket, mediaObjectKey, BUCKET_DOCUMENTS } from '../../lib/minio';
+import { extractPaymentSlip, type PaymentSlipExtract } from '../../lib/rent-payment-ocr';
+import type { PoolClient } from 'pg';
 
 export const whatsappWebhookRouter = Router();
 
@@ -169,6 +171,88 @@ async function logOutbound(
   );
 }
 
+// A tenant sent a photo while messaging from a phone matched to an active
+// lease. Finds the earliest unpaid/partial period on that lease and — if the
+// OCR read recognises the image as an actual payment slip — attaches the
+// extract to that period and flags it ocr_review_needed. The receipt is
+// NEVER sent automatically from here, however confident the read: Robert
+// must open Tenant -> Rent, see the extracted amount/date next to the slip
+// photo, and click Confirm & Send Receipt himself before recordRentPayment()
+// (and the WhatsApp receipt it sends) ever runs.
+//
+// Robert (2026-07-30): this manual gate is deliberately provisional — "only
+// until I gain confidence on the process and the correctness of the OCR
+// reading." Once that trust is established, re-enabling the confident-match
+// auto-record path is a small, additive change here (call recordRentPayment
+// directly instead of only flagging ocr_review_needed) — it does not need
+// migration 064 touched again, and should not be done silently; ask first.
+//
+// If the image doesn't look like a payment slip at all (a maintenance photo,
+// etc.) — or OCR was unavailable — nothing is flagged and no reply is sent,
+// same as before this feature existed; the message is still logged in the WA
+// inbox either way.
+async function handlePaymentSlipImage(
+  client: PoolClient,
+  opts: {
+    from: string; waMessageId: string; mediaObjectKey: string;
+    ocrResult: PaymentSlipExtract | null; leaseId: string;
+    enquiryId: string | null; ticketId: string | null;
+  },
+): Promise<void> {
+  if (!opts.ocrResult?.looksLikePaymentSlip) return;
+
+  const { rows: [period] } = await client.query<{
+    id: string; amount_due_ttd: string; paid_amount_ttd: string | null;
+    period_year: number; period_month: number; tenant_name: string | null;
+  }>(
+    `SELECT id, amount_due_ttd, paid_amount_ttd, period_year, period_month, tenant_name
+     FROM prop_rent_schedule
+     WHERE lease_id = $1 AND status IN ('UPCOMING','REMINDER_SENT','LATE','PARTIAL')
+     ORDER BY due_date ASC LIMIT 1`,
+    [opts.leaseId],
+  );
+
+  if (!period) {
+    const replyBody = `Thanks for the payment proof! We don't see a rent period currently due on file for your unit — we'll follow up shortly.`;
+    const result = await sendText({ to: opts.from, body: replyBody }).catch(() => null);
+    await logOutbound(client, { to: opts.from, messageType: 'TEXT', body: replyBody, enquiryId: opts.enquiryId, ticketId: opts.ticketId, result });
+    void enqueueNotification({
+      tier: 1,
+      title: 'WhatsApp: payment slip received, no due period on file',
+      body: `${opts.from} sent a payment-slip photo but this lease has no unpaid rent period on file. Check the WhatsApp inbox / tenant record.`,
+      payload: { module: 'PROPERTIES', kind: 'RENT_OCR_NO_PERIOD', lease_id: opts.leaseId },
+    });
+    return;
+  }
+
+  const balanceDue = parseFloat(period.amount_due_ttd) - parseFloat(period.paid_amount_ttd ?? '0');
+  const extractedAmount = opts.ocrResult.amount;
+  const matchesAmount = extractedAmount !== null && Math.abs(extractedAmount - balanceDue) <= Math.max(5, balanceDue * 0.01);
+
+  await client.query(
+    `UPDATE prop_rent_schedule
+     SET ocr_extracted_amount_ttd = $1, ocr_extracted_date = $2, ocr_confidence = $3,
+         payment_slip_object_key = $4, ocr_review_needed = true
+     WHERE id = $5`,
+    [extractedAmount, opts.ocrResult.date, opts.ocrResult.confidence, opts.mediaObjectKey, period.id],
+  );
+
+  // Neutral on purpose — the receipt only ever goes out once Robert confirms,
+  // so nothing here should read to the tenant as "payment confirmed."
+  const replyBody = `Thanks for sending your payment proof — we're confirming it and will send your official receipt shortly.`;
+  const result = await sendText({ to: opts.from, body: replyBody }).catch(() => null);
+  await logOutbound(client, { to: opts.from, messageType: 'TEXT', body: replyBody, enquiryId: opts.enquiryId, ticketId: opts.ticketId, result });
+
+  void enqueueNotification({
+    tier: 1,
+    title: matchesAmount ? 'Rent payment slip ready to confirm' : 'Rent payment slip needs review',
+    body: `${period.tenant_name} sent a payment slip — OCR read ${extractedAmount !== null ? `TTD $${extractedAmount.toFixed(2)}` : 'an unreadable amount'}` +
+      ` (${opts.ocrResult.confidence} confidence) against TTD $${balanceDue.toFixed(2)} due for ${period.period_year}-${String(period.period_month).padStart(2, '0')}.` +
+      ` Open Tenant -> Rent to view the slip and confirm before the receipt is sent.`,
+    payload: { module: 'PROPERTIES', kind: 'RENT_OCR_REVIEW', rent_schedule_id: period.id },
+  });
+}
+
 type ListedUnitRow = {
   id: string; booking_slug: string; rent_amount: string | null;
   suggested_rent_recommended_ttd: string | null; address_line1: string | null; city: string | null;
@@ -222,6 +306,13 @@ async function processInboundMessage(msg: Record<string, unknown>): Promise<void
   // gets logged, just without an attachment, rather than losing the whole
   // inbound message over a Meta/MinIO hiccup.
   let mediaObjectKeyVal: string | null = null;
+  // Ran alongside the media download (also a slow network round trip, also
+  // best-effort) rather than lazily on demand — a payment-slip photo needs its
+  // OCR read available by the time the payment-keyword/image branch below
+  // decides whether to auto-record. A failed or skipped OCR (no GEMINI_API_KEY,
+  // unsupported mime, blurry image) is not fatal — it just forces the manual-
+  // review fallback instead of an auto-recorded payment.
+  let ocrResult: PaymentSlipExtract | null = null;
   if (mediaId) {
     try {
       const media = await downloadMedia(mediaId);
@@ -230,6 +321,12 @@ async function processInboundMessage(msg: Record<string, unknown>): Promise<void
         const key = mediaObjectKey(JAG_OWNER_ID, 'wa-inbound', from, `${waMessageId}.${mimeToExt(media.mimeType)}`);
         await minioClient.putObject(BUCKET_DOCUMENTS, key, media.buffer, media.buffer.length, { 'Content-Type': media.mimeType });
         mediaObjectKeyVal = key;
+        if (type === 'image') {
+          ocrResult = await extractPaymentSlip(media.buffer, media.mimeType).catch(e => {
+            logger.error({ entity: 'WHATSAPP_WEBHOOK', action: 'RENT_OCR_FAILED', error_message: (e as Error).message });
+            return null;
+          });
+        }
       }
     } catch (e) {
       logger.error({ entity: 'WHATSAPP_WEBHOOK', action: 'MEDIA_STORE_FAILED', error_message: (e as Error).message });
@@ -291,7 +388,10 @@ async function processInboundMessage(msg: Record<string, unknown>): Promise<void
       );
     }
 
-    if (!body) return;
+    // An un-captioned image (the normal case for a payment-slip photo) has
+    // body === null — previously this returned here before the payment-slip
+    // branch below ever ran, so only the rare captioned photo was reachable.
+    if (!body && !mediaObjectKeyVal) return;
 
     // Step 3 — a tap on one of the availability-list rows (sent when 2+ units
     // are LISTED at once — see the greeting below). Links this enquiry to the
@@ -364,20 +464,26 @@ async function processInboundMessage(msg: Record<string, unknown>): Promise<void
     // erroring out and swallowing the message whenever it fired) before this
     // fix; found while testing the new availability auto-reply.
     const { rows: [activeLease] } = await client.query(
-      `SELECT u.id FROM prop_lease_agreements la
+      `SELECT u.id, la.id AS lease_id
+       FROM prop_lease_agreements la
        JOIN prop_units u ON u.id = la.unit_id
        JOIN prop_property_tenants pt ON pt.id = la.tenant_id
        WHERE pt.phone = $1 AND la.status = 'ACTIVE' LIMIT 1`,
       [from],
     );
-    const lower = body.toLowerCase();
+    const lower = (body ?? '').toLowerCase();
     const isMaintenanceKw = Boolean(activeLease) && [...P1_KEYWORDS, ...P2_KEYWORDS].some(k => lower.includes(k));
     const isPaymentKw     = Boolean(activeLease) && ['paid','payment','transferred','sent'].some(k => lower.includes(k));
     const isRenewalKw     = Boolean(activeLease) && ['renew','staying','leaving','vacating','extend'].some(k => lower.includes(k));
+    // A tenant proving rent payment almost never captions the photo — gate on
+    // "is this an image from a matched active tenant" rather than requiring a
+    // payment keyword, or the OCR flow below would only ever fire for the rare
+    // captioned slip.
+    const isPaymentSlipImage = type === 'image' && Boolean(activeLease) && Boolean(mediaObjectKeyVal);
 
     if (isMaintenanceKw) {
       // Auto-create maintenance ticket
-      const priority = suggestPriority(body);
+      const priority = suggestPriority(body ?? '');
       const sla      = slaHours(priority);
       const slaAt    = sla ? new Date(Date.now() + sla * 3_600_000) : null;
 
@@ -416,8 +522,24 @@ async function processInboundMessage(msg: Record<string, unknown>): Promise<void
           ]}],
         }).catch(() => { /* best effort */ });
       }
+    } else if (isPaymentSlipImage) {
+      await handlePaymentSlipImage(client, {
+        from, waMessageId, mediaObjectKey: mediaObjectKeyVal as string, ocrResult,
+        leaseId: activeLease.lease_id as string, enquiryId, ticketId,
+      });
     } else if (isPaymentKw) {
-      logger.info({ entity: 'WHATSAPP_WEBHOOK', action: 'PAYMENT_CONFIRM_FLAG', from });
+      // Tenant said they paid but sent no photo (or it wasn't recognised as an
+      // image) — ask for the slip rather than silently doing nothing, since
+      // isPaymentSlipImage above is what actually drives the OCR/receipt flow.
+      const replyBody = `Thanks for letting us know! Please send a photo of the bank transfer / payment confirmation and we'll match it and send your receipt.`;
+      const result = await sendText({ to: from, body: replyBody }).catch(() => null);
+      await logOutbound(client, { to: from, messageType: 'TEXT', body: replyBody, enquiryId, ticketId, result });
+      void enqueueNotification({
+        tier: 2,
+        title: 'WhatsApp: tenant says they paid rent',
+        body: `${from} said they paid but sent no payment-slip photo — check the WhatsApp inbox.`,
+        payload: { module: 'PROPERTIES', kind: 'RENT_PAYMENT_CLAIM' },
+      });
     } else if (isRenewalKw) {
       logger.info({ entity: 'WHATSAPP_WEBHOOK', action: 'RENEWAL_RESPONSE_FLAG', from });
     } else if (enquiryId) {
@@ -476,7 +598,7 @@ async function processInboundMessage(msg: Record<string, unknown>): Promise<void
         void enqueueNotification({
           tier: 2,
           title: 'WhatsApp: new message from prospect',
-          body: `${from}: ${body.slice(0, 200)}`,
+          body: `${from}: ${(body ?? '[image, no caption]').slice(0, 200)}`,
           payload: { module: 'PROPERTIES', kind: 'ENQUIRY', enquiry_id: enquiryId },
         });
       }

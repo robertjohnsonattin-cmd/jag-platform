@@ -177,6 +177,44 @@ with an active Owner role in `jag_core`** — if a second one is ever created (t
 future co-owner before succession activation, anything), this function silently breaks for every
 cron job and the auditor portal simultaneously, with no error to signal it.
 
+### WhatsApp payment-slip OCR — always requires Robert's confirmation, never auto-sends (session 2026-07-30, provisional)
+`processInboundMessage()` in `whatsapp-webhook.ts` had a dead `isPaymentKw` branch that just logged
+`PAYMENT_CONFIRM_FLAG` and did nothing — a tenant saying "paid" (or, far more commonly, just sending
+a photo with no caption) produced no receipt and no owner notification. Two bugs stacked on the same
+gap: (1) a tenant proving payment almost never captions the photo, so gating on a payment *keyword*
+alone would only ever catch the rare captioned slip; (2) the function's very first line for any
+non-text message, `if (!body) return;`, exited **before** the payment logic could run at all for an
+un-captioned image — fixed to `if (!body && !mediaObjectKeyVal) return;`.
+
+**Design:** any inbound `image` message from a phone matched to an **active lease** (not just a
+payment keyword) now runs through Gemini vision (`lib/rent-payment-ocr.ts`, same `GEMINI_API_KEY`/
+`GEMINI_MODEL` env vars as `listing.ts` suggest-price) to read amount/date/reference off the slip.
+If the read doesn't look like a genuine payment slip at all (`looksLikePaymentSlip: false`, or OCR
+unavailable), `handlePaymentSlipImage()` does nothing — no reply, no notification, same as before
+this feature existed, so an ordinary un-captioned photo (e.g. a maintenance picture) doesn't misfire.
+
+**The receipt is never sent automatically, however confident the OCR read is** — Robert explicitly
+asked for this: every recognised payment slip is attached to the tenant's earliest unpaid/partial
+`prop_rent_schedule` period (`ocr_extracted_amount_ttd`, `ocr_extracted_date`, `ocr_confidence`,
+`payment_slip_object_key`, `ocr_review_needed = true`, migration `064`) and Robert gets a tier-1
+in-app notification. The tenant gets a neutral "we're confirming it" reply — never anything implying
+the payment is accepted. `recordRentPayment()` (exported from `rent-schedule.ts`, shared with the
+manual Record Payment button) — the only thing that actually posts the payment and sends the
+`jag_rent_receipt_full_v2`/`jag_rent_partial_payment` WhatsApp receipt — is called **only** when
+Robert clicks Confirm & Send Receipt in the Rent panel (`PropertiesRentSchedulePanel.tsx`), which
+pre-fills from the OCR extract and shows the slip photo (`GET /rent-schedule/:id/payment-slip`) so he
+has something to actually verify against. `POST /rent-schedule/:id/dismiss-ocr` clears a false
+positive without recording anything. `recordRentPayment()` infers `payment_source` (`WHATSAPP_OCR`
+vs `MANUAL`) from whether the row already carries a slip, rather than the manual form having to say
+so, and `COALESCE`s the OCR extract columns rather than nulling them out on confirm — losing that
+audit trail on the exact action meant to close it out would defeat the point.
+
+**This manual-confirm gate is provisional, not a locked decision** — Robert wants it "only until I
+gain confidence on the process and the correctness of the OCR reading." When he asks to turn on
+auto-send, the change is small (in `handlePaymentSlipImage()`, call `recordRentPayment()` directly
+on a confident amount match instead of only flagging `ocr_review_needed`) and doesn't need migration
+`064` touched again — but don't make that change without being asked.
+
 ### Lifecycle state is derived, and "unknown" is not "not yet" (session 51)
 Nothing in the schema records where a tenant sits between enquiry and handover.
 `deriveLifecycle()` in `components/properties/TenantTimeline.tsx` computes it from records

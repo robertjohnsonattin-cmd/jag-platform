@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { tenancyApi } from '../../api/tenancy'
 import { api } from '../../api/client'
+import AuthedImg from '../AuthedImg'
 
 const STATUS_COLORS: Record<string, string> = {
   UPCOMING:     'bg-slate-700 text-slate-300 border-slate-600',
@@ -30,12 +31,22 @@ export default function PropertiesRentSchedulePanel() {
   const { t } = useTranslation()
   const qc = useQueryClient()
   const [statusFilter, setStatusFilter] = useState('')
+  const [ocrOnly, setOcrOnly] = useState(false)
   const [payModal, setPayModal] = useState<Record<string, unknown> | null>(null)
   const [payForm, setPayForm] = useState({ paid_amount_ttd: '', paid_date: new Date().toISOString().slice(0,10), payment_method: 'BANK_TRANSFER', payment_reference: '', idempotency_key: crypto.randomUUID() })
 
   const { data: schedule = [] } = useQuery({
-    queryKey: ['rent-schedule', statusFilter],
-    queryFn: () => tenancyApi.getRentSchedule(statusFilter ? { status: statusFilter } : undefined),
+    queryKey: ['rent-schedule', statusFilter, ocrOnly],
+    queryFn: () => tenancyApi.getRentSchedule({
+      ...(statusFilter ? { status: statusFilter } : {}),
+      ...(ocrOnly ? { ocr_review_needed: 'true' } : {}),
+    }),
+  })
+
+  const { data: ocrPending = [] } = useQuery({
+    queryKey: ['rent-schedule-ocr-count'],
+    queryFn: () => tenancyApi.getRentSchedule({ ocr_review_needed: 'true' }),
+    refetchInterval: 60_000,
   })
 
   const payMut = useMutation({
@@ -43,15 +54,42 @@ export default function PropertiesRentSchedulePanel() {
       ...payForm,
       paid_amount_ttd: parseFloat(payForm.paid_amount_ttd),
     }),
-    onSuccess: () => { setPayModal(null); qc.invalidateQueries({ queryKey: ['rent-schedule'] }) },
+    onSuccess: () => {
+      setPayModal(null)
+      qc.invalidateQueries({ queryKey: ['rent-schedule'] })
+      qc.invalidateQueries({ queryKey: ['rent-schedule-ocr-count'] })
+    },
+  })
+
+  const dismissOcrMut = useMutation({
+    mutationFn: (id: string) => tenancyApi.dismissRentOcrReview(id),
+    onSuccess: () => {
+      setPayModal(null)
+      qc.invalidateQueries({ queryKey: ['rent-schedule'] })
+      qc.invalidateQueries({ queryKey: ['rent-schedule-ocr-count'] })
+    },
   })
 
   const setP = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
     setPayForm(f => ({ ...f, [k]: e.target.value }))
 
+  // Pre-fills the Record Payment modal from the WhatsApp OCR extract so
+  // confirming is a review-and-click, not re-typing the whole form — Robert
+  // still has to look at the slip photo and press Save before anything sends.
+  const openReview = (rs: Record<string, unknown>) => {
+    setPayModal(rs)
+    setPayForm({
+      paid_amount_ttd: rs['ocr_extracted_amount_ttd'] != null ? String(rs['ocr_extracted_amount_ttd']) : String(rs['amount_due_ttd'] ?? ''),
+      paid_date: rs['ocr_extracted_date'] ? String(rs['ocr_extracted_date']).slice(0, 10) : new Date().toISOString().slice(0, 10),
+      payment_method: 'BANK_TRANSFER',
+      payment_reference: '',
+      idempotency_key: crypto.randomUUID(),
+    })
+  }
+
   return (
     <div>
-      <div className="flex items-center gap-2 mb-4">
+      <div className="flex items-center gap-2 mb-4 flex-wrap">
         <label htmlFor="rent-status-filter" className="text-xs text-slate-400 uppercase tracking-wide">
           {t('tenancy.filterStatus', 'Status')}
         </label>
@@ -61,6 +99,11 @@ export default function PropertiesRentSchedulePanel() {
           {['UPCOMING','REMINDER_SENT','PAID','PARTIAL','LATE','WAIVED'].map(s =>
             <option key={s} value={s}>{s}</option>)}
         </select>
+        <button onClick={() => setOcrOnly(v => !v)}
+          className={`text-xs px-2.5 py-1.5 rounded border ${ocrOnly ? 'bg-amber-900/50 border-amber-600 text-amber-300' : 'bg-slate-700 border-slate-600 text-slate-300 hover:text-slate-100'}`}>
+          {t('tenancy.ocrReviewFilter', 'Needs Payment-Slip Review')}
+          {ocrPending.length > 0 && <span className="ml-1.5 px-1.5 py-0.5 rounded-full bg-amber-600 text-white text-[10px]">{ocrPending.length}</span>}
+        </button>
         <span className="ml-auto text-xs text-slate-500">
           {t('tenancy.periodCount', '{{n}} periods', { n: schedule.length })}
         </span>
@@ -105,9 +148,20 @@ export default function PropertiesRentSchedulePanel() {
                 <span className={`text-xs px-2 py-0.5 rounded border whitespace-nowrap ${STATUS_COLORS[String(rs['status'])] ?? ''}`}>
                   {String(rs['status'])}
                 </span>
+                {Boolean(rs['ocr_review_needed']) && (
+                  <span className="ml-1.5 text-xs px-1.5 py-0.5 rounded border border-amber-600 bg-amber-900/50 text-amber-300 whitespace-nowrap"
+                    title={t('tenancy.ocrReviewHint', 'A tenant sent a WhatsApp payment-slip photo — OCR read the amount/date below. Nothing is recorded and no receipt is sent until you confirm.')}>
+                    {t('tenancy.ocrReview', 'slip received')}
+                  </span>
+                )}
               </td>
               <td className="py-2">
-                {['UPCOMING','REMINDER_SENT','LATE'].includes(String(rs['status'])) && (
+                {Boolean(rs['ocr_review_needed']) ? (
+                  <button onClick={() => openReview(rs)}
+                    className="px-2 py-0.5 text-xs bg-amber-700 hover:bg-amber-600 text-white rounded">
+                    {t('tenancy.reviewSlip', 'Review Slip')}
+                  </button>
+                ) : ['UPCOMING','REMINDER_SENT','LATE'].includes(String(rs['status'])) && (
                   <button onClick={() => { setPayModal(rs); setPayForm(f => ({ ...f, paid_amount_ttd: String(rs['amount_due_ttd']), idempotency_key: crypto.randomUUID() })) }}
                     className="px-2 py-0.5 text-xs bg-blue-700 hover:bg-blue-600 text-white rounded">
                     {t('tenancy.recordPayment', 'Record Payment')}
@@ -129,7 +183,26 @@ export default function PropertiesRentSchedulePanel() {
       {payModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-slate-800 rounded-lg p-6 w-full max-w-md">
-            <h3 className="text-base font-semibold mb-4">{t('tenancy.recordPayment', 'Record Payment')} — {String(payModal['tenant_name'])}</h3>
+            <h3 className="text-base font-semibold mb-1">
+              {Boolean(payModal['ocr_review_needed'])
+                ? t('tenancy.reviewSlipTitle', 'Confirm Payment')
+                : t('tenancy.recordPayment', 'Record Payment')} — {String(payModal['tenant_name'])}
+            </h3>
+
+            {Boolean(payModal['ocr_review_needed']) && (
+              <div className="mb-4">
+                <p className="text-xs text-amber-400 mb-2">
+                  {t('tenancy.ocrReviewNote', 'Sent via WhatsApp — check the slip against the amount below, then confirm. No receipt goes to the tenant until you press Save.')}
+                  {payModal['ocr_confidence'] ? ` (${t('tenancy.ocrConfidence', 'OCR confidence')}: ${String(payModal['ocr_confidence'])})` : ''}
+                </p>
+                <AuthedImg
+                  path={`/properties/rent-schedule/${String(payModal['id'])}/payment-slip`}
+                  alt={t('tenancy.paymentSlip', 'Payment slip')}
+                  className="w-full max-h-72 object-contain rounded border border-slate-600 bg-slate-900"
+                />
+              </div>
+            )}
+
             <div className="space-y-3">
               <div>
                 <label className="block text-xs text-slate-400 mb-1">{t('tenancy.amountPaid', 'Amount Paid (TTD)')}</label>
@@ -151,10 +224,16 @@ export default function PropertiesRentSchedulePanel() {
               </div>
             </div>
             <div className="flex gap-2 justify-end mt-4">
+              {Boolean(payModal['ocr_review_needed']) && (
+                <button onClick={() => dismissOcrMut.mutate(String(payModal['id']))} disabled={dismissOcrMut.isPending}
+                  className="px-4 py-2 text-sm text-red-400 hover:text-red-300 mr-auto disabled:opacity-40">
+                  {t('tenancy.notAPayment', 'Not a payment — dismiss')}
+                </button>
+              )}
               <button onClick={() => setPayModal(null)} className="px-4 py-2 text-sm text-slate-400 hover:text-slate-200">{t('common.cancel','Cancel')}</button>
               <button onClick={() => payMut.mutate(String(payModal['id']))} disabled={payMut.isPending || !payForm.paid_amount_ttd}
                 className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded disabled:opacity-40">
-                {payMut.isPending ? t('common.saving','Saving...') : t('common.save','Save')}
+                {payMut.isPending ? t('common.saving','Saving...') : t('tenancy.confirmAndSendReceipt', 'Confirm & Send Receipt')}
               </button>
             </div>
           </div>
