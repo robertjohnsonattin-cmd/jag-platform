@@ -22,6 +22,16 @@ function notificationTarget(payload: unknown): string | null {
   if (module === 'PROPERTIES' && (kind === 'MAINTENANCE' || kind === 'MAINTENANCE_SLA') && typeof p['ticket_id'] === 'string') {
     return `/properties?tab=maintenance&focus=${p['ticket_id']}`
   }
+  if (module === 'PROPERTIES' && kind === 'RENT_OCR_REVIEW' && typeof p['rent_schedule_id'] === 'string') {
+    return `/properties?tab=rent&focus=${p['rent_schedule_id']}`
+  }
+  // RENT_OCR_NO_PERIOD (no rent period exists to attach the slip to) and
+  // RENT_PAYMENT_CLAIM (tenant said they paid but sent no photo) both carry
+  // no record to deep-link to — the notification body itself says "check the
+  // WhatsApp inbox", so send Robert there rather than nowhere.
+  if (module === 'PROPERTIES' && (kind === 'RENT_OCR_NO_PERIOD' || kind === 'RENT_PAYMENT_CLAIM')) {
+    return '/properties?tab=whatsapp'
+  }
   if (module === 'FINANCE' && kind === 'EXPENSE_APPROVAL') {
     return '/expenses'
   }

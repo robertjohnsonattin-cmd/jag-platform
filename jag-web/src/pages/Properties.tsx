@@ -187,7 +187,7 @@ export default function Properties() {
       {tab === 'viewings'     && <PropertiesViewingsPanel />}
       {tab === 'applications' && <PropertiesApplicationsPanel focusId={focusId} />}
       {tab === 'deposits'     && <PropertiesDepositsPanel />}
-      {tab === 'rent'         && <PropertiesRentSchedulePanel />}
+      {tab === 'rent'         && <PropertiesRentSchedulePanel focusId={focusId} />}
       {tab === 'reconciliation' && <PropertiesReconciliationPanel />}
       {tab === 'maintenance'  && <PropertiesMaintenancePanel focusId={focusId} />}
       {tab === 'sched_maintenance' && <PropertiesScheduledMaintenancePanel />}

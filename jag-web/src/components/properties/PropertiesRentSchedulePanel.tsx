@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { tenancyApi } from '../../api/tenancy'
@@ -27,12 +27,13 @@ const fmtDue = (v: unknown): string => {
   return isNaN(d.getTime()) ? s : d.toLocaleDateString('en-TT', { day: 'numeric', month: 'short', year: 'numeric' })
 }
 
-export default function PropertiesRentSchedulePanel() {
+export default function PropertiesRentSchedulePanel({ focusId }: { focusId?: string | null } = {}) {
   const { t } = useTranslation()
   const qc = useQueryClient()
   const [statusFilter, setStatusFilter] = useState('')
   const [ocrOnly, setOcrOnly] = useState(false)
   const [payModal, setPayModal] = useState<Record<string, unknown> | null>(null)
+  const focusHandled = useRef(false)
   const [payForm, setPayForm] = useState({ paid_amount_ttd: '', paid_date: new Date().toISOString().slice(0,10), payment_method: 'BANK_TRANSFER', payment_reference: '', idempotency_key: crypto.randomUUID() })
 
   const { data: schedule = [] } = useQuery({
@@ -86,6 +87,19 @@ export default function PropertiesRentSchedulePanel() {
       idempotency_key: crypto.randomUUID(),
     })
   }
+
+  // Deep-link from a notification click (?tab=rent&focus=<rent_schedule_id>) —
+  // once the schedule list has loaded, open the same modal a manual click on
+  // that row would. `focusHandled` stops this re-firing every time the list
+  // refetches (e.g. after the mutation below invalidates it).
+  useEffect(() => {
+    if (!focusId || focusHandled.current || schedule.length === 0) return
+    const row = schedule.find((rs: Record<string, unknown>) => String(rs['id']) === focusId)
+    if (!row) return
+    focusHandled.current = true
+    if (row['ocr_review_needed']) openReview(row)
+    else { setPayModal(row); setPayForm(f => ({ ...f, paid_amount_ttd: String(row['amount_due_ttd'] ?? ''), idempotency_key: crypto.randomUUID() })) }
+  }, [focusId, schedule])
 
   return (
     <div>
