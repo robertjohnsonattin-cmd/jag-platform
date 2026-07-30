@@ -143,6 +143,40 @@ Messages tab renders an empty thread that looks like "no messages" rather than "
 That empty state deliberately prints the number it searched, so a future mismatch is
 diagnosable instead of silent.
 
+### Two intake paths into prop_property_tenants, only one links the application (session 2026-07-30)
+`POST /applications/:id/create-tenant` creates a tenant and backfills `prop_applications.tenant_id`.
+`POST /properties/tenants` (the "+ Add Tenant" button, `tenants-mortgage.ts`) is a second, fully
+independent path into the same table that never looked at `prop_applications` — so a tenant added
+by hand for someone who already has a real, approved application on file showed up with "0
+applications" and a Tenant 360 timeline permanently stuck on Application/Approved, exactly the
+"row exists is not the thing happened" failure mode, just inverted: the thing *had* happened and
+the row *didn't* exist where the derivation looked. **Fixed:** `POST /properties/tenants` now
+searches `prop_applications` for an unlinked row matching the new tenant's phone (last-7-digit
+match — same rule as the enquiries `?phone=` filter below, since phone formats are inconsistent
+across intake paths) and links it on create. This only fixes new tenants; a one-time backfill was
+needed for tenants already added before the fix. **When adding any second way to create a record
+that another flow already links elsewhere, check whether the new path needs the same linking —
+this is the third time in this file a soft-linked record type has skipped its link (see the
+application/tenant-chain sweep above).**
+
+### resolveOwnerContext() picks the wrong "Owner" if a stale test account exists (session 2026-07-30)
+Cron jobs (`jag-cron-service` client) and the auditor portal (Wife's login) both authenticate as
+someone other than Robert, then need to borrow his real owner scope — `middleware/auth.ts`'s
+`resolveOwnerContext()` does this by picking "the first active user with an active Owner role,
+ordered by `created_at`". A leftover test fixture, `testuser@jag.test`, was still `is_active =
+true` with an active Owner role and had been created ~90 seconds before Robert's real account —
+so every cron-authenticated request (`send-reminders`, `send-reminders-d1`, `send-missed-d1`,
+`queue-arrears-escalation`, and anything else on that path) was silently scoped to an owner_id
+that owns nothing. No errors anywhere: the SQL was valid, just scoped to the wrong tenant, so
+every batch endpoint returned `{sent: 0}` and looked like it was working. **This is not something
+`docs/rules/db-rls.md` catches** — RLS did exactly what it was told; the bug was upstream, in
+which identity got handed to RLS. **Fix:** deactivate stray test users the moment they're found
+(`UPDATE users SET is_active = false`), and restart `jag-api` — `ownerContextCache` has a 5-minute
+TTL and won't self-correct faster than that. **There must only ever be one `is_active = true` user
+with an active Owner role in `jag_core`** — if a second one is ever created (test fixture, a
+future co-owner before succession activation, anything), this function silently breaks for every
+cron job and the auditor portal simultaneously, with no error to signal it.
+
 ### Lifecycle state is derived, and "unknown" is not "not yet" (session 51)
 Nothing in the schema records where a tenant sits between enquiry and handover.
 `deriveLifecycle()` in `components/properties/TenantTimeline.tsx` computes it from records

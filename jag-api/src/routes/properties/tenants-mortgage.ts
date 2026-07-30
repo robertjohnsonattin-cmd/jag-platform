@@ -130,8 +130,8 @@ propTenantsRouter.post('/', async (req: Request, res: Response, next: NextFuncti
 
     const client = await propertiesPool.connect();
     try {
-      const newTenant = await withOwnerRLS(client, req.rlsCtx, (c) =>
-        c.query(
+      const { tenant: newTenant, linkedApplicationId } = await withOwnerRLS(client, req.rlsCtx, async (c) => {
+        const tenant = await c.query(
           `INSERT INTO prop_property_tenants
              (owner_id, first_name, last_name, company_name, is_company, phone, phone2, email,
               identification_type, identification_number, emergency_contact_name,
@@ -143,10 +143,36 @@ propTenantsRouter.post('/', async (req: Request, res: Response, next: NextFuncti
            body.identification_type ?? null, body.identification_number ?? null,
            body.emergency_contact_name ?? null, body.emergency_contact_phone ?? null,
            body.notes ?? null],
-        ).then(r => r.rows[0]),
-      );
+        ).then(r => r.rows[0]);
 
-      logger.info({ entity: 'PROPERTIES', action: 'TENANT_CREATED', user_id: ownerId, record_id: newTenant.id });
+        // "+ Add Tenant" is a second, independent path into prop_property_tenants
+        // alongside POST /applications/:id/create-tenant — that route backfills
+        // prop_applications.tenant_id, this one never did, so a tenant added here
+        // for someone who already has a real APPROVED application on file showed
+        // up with "0 applications" and the Tenant 360 lifecycle stuck on
+        // Application/Approved forever, even though both had genuinely happened.
+        // Match on phone only (last 7 digits — see enquiries.ts ?phone= for the
+        // same rule) since that's the one field guaranteed comparable across
+        // the two intake paths; a shorter/absent input matches nothing.
+        let linkedApplicationId: string | null = null;
+        if (body.phone) {
+          const match = await c.query(
+            `SELECT id FROM prop_applications
+             WHERE tenant_id IS NULL
+               AND right(regexp_replace(phone, '\\D', '', 'g'), 7) = right(regexp_replace($1, '\\D', '', 'g'), 7)
+             ORDER BY submitted_at DESC LIMIT 1`,
+            [body.phone],
+          );
+          if (match.rows[0]) {
+            linkedApplicationId = match.rows[0].id;
+            await c.query(`UPDATE prop_applications SET tenant_id = $1 WHERE id = $2`, [tenant.id, linkedApplicationId]);
+          }
+        }
+
+        return { tenant, linkedApplicationId };
+      });
+
+      logger.info({ entity: 'PROPERTIES', action: 'TENANT_CREATED', user_id: ownerId, record_id: newTenant.id, linked_application_id: linkedApplicationId });
       await auditLog(ownerId, 'PropertyTenant', 'CREATE', newTenant.id, body);
       ok(res, newTenant, 201);
     } finally { client.release(); }
