@@ -1599,7 +1599,8 @@
       "noPhone": "No phone number on file, so there is no WhatsApp thread to show. Add one on the tenant record.",
       "goTo": "Go to WhatsApp inbox →",
       "received": "Received",
-      "sent": "Sent"
+      "sent": "Sent",
+      "attachment": "Open attachment"
     },
     "section": {
       "loadFailed": "Couldn't load this section.",
@@ -2928,6 +2929,7 @@
     "noConversations": "No conversations yet.",
     "selectConversation": "Select a conversation or enter a number to start.",
     "noMessages": "No messages yet.",
+    "openAttachment": "Open attachment",
     "typeMessage": "Type a message...",
     "newEnquiry": "New Enquiry",
     "noEnquiries": "No enquiries yet.",

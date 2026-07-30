@@ -9,6 +9,7 @@ import type { PropertyTenant, TenantDocument, TenantDocType, Lease } from '../..
 import { fmtDate, fmtTTD } from '../../lib/entities'
 import TenantSectionState from './TenantSectionState'
 import TenantTimeline, { deriveLifecycle, type Translate } from './TenantTimeline'
+import AuthedImg from '../AuthedImg'
 
 /**
  * Tenant 360 — one detail pane replacing the eight near-identical modals that
@@ -665,6 +666,9 @@ export default function TenantDetail({ tenant, onEdit, onDelete }: {
                 <div className="space-y-2">
                   {(threadQ.data?.messages ?? []).map((m: Row) => {
                     const inbound = String(m['direction'] ?? '') === 'INBOUND'
+                    const hasMedia = Boolean(m['has_media'])
+                    const messageType = String(m['message_type'] ?? '')
+                    const mediaPath = `/properties/wa-inbox/media/${String(m['id'])}`
                     return (
                       <div
                         key={String(m['id'])}
@@ -674,9 +678,29 @@ export default function TenantDetail({ tenant, onEdit, onDelete }: {
                             : 'bg-blue-900/20 border-blue-800 ml-6'
                         }`}
                       >
-                        <p className="text-sm text-slate-200 whitespace-pre-wrap break-words">
-                          {String(m['body'] ?? '')}
-                        </p>
+                        {hasMedia && messageType === 'IMAGE' && (
+                          <button
+                            type="button"
+                            onClick={() => { void api.objectUrl(mediaPath).then(url => window.open(url, '_blank')) }}
+                            className="block mb-2"
+                          >
+                            <AuthedImg path={mediaPath} className="max-h-48 rounded border border-slate-600 object-cover" />
+                          </button>
+                        )}
+                        {hasMedia && messageType !== 'IMAGE' && (
+                          <button
+                            type="button"
+                            onClick={() => { void api.objectUrl(mediaPath).then(url => window.open(url, '_blank')) }}
+                            className="mb-2 flex items-center gap-1.5 text-xs text-blue-300 hover:text-blue-200"
+                          >
+                            📎 {t('tenants.messages.attachment', 'Open attachment')} ({messageType.toLowerCase()})
+                          </button>
+                        )}
+                        {Boolean(m['body']) && (
+                          <p className="text-sm text-slate-200 whitespace-pre-wrap break-words">
+                            {String(m['body'] ?? '')}
+                          </p>
+                        )}
                         <p className="text-xs text-slate-500 mt-1">
                           {inbound ? t('tenants.messages.received', 'Received') : t('tenants.messages.sent', 'Sent')}
                           {m['created_at'] ? ` · ${fmtDate(String(m['created_at']))}` : ''}

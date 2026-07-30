@@ -104,6 +104,49 @@ export async function sendList({ to, body, buttonText, rows }: WaListMessage): P
   });
 }
 
+// Meta's inbound media payload only carries a media *id* — the actual bytes
+// live behind a short-lived, Bearer-token-gated URL that has to be resolved
+// in a second call. Both calls need the same access token; the media URL
+// itself expires (Meta docs say ~5 min), so this must run at webhook-receipt
+// time, not lazily on first view.
+export async function downloadMedia(mediaId: string): Promise<{ buffer: Buffer; mimeType: string } | null> {
+  const token = process.env.WHATSAPP_ACCESS_TOKEN;
+  if (!token) {
+    logger.warn({ entity: 'WHATSAPP', action: 'MEDIA_SKIP', reason: 'env vars not configured' });
+    return null;
+  }
+  const metaRes = await fetch(`${BASE_URL}/${mediaId}`, { headers: { Authorization: `Bearer ${token}` } });
+  if (!metaRes.ok) {
+    logger.error({ entity: 'WHATSAPP', action: 'MEDIA_LOOKUP_FAILED', status: metaRes.status, body: await metaRes.text() });
+    return null;
+  }
+  const meta = await metaRes.json() as { url?: string; mime_type?: string };
+  if (!meta.url) return null;
+
+  const fileRes = await fetch(meta.url, { headers: { Authorization: `Bearer ${token}` } });
+  if (!fileRes.ok) {
+    logger.error({ entity: 'WHATSAPP', action: 'MEDIA_DOWNLOAD_FAILED', status: fileRes.status });
+    return null;
+  }
+  const buffer = Buffer.from(await fileRes.arrayBuffer());
+  return { buffer, mimeType: meta.mime_type ?? 'application/octet-stream' };
+}
+
+// Meta's media object doesn't return a usable filename — only a MIME type —
+// so the extension has to be derived for the object key. Covers the types
+// WhatsApp actually sends for images/documents/audio; falls back to .bin
+// rather than guessing wrong (a wrong extension misleads more than none).
+const MIME_EXT: Record<string, string> = {
+  'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp',
+  'application/pdf': 'pdf',
+  'application/msword': 'doc',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
+  'audio/ogg': 'ogg', 'audio/aac': 'aac', 'audio/amr': 'amr', 'audio/mpeg': 'mp3',
+};
+export function mimeToExt(mimeType: string): string {
+  return MIME_EXT[mimeType.split(';')[0] as string] ?? 'bin';
+}
+
 export function verifyWebhookSignature(rawBody: Buffer, signatureHeader: string): boolean {
   // Meta signs the X-Hub-Signature-256 header with the app's App Secret
   // (App Dashboard → Settings → Basic → "App secret"), NOT the access token.

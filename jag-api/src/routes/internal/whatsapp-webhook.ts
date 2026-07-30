@@ -9,8 +9,9 @@ import { Router, type Request, type Response, type NextFunction } from 'express'
 import { propertiesPool } from '../../db/index';
 import { logger } from '../../lib/logger';
 import { withOwnerRLS } from '../../middleware/rls';
-import { sendTemplate, sendList, sendText, verifyWebhookSignature } from '../../lib/whatsapp';
+import { sendTemplate, sendList, sendText, verifyWebhookSignature, downloadMedia, mimeToExt } from '../../lib/whatsapp';
 import { enqueueNotification } from '../../lib/notifications';
+import { minioClient, ensureBucket, mediaObjectKey, BUCKET_DOCUMENTS } from '../../lib/minio';
 
 export const whatsappWebhookRouter = Router();
 
@@ -198,13 +199,42 @@ async function processInboundMessage(msg: Record<string, unknown>): Promise<void
   // as a typed message would, while buttonReply.id lets us branch on intent
   // precisely instead of relying on keyword matching against the title.
   const buttonReply = extractButtonReply(msg);
+  // Image/document messages can carry a caption — previously dropped entirely
+  // (body was null for every non-text type), so a tenant captioning a payment
+  // slip photo ("paid Aug rent") never reached the payment-keyword branch below
+  // and the caption was invisible in the thread alongside the photo itself.
+  const mediaNode = msg[type] as Record<string, unknown> | undefined;
+  const caption   = (type === 'image' || type === 'document') ? (mediaNode?.['caption'] as string | undefined) : undefined;
+  const mediaId   = (type === 'image' || type === 'document' || type === 'audio') ? (mediaNode?.['id'] as string | undefined) : undefined;
   const body        = buttonReply
     ? buttonReply.title
-    : (type === 'text' ? String((msg['text'] as Record<string, unknown>)?.['body'] ?? '') : null);
+    : type === 'text' ? String((msg['text'] as Record<string, unknown>)?.['body'] ?? '')
+    : (caption ?? null);
 
   if (!from) return;
 
-  logger.info({ entity: 'WHATSAPP_WEBHOOK', action: 'INBOUND', from, type, button_id: buttonReply?.id ?? null });
+  logger.info({ entity: 'WHATSAPP_WEBHOOK', action: 'INBOUND', from, type, button_id: buttonReply?.id ?? null, has_media: Boolean(mediaId) });
+
+  // Downloaded and uploaded to MinIO before opening the DB transaction below —
+  // this is a slow network round trip (two calls to Meta), and doing it inside
+  // withOwnerRLS would hold the Postgres connection/transaction open for the
+  // duration for no reason. A failure here is non-fatal: the message still
+  // gets logged, just without an attachment, rather than losing the whole
+  // inbound message over a Meta/MinIO hiccup.
+  let mediaObjectKeyVal: string | null = null;
+  if (mediaId) {
+    try {
+      const media = await downloadMedia(mediaId);
+      if (media) {
+        await ensureBucket(BUCKET_DOCUMENTS);
+        const key = mediaObjectKey(JAG_OWNER_ID, 'wa-inbound', from, `${waMessageId}.${mimeToExt(media.mimeType)}`);
+        await minioClient.putObject(BUCKET_DOCUMENTS, key, media.buffer, media.buffer.length, { 'Content-Type': media.mimeType });
+        mediaObjectKeyVal = key;
+      }
+    } catch (e) {
+      logger.error({ entity: 'WHATSAPP_WEBHOOK', action: 'MEDIA_STORE_FAILED', error_message: (e as Error).message });
+    }
+  }
 
   await withOwnerRLS(propertiesPool, JAG_OWNER_ID, async client => {
     // Step 1 — identify sender, get or create enquiry
@@ -247,12 +277,12 @@ async function processInboundMessage(msg: Record<string, unknown>): Promise<void
     await client.query(
       `INSERT INTO prop_whatsapp_messages
          (owner_id, wa_message_id, direction, from_number, to_number, message_type, body,
-          enquiry_id, ticket_id, delivery_status, sent_at)
-       VALUES ($1,$2,'INBOUND',$3,$4,$5,$6,$7,$8,'READ',NOW())
+          enquiry_id, ticket_id, delivery_status, sent_at, media_url)
+       VALUES ($1,$2,'INBOUND',$3,$4,$5,$6,$7,$8,'READ',NOW(),$9)
        ON CONFLICT (wa_message_id) DO NOTHING`,
       [JAG_OWNER_ID, waMessageId, from,
        process.env.WHATSAPP_PHONE_NUMBER_ID ?? 'JAG',
-       dbMessageType(type), body, enquiryId, ticketId],
+       dbMessageType(type), body, enquiryId, ticketId, mediaObjectKeyVal],
     );
 
     if (enquiryId) {

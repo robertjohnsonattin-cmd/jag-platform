@@ -15,10 +15,12 @@ import { propertiesPool } from '../../db/index';
 import { logger } from '../../lib/logger';
 import { ok, err } from '../../lib/response';
 import { sendText } from '../../lib/whatsapp';
+import { getObjectStream, getObjectStat, BUCKET_DOCUMENTS } from '../../lib/minio';
 
 export const waInboxRouter = Router();
 
 const PhoneParam = z.object({ phone: z.string().min(7).max(30) });
+const MediaParam = z.object({ id: z.string().uuid() });
 
 const ReplySchema = z.object({
   body: z.string().min(1).max(4096),
@@ -66,6 +68,35 @@ waInboxRouter.get('/', async (req: Request, res: Response, next: NextFunction) =
   } catch (e) { next(e); }
 });
 
+// ── GET /wa-inbox/media/:id — stream an inbound attachment from MinIO ────────
+// Two path segments, so this does not collide with the single-segment
+// `/:phone` route below regardless of registration order — kept above it
+// anyway to match the flat-route-above-:id convention used everywhere else
+// in Properties (see docs/rules/properties.md).
+waInboxRouter.get('/media/:id', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const ownerId = req.rlsCtx.userId;
+    if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
+    const { id } = MediaParam.parse(req.params);
+
+    const row = await withOwnerRLS(propertiesPool, ownerId, async client => {
+      const { rows } = await client.query<{ media_url: string | null }>(
+        `SELECT media_url FROM prop_whatsapp_messages WHERE id = $1 AND owner_id = $2`,
+        [id, ownerId],
+      );
+      return rows[0] ?? null;
+    });
+    if (!row?.media_url) { err(res, 404, 'NOT_FOUND', 'No attachment on this message.'); return; }
+
+    const [stream, stat] = await Promise.all([
+      getObjectStream(BUCKET_DOCUMENTS, row.media_url),
+      getObjectStat(BUCKET_DOCUMENTS, row.media_url),
+    ]);
+    res.set({ 'Content-Type': stat.contentType, 'Cache-Control': 'private, no-cache' });
+    stream.pipe(res);
+  } catch (e) { next(e); }
+});
+
 // ── GET /wa-inbox/:phone — full timeline for a contact ───────────────────────
 waInboxRouter.get('/:phone', async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -76,7 +107,7 @@ waInboxRouter.get('/:phone', async (req: Request, res: Response, next: NextFunct
     const data = await withOwnerRLS(propertiesPool, ownerId, async client => {
       const { rows: messages } = await client.query<Record<string, unknown>>(
         `SELECT id, direction, message_type, body, template_name, delivery_status,
-                created_at, read_at,
+                created_at, read_at, (media_url IS NOT NULL) AS has_media,
                 'WA_MESSAGE' AS entry_type
          FROM prop_whatsapp_messages
          WHERE owner_id = $1 AND (from_number = $2 OR to_number = $2)

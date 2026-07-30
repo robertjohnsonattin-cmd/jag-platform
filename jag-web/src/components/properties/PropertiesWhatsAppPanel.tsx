@@ -2,6 +2,8 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { tenancyApi } from '../../api/tenancy'
+import { api } from '../../api/client'
+import AuthedImg from '../AuthedImg'
 
 const cls = 'w-full bg-slate-700 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500'
 
@@ -131,9 +133,30 @@ export default function PropertiesWhatsAppPanel() {
               {timeline.map((entry: Record<string, unknown>) => {
                 if (entry['_type'] === 'WA') {
                   const isOut = entry['direction'] === 'OUTBOUND'
+                  const hasMedia = Boolean(entry['has_media'])
+                  const messageType = String(entry['message_type'] ?? '')
+                  const mediaPath = `/properties/wa-inbox/media/${String(entry['id'])}`
                   return (
                     <div key={`wa-${entry['id']}`} className={`flex ${isOut ? 'justify-end' : 'justify-start'}`}>
                       <div className={`max-w-[72%] rounded-lg px-3 py-2 text-sm ${isOut ? 'bg-blue-700 text-white' : 'bg-slate-700 text-slate-200'}`}>
+                        {hasMedia && messageType === 'IMAGE' && (
+                          <button
+                            type="button"
+                            onClick={() => { void api.objectUrl(mediaPath).then(url => window.open(url, '_blank')) }}
+                            className="block mb-1.5"
+                          >
+                            <AuthedImg path={mediaPath} className="max-h-40 rounded object-cover" />
+                          </button>
+                        )}
+                        {hasMedia && messageType !== 'IMAGE' && (
+                          <button
+                            type="button"
+                            onClick={() => { void api.objectUrl(mediaPath).then(url => window.open(url, '_blank')) }}
+                            className="mb-1.5 flex items-center gap-1 text-xs underline opacity-90"
+                          >
+                            📎 {t('tenancy.openAttachment', 'Open attachment')} ({messageType.toLowerCase()})
+                          </button>
+                        )}
                         {entry['template_name']
                           ? <span className="italic text-xs opacity-80">[{String(entry['template_name'])}]</span>
                           : String(entry['body'] ?? '')}
