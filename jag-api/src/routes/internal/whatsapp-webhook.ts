@@ -228,13 +228,16 @@ async function handlePaymentSlipImage(
   const balanceDue = parseFloat(period.amount_due_ttd) - parseFloat(period.paid_amount_ttd ?? '0');
   const extractedAmount = opts.ocrResult.amount;
   const matchesAmount = extractedAmount !== null && Math.abs(extractedAmount - balanceDue) <= Math.max(5, balanceDue * 0.01);
+  const payeeMatch = opts.ocrResult.payeeMatch;
 
   await client.query(
     `UPDATE prop_rent_schedule
      SET ocr_extracted_amount_ttd = $1, ocr_extracted_date = $2, ocr_confidence = $3,
-         payment_slip_object_key = $4, ocr_review_needed = true
-     WHERE id = $5`,
-    [extractedAmount, opts.ocrResult.date, opts.ocrResult.confidence, opts.mediaObjectKey, period.id],
+         payment_slip_object_key = $4, ocr_review_needed = true,
+         ocr_recipient_name = $5, ocr_payee_match = $6
+     WHERE id = $7`,
+    [extractedAmount, opts.ocrResult.date, opts.ocrResult.confidence, opts.mediaObjectKey,
+     opts.ocrResult.recipientName, payeeMatch, period.id],
   );
 
   // Neutral on purpose — the receipt only ever goes out once Robert confirms,
@@ -243,11 +246,25 @@ async function handlePaymentSlipImage(
   const result = await sendText({ to: opts.from, body: replyBody }).catch(() => null);
   await logOutbound(client, { to: opts.from, messageType: 'TEXT', body: replyBody, enquiryId: opts.enquiryId, ticketId: opts.ticketId, result });
 
+  // A slip can be perfectly genuine and still not be rent paid to this
+  // landlord — amount/date matching alone can never establish that. A payee
+  // mismatch is the loudest possible signal and gets its own title/tier
+  // rather than being buried in the same wording as an ordinary review.
+  const title = payeeMatch === 'MISMATCH'
+    ? '⚠️ Payment slip does NOT match landlord — do not confirm without checking'
+    : matchesAmount ? 'Rent payment slip ready to confirm' : 'Rent payment slip needs review';
+  const payeeNote = payeeMatch === 'MISMATCH'
+    ? ` PAYEE MISMATCH: slip appears paid to "${opts.ocrResult.recipientName ?? 'someone else'}", not the landlord.`
+    : payeeMatch === 'UNKNOWN'
+    ? ` Payee not legible on the slip — verify by eye before confirming.`
+    : ` Payee verified against the landlord's account.`;
+
   void enqueueNotification({
     tier: 1,
-    title: matchesAmount ? 'Rent payment slip ready to confirm' : 'Rent payment slip needs review',
+    title,
     body: `${period.tenant_name} sent a payment slip — OCR read ${extractedAmount !== null ? `TTD $${extractedAmount.toFixed(2)}` : 'an unreadable amount'}` +
       ` (${opts.ocrResult.confidence} confidence) against TTD $${balanceDue.toFixed(2)} due for ${period.period_year}-${String(period.period_month).padStart(2, '0')}.` +
+      payeeNote +
       ` Open Tenant -> Rent to view the slip and confirm before the receipt is sent.`,
     payload: { module: 'PROPERTIES', kind: 'RENT_OCR_REVIEW', rent_schedule_id: period.id },
   });

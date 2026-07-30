@@ -1,4 +1,5 @@
 import { logger } from './logger';
+import { getPaymentDetails } from './payment-config';
 
 export interface PaymentSlipExtract {
   looksLikePaymentSlip: boolean;
@@ -6,6 +7,14 @@ export interface PaymentSlipExtract {
   date: string | null; // YYYY-MM-DD
   reference: string | null;
   confidence: 'HIGH' | 'MEDIUM' | 'LOW';
+  // Who the slip shows the money being paid TO — read as literal text so a
+  // human can double-check it, plus Gemini's own MATCH/MISMATCH/UNKNOWN
+  // judgment against the real payee it was given. A slip can be a completely
+  // genuine bank transfer and still not be rent paid to this landlord — the
+  // amount/date alone can never establish that; found via a real test where
+  // a HIGH-confidence, well-read slip turned out to be paid to someone else.
+  recipientName: string | null;
+  payeeMatch: 'MATCH' | 'MISMATCH' | 'UNKNOWN';
 }
 
 // Gemini's inline-image API only accepts a handful of MIME types — anything
@@ -13,12 +22,17 @@ export interface PaymentSlipExtract {
 // skipped rather than sent and rejected outright.
 const SUPPORTED_MIME = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif']);
 
-const PROMPT = `This image is a photo or screenshot sent by a residential tenant in Trinidad & Tobago as proof of a rent payment (a bank transfer confirmation, deposit slip, or online banking screenshot). Read the image and extract:
+function buildPrompt(): string {
+  const pay = getPaymentDetails();
+  return `This image is a photo or screenshot sent by a residential tenant in Trinidad & Tobago as proof of a rent payment (a bank transfer confirmation, deposit slip, or online banking screenshot). Read the image and extract:
 - amount_ttd: the TTD amount transferred, as a plain number (no currency symbol, no commas). null if you cannot read it.
 - payment_date: the date the payment/transfer was made, formatted YYYY-MM-DD. null if you cannot read it.
 - reference: any transaction/confirmation/reference number visible on the slip. null if there isn't one.
 - is_payment_slip: true only if this genuinely looks like a bank transfer, deposit slip, or payment confirmation — false for an unrelated photo.
-- confidence: "HIGH" if the amount and date are both clearly legible, "MEDIUM" if one of them is uncertain, "LOW" if the image is blurry, cropped, or ambiguous.`;
+- confidence: "HIGH" if the amount and date are both clearly legible, "MEDIUM" if one of them is uncertain, "LOW" if the image is blurry, cropped, or ambiguous.
+- recipient_name: the name of the person/account the money was paid TO, exactly as written on the slip (the "to", "beneficiary", "payee", or "credited to" field — NOT the sender). null if you cannot find or read it.
+- payee_match: the rent for this unit is owed to "${pay.payee}" (bank: ${pay.bank}${pay.acctNo ? `, account ending ${pay.acctNo.slice(-4)}` : ''}). Compare that against the recipient_name/account you read off the slip and answer "MATCH" if they clearly refer to the same person/account (minor spelling/formatting differences are fine), "MISMATCH" if the slip clearly shows a different recipient, or "UNKNOWN" if the recipient isn't legible enough to tell.`;
+}
 
 // Reads a tenant's WhatsApp payment-slip photo and extracts the fields needed
 // to match it against prop_rent_schedule. Returns null on any failure (missing
@@ -47,7 +61,7 @@ export async function extractPaymentSlip(buffer: Buffer, mimeType: string): Prom
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           contents: [{ parts: [
-            { text: PROMPT },
+            { text: buildPrompt() },
             { inlineData: { mimeType: base, data: buffer.toString('base64') } },
           ] }],
           generationConfig: {
@@ -60,8 +74,10 @@ export async function extractPaymentSlip(buffer: Buffer, mimeType: string): Prom
                 reference:       { type: 'STRING', nullable: true },
                 is_payment_slip: { type: 'BOOLEAN' },
                 confidence:      { type: 'STRING', enum: ['HIGH', 'MEDIUM', 'LOW'] },
+                recipient_name:  { type: 'STRING', nullable: true },
+                payee_match:     { type: 'STRING', enum: ['MATCH', 'MISMATCH', 'UNKNOWN'] },
               },
-              required: ['is_payment_slip', 'confidence'],
+              required: ['is_payment_slip', 'confidence', 'payee_match'],
             },
           },
         }),
@@ -85,6 +101,7 @@ export async function extractPaymentSlip(buffer: Buffer, mimeType: string): Prom
     const parsed = JSON.parse(raw) as {
       amount_ttd?: number | null; payment_date?: string | null; reference?: string | null;
       is_payment_slip?: boolean; confidence?: 'HIGH' | 'MEDIUM' | 'LOW';
+      recipient_name?: string | null; payee_match?: 'MATCH' | 'MISMATCH' | 'UNKNOWN';
     };
     // Reject anything not matching YYYY-MM-DD before it can reach a DATE column (STD-10).
     const date = parsed.payment_date && /^\d{4}-\d{2}-\d{2}$/.test(parsed.payment_date) ? parsed.payment_date : null;
@@ -94,6 +111,8 @@ export async function extractPaymentSlip(buffer: Buffer, mimeType: string): Prom
       date,
       reference: parsed.reference?.trim() || null,
       confidence: parsed.confidence ?? 'LOW',
+      recipientName: parsed.recipient_name?.trim() || null,
+      payeeMatch: parsed.payee_match ?? 'UNKNOWN',
     };
   } catch {
     logger.warn({ entity: 'RENT_OCR', action: 'PARSE_FAILED', raw: raw.slice(0, 300) });

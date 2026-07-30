@@ -286,6 +286,8 @@ Only genuinely-open work lives here. Everything completed is in **`docs/CHANGELO
 
 - **WhatsApp rent-payment-slip OCR — auto-send is intentionally OFF** (built 2026-07-30, not yet deployed): every OCR'd slip requires Robert to confirm in Tenant → Rent before the receipt is sent — no auto-posting, however confident the read. Robert: "only until I gain confidence on the process and the correctness of the OCR reading." Do not flip this to auto-send without being asked — see `docs/rules/properties.md`
 
+- **`jag_rent_partial_payment` WhatsApp template has no landlord line** — found 2026-07-30 via the OCR feature's first live test (a partial payment triggered this template, not the full-receipt one). Unlike `jag_rent_receipt_full_v2`, its live approved body never got the "Received by Robert Johnson-Attin, Landlord" line added in the session-40 landlord-identity fix. Needs Robert's sign-off on exact wording before editing (any edit resets an APPROVED template to PENDING for re-review) — see `docs/rules/properties.md` "Payee verification"
+
 ---
 
 ---

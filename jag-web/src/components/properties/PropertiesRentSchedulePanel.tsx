@@ -163,10 +163,17 @@ export default function PropertiesRentSchedulePanel({ focusId }: { focusId?: str
                   {String(rs['status'])}
                 </span>
                 {Boolean(rs['ocr_review_needed']) && (
-                  <span className="ml-1.5 text-xs px-1.5 py-0.5 rounded border border-amber-600 bg-amber-900/50 text-amber-300 whitespace-nowrap"
-                    title={t('tenancy.ocrReviewHint', 'A tenant sent a WhatsApp payment-slip photo — OCR read the amount/date below. Nothing is recorded and no receipt is sent until you confirm.')}>
-                    {t('tenancy.ocrReview', 'slip received')}
-                  </span>
+                  rs['ocr_payee_match'] === 'MISMATCH' ? (
+                    <span className="ml-1.5 text-xs px-1.5 py-0.5 rounded border border-red-600 bg-red-950/60 text-red-300 whitespace-nowrap"
+                      title={t('tenancy.payeeMismatch', "⚠️ This slip does not appear to be paid to Robert Johnson-Attin.")}>
+                      {t('tenancy.payeeMismatchBadge', '⚠️ payee mismatch')}
+                    </span>
+                  ) : (
+                    <span className="ml-1.5 text-xs px-1.5 py-0.5 rounded border border-amber-600 bg-amber-900/50 text-amber-300 whitespace-nowrap"
+                      title={t('tenancy.ocrReviewHint', 'A tenant sent a WhatsApp payment-slip photo — OCR read the amount/date below. Nothing is recorded and no receipt is sent until you confirm.')}>
+                      {t('tenancy.ocrReview', 'slip received')}
+                    </span>
+                  )
                 )}
               </td>
               <td className="py-2">
@@ -205,6 +212,22 @@ export default function PropertiesRentSchedulePanel({ focusId }: { focusId?: str
 
             {Boolean(payModal['ocr_review_needed']) && (
               <div className="mb-4">
+                {payModal['ocr_payee_match'] === 'MISMATCH' && (
+                  <div className="mb-2 px-3 py-2 rounded border border-red-600 bg-red-950/60 text-red-300 text-xs">
+                    <strong>{t('tenancy.payeeMismatch', "⚠️ This slip does not appear to be paid to Robert Johnson-Attin.")}</strong>{' '}
+                    {t('tenancy.payeeMismatchDetail', 'It shows the recipient as "{{name}}" — check carefully before confirming.', { name: String(payModal['ocr_recipient_name'] ?? '—') })}
+                  </div>
+                )}
+                {payModal['ocr_payee_match'] === 'UNKNOWN' && (
+                  <div className="mb-2 px-3 py-2 rounded border border-amber-600 bg-amber-950/40 text-amber-300 text-xs">
+                    {t('tenancy.payeeUnknown', "Could not read who the slip was paid to — verify by eye that it's paid to Robert Johnson-Attin before confirming.")}
+                  </div>
+                )}
+                {payModal['ocr_payee_match'] === 'MATCH' && (
+                  <div className="mb-2 px-3 py-2 rounded border border-emerald-700 bg-emerald-950/30 text-emerald-300 text-xs">
+                    {t('tenancy.payeeMatch', 'Payee on the slip matches Robert Johnson-Attin.')}
+                  </div>
+                )}
                 <p className="text-xs text-amber-400 mb-2">
                   {t('tenancy.ocrReviewNote', 'Sent via WhatsApp — check the slip against the amount below, then confirm. No receipt goes to the tenant until you press Save.')}
                   {payModal['ocr_confidence'] ? ` (${t('tenancy.ocrConfidence', 'OCR confidence')}: ${String(payModal['ocr_confidence'])})` : ''}

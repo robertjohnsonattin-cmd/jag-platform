@@ -215,6 +215,21 @@ auto-send, the change is small (in `handlePaymentSlipImage()`, call `recordRentP
 on a confident amount match instead of only flagging `ocr_review_needed`) and doesn't need migration
 `064` touched again — but don't make that change without being asked.
 
+### Payee verification (session 2026-07-30, found in the first live test)
+Amount/date matching alone is not proof a slip is rent paid to this landlord — a tenant's slip can
+be a perfectly genuine bank transfer confirmation and still be for a payment to someone else
+entirely. The first real test caught exactly this: a HIGH-confidence, correctly-read slip that
+simply wasn't paid to Robert. **Fix (migration `065`):** the Gemini prompt (`lib/rent-payment-ocr.ts`)
+is now given the actual expected payee (`getPaymentDetails()` — name/bank/account) and asked to read
+the slip's recipient and judge `MATCH` / `MISMATCH` / `UNKNOWN`, plus return the raw recipient text
+so it's human-checkable rather than trusted blindly. `ocr_recipient_name` and `ocr_payee_match` are
+stored on the period. A `MISMATCH` gets its own loud notification title (prefixed `⚠️`), a red badge
+on the Rent panel row (replacing the normal amber "slip received" badge), and a red warning banner
+in the confirm modal naming who it actually appears to be paid to. **Never auto-blocked** — Robert
+still has the final call (e.g. a tenant who pays into a joint/family account) — but it must never be
+easy to miss. `UNKNOWN` (recipient not legible) gets an amber "verify by eye" note instead of a hard
+warning, since most real slips crop tightly around amount/date and won't always show the recipient.
+
 ### Lifecycle state is derived, and "unknown" is not "not yet" (session 51)
 Nothing in the schema records where a tenant sits between enquiry and handover.
 `deriveLifecycle()` in `components/properties/TenantTimeline.tsx` computes it from records
