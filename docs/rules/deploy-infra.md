@@ -27,6 +27,22 @@ Adding a new env var to `.env` does **nothing** on its own — `docker-compose.y
 
 **Recurrence, session 48:** `GEMINI_API_KEY`/`GEMINI_MODEL` were set in VM `.env` but never listed in `docker-compose.yml`'s `api.environment` block — this meant the *pre-existing* Properties rent-suggestion feature (`listing.ts` `suggest-price`, live since session 19) had likely been silently 503ing in production the whole time, not just the new AI Fitness Coach that surfaced it. Fixed by adding both vars to the block and force-recreating; this is now the 4th time this exact class of gap has been found — always grep `docker-compose.yml` for a var *before* assuming a feature that calls `process.env.X` actually works in prod, even if it's been "live" for a long time.
 
+### Cloudflare silently replaces 502/504 responses — never use those codes for app-level errors (found session 49, 2026-07-30)
+Cloudflare's edge intercepts HTTP `502` and `504` responses from the origin and replaces the body with its own generic error page (plain text, e.g. `error code: 502`) — **even when jag-api sends back a perfectly valid `{ success, data, error, code }` JSON body.** `500` and `503` are passed through untouched. Confirmed empirically with a temporary no-auth debug route returning each status in turn through `jagcorporate.com` (Cloudflare-proxied, confirmed via `nslookup` resolving to Cloudflare anycast IPs, not the VM's real IP):
+
+| Status sent by jag-api | What the browser actually receives |
+|---|---|
+| 500 | Our JSON, untouched |
+| 502 | Cloudflare's own plaintext page — origin JSON discarded |
+| 503 | Our JSON, untouched |
+| 504 | Cloudflare's own plaintext page — origin JSON discarded |
+
+**Symptom:** frontend `fetch().then(r => r.json())` throws `Unexpected token '<', "<!DOCTYPE "... is not valid JSON` — looks like a broken deploy or a raw HTML error page, but the API logs show a normal, well-formed error response was sent. This exact bug shipped in `ai-coach.ts`'s Gemini-unavailable path (`err(res, 502, 'UPSTREAM_ERROR', ...)`) — every time Gemini returned its own transient `503 high demand` error, jag-api correctly wrapped it as a `502` JSON error, and Cloudflare swallowed it before it reached the browser.
+
+**Rule: never call `err(res, 502, ...)` or `err(res, 504, ...)` anywhere in jag-api.** Use `503` for "upstream/dependency unavailable" cases (semantically correct anyway) and `500` for generic unhandled failures — both pass through Cloudflare cleanly. Before adding any new upstream-integration error path (payment gateways, AI APIs, webhooks to third parties), grep `err(res, 50` across the codebase and confirm nothing uses 502/504.
+
+**How to re-verify if ever in doubt:** add a temporary unauthenticated debug route (e.g. `app.get('/api/v1/_debug/force/:code', (req, res) => res.status(Number(req.params.code)).json({...}))`), deploy it, `curl` each status code through the public domain, compare `Server:`/`Content-Type` headers (Cloudflare's substituted page has `Server: cloudflare` and `Content-Type: text/plain`, ours is `application/json`) — then remove the route and redeploy clean. Don't leave it in production.
+
 ### Caddy / frontend
 - Caddy Caddyfile already has the `jag-web` block
 - `docker-compose.yml` Caddy service has volume mount: `/opt/jag/jag-web/dist:/opt/jag/jag-web/dist:ro`

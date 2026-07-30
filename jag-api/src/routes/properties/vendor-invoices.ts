@@ -294,7 +294,9 @@ vendorInvoicesRouter.patch('/:id/approve', async (req: Request, res: Response, n
       }));
     } catch (e) {
       logger.error({ entity: 'PROPERTIES', action: 'VENDOR_INVOICE_BRIDGE_FAILED', record_id: id, error: String(e) });
-      err(res, 502, 'FINANCE_BRIDGE_FAILED', 'Could not create the linked Finance expense; invoice left unapproved.');
+      // 503, not 502 — Cloudflare's edge replaces 502/504 responses with its own
+      // error page even when the origin sends a valid JSON body; 503 passes through.
+      err(res, 503, 'FINANCE_BRIDGE_FAILED', 'Could not create the linked Finance expense; invoice left unapproved.');
       return;
     } finally { famClient.release(); }
 
@@ -469,7 +471,7 @@ vendorInvoicesRouter.patch('/:id/pay', async (req: Request, res: Response, next:
         settlementCreated = outcome.created;
       } catch (e) {
         logger.error({ entity: 'PROPERTIES', action: 'VENDOR_INVOICE_SETTLEMENT_FAILED', record_id: id, error: String(e) });
-        err(res, 502, 'FINANCE_SETTLEMENT_FAILED', 'Could not post the payment to the ledger; invoice left unpaid.');
+        err(res, 503, 'FINANCE_SETTLEMENT_FAILED', 'Could not post the payment to the ledger; invoice left unpaid.');
         return;
       } finally { famClient.release(); }
     }
@@ -622,7 +624,7 @@ vendorInvoicesRouter.patch('/:id/unpay', async (req: Request, res: Response, nex
         }));
       } catch (e) {
         logger.error({ entity: 'PROPERTIES', action: 'VENDOR_INVOICE_UNPAY_FAILED', record_id: id, error: String(e) });
-        err(res, 502, 'FINANCE_REVERSAL_FAILED', 'Could not reverse the payment on the ledger; invoice left paid.');
+        err(res, 503, 'FINANCE_REVERSAL_FAILED', 'Could not reverse the payment on the ledger; invoice left paid.');
         return;
       } finally { famClient.release(); }
     }

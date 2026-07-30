@@ -104,6 +104,55 @@ export async function sendList({ to, body, buttonText, rows }: WaListMessage): P
   });
 }
 
+// Outbound media has to be uploaded to Meta first (returns a media_id), then
+// referenced in a separate /messages call — Meta does not accept raw bytes
+// in the message payload itself, mirroring the two-step shape of downloadMedia().
+export async function uploadMedia(buffer: Buffer, mimeType: string): Promise<string | null> {
+  const token = process.env.WHATSAPP_ACCESS_TOKEN;
+  const phoneId = process.env.WHATSAPP_PHONE_NUMBER_ID;
+  if (!token || !phoneId) {
+    logger.warn({ entity: 'WHATSAPP', action: 'UPLOAD_SKIP', reason: 'env vars not configured' });
+    return null;
+  }
+  const form = new FormData();
+  form.append('messaging_product', 'whatsapp');
+  form.append('file', new Blob([buffer], { type: mimeType }));
+  const res = await fetch(`${BASE_URL}/${phoneId}/media`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+    body: form,
+  });
+  if (!res.ok) {
+    logger.error({ entity: 'WHATSAPP', action: 'UPLOAD_FAILED', status: res.status, body: await res.text() });
+    return null;
+  }
+  const json = await res.json() as { id?: string };
+  return json.id ?? null;
+}
+
+export interface WaMediaMessage {
+  to: string;
+  mediaId: string;
+  mediaType: 'image' | 'document';
+  caption?: string;
+  filename?: string;
+}
+
+// `document` messages accept an optional `filename` shown in the WhatsApp UI;
+// `image` messages don't have that field, so it's only included for documents.
+export async function sendMedia({ to, mediaId, mediaType, caption, filename }: WaMediaMessage): Promise<unknown> {
+  return callMeta('messages', {
+    messaging_product: 'whatsapp',
+    to,
+    type: mediaType,
+    [mediaType]: {
+      id: mediaId,
+      ...(caption ? { caption } : {}),
+      ...(mediaType === 'document' && filename ? { filename } : {}),
+    },
+  });
+}
+
 // Meta's inbound media payload only carries a media *id* — the actual bytes
 // live behind a short-lived, Bearer-token-gated URL that has to be resolved
 // in a second call. Both calls need the same access token; the media URL
@@ -145,6 +194,14 @@ const MIME_EXT: Record<string, string> = {
 };
 export function mimeToExt(mimeType: string): string {
   return MIME_EXT[mimeType.split(';')[0] as string] ?? 'bin';
+}
+
+// WhatsApp's outbound message `type` must be 'image' or 'document' — anything
+// that isn't a WhatsApp-previewable image goes out as a document so Meta
+// doesn't reject the send outright for an unsupported image subtype.
+export function mimeToWaMediaType(mimeType: string): 'image' | 'document' {
+  const base = mimeType.split(';')[0] as string;
+  return base === 'image/jpeg' || base === 'image/png' || base === 'image/webp' ? 'image' : 'document';
 }
 
 export function verifyWebhookSignature(rawBody: Buffer, signatureHeader: string): boolean {

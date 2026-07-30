@@ -312,7 +312,10 @@ ${exerciseListText}`;
       if (!geminiRes.ok) {
         const bodyText = await geminiRes.text();
         logger.error({ entity: 'FITNESS', action: 'AI_COACH_GEMINI_ERROR', status: geminiRes.status, body: bodyText });
-        err(res, 502, 'UPSTREAM_ERROR', 'Gemini unavailable.'); return;
+        // 503, not 502/504 — Cloudflare's edge silently replaces those two with its own
+        // branded error page (plain text, no body) even when the origin sends valid JSON,
+        // which broke this exact response for the browser. 503 passes through unmodified.
+        err(res, 503, 'UPSTREAM_ERROR', 'Gemini unavailable.'); return;
       }
 
       type GeminiResp = { candidates: Array<{ content: { parts: Array<{ text: string }> } }> };
@@ -322,7 +325,7 @@ ${exerciseListText}`;
       let suggestion: GeminiSuggestion | null = null;
       try { suggestion = JSON.parse(raw) as GeminiSuggestion; } catch { /* schema enforcement means this rarely fires */ }
 
-      if (!suggestion) { err(res, 502, 'UPSTREAM_ERROR', 'Could not parse Gemini response.'); return; }
+      if (!suggestion) { err(res, 503, 'UPSTREAM_ERROR', 'Could not parse Gemini response.'); return; }
 
       // Defensive: never trust the model to only emit real exercise IDs.
       const validIds = new Set(library.map(e => e.id));

@@ -10,14 +10,20 @@
 
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import { z } from 'zod';
+import multer from 'multer';
 import { withOwnerRLS } from '../../middleware/rls';
 import { propertiesPool } from '../../db/index';
 import { logger } from '../../lib/logger';
 import { ok, err } from '../../lib/response';
-import { sendText } from '../../lib/whatsapp';
-import { getObjectStream, getObjectStat, BUCKET_DOCUMENTS } from '../../lib/minio';
+import { sendText, uploadMedia, sendMedia, mimeToWaMediaType } from '../../lib/whatsapp';
+import { minioClient, ensureBucket, mediaObjectKey, getObjectStream, getObjectStat, BUCKET_DOCUMENTS } from '../../lib/minio';
 
 export const waInboxRouter = Router();
+
+// Meta limits: images 5MB, documents 100MB — capping uploads at 16MB here
+// covers every payment-slip/receipt photo case without holding a huge buffer
+// in memory; a genuinely large document can still go through DocVault instead.
+const mediaUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 16 * 1024 * 1024 } });
 
 const PhoneParam = z.object({ phone: z.string().min(7).max(30) });
 const MediaParam = z.object({ id: z.string().uuid() });
@@ -170,6 +176,44 @@ waInboxRouter.post('/:phone/reply', async (req: Request, res: Response, next: Ne
     });
 
     logger.info({ entity: 'PROPERTIES', action: 'WA_INBOX_REPLY', to: phone, user_id: ownerId });
+    res.json(ok({ sent: true }));
+  } catch (e) { next(e); }
+});
+
+// ── POST /wa-inbox/:phone/send-media — attach and send a file over WhatsApp ──
+// Three-step Meta flow: upload the file to get a media_id, send a message
+// referencing that id, then store the same bytes in MinIO so the outbound
+// attachment renders in the thread exactly like an inbound one (same
+// media_url column, same GET /wa-inbox/media/:id streaming route).
+waInboxRouter.post('/:phone/send-media', mediaUpload.single('file'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const ownerId = req.rlsCtx.userId;
+    if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
+    const { phone } = PhoneParam.parse(req.params);
+    const file = req.file;
+    if (!file) { err(res, 400, 'NO_FILE', 'No file attached.'); return; }
+    const caption = typeof req.body?.caption === 'string' && req.body.caption.trim() ? req.body.caption.trim() : undefined;
+
+    const mediaId = await uploadMedia(file.buffer, file.mimetype);
+    if (!mediaId) { err(res, 502, 'WHATSAPP_UPLOAD_FAILED', 'Could not upload file to WhatsApp.'); return; }
+
+    const mediaType = mimeToWaMediaType(file.mimetype);
+    await sendMedia({ to: phone, mediaId, mediaType, caption, filename: file.originalname });
+
+    await ensureBucket(BUCKET_DOCUMENTS);
+    const key = mediaObjectKey(ownerId, 'wa-outbound', phone, file.originalname);
+    await minioClient.putObject(BUCKET_DOCUMENTS, key, file.buffer, file.buffer.length, { 'Content-Type': file.mimetype });
+
+    await withOwnerRLS(propertiesPool, ownerId, async client => {
+      await client.query(
+        `INSERT INTO prop_whatsapp_messages
+           (owner_id, direction, to_number, from_number, message_type, body, media_url, delivery_status, sent_at)
+         VALUES ($1,'OUTBOUND',$2,$3,$4,$5,$6,'SENT',NOW())`,
+        [ownerId, phone, process.env.WHATSAPP_PHONE_NUMBER_ID ?? 'JAG', mediaType.toUpperCase(), caption ?? null, key],
+      );
+    });
+
+    logger.info({ entity: 'PROPERTIES', action: 'WA_INBOX_SEND_MEDIA', to: phone, media_type: mediaType, user_id: ownerId });
     res.json(ok({ sent: true }));
   } catch (e) { next(e); }
 });

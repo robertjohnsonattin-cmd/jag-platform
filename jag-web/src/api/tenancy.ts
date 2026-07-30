@@ -258,6 +258,13 @@ export const tenancyApi = {
   sendWaInboxReply: (phone: string, body: string) =>
     api.post<void>(`/properties/wa-inbox/${encodeURIComponent(phone)}/reply`, { body }),
 
+  sendWaInboxMedia: (phone: string, file: File, caption?: string) => {
+    const form = new FormData()
+    form.append('file', file)
+    if (caption) form.append('caption', caption)
+    return api.postForm<{ sent: boolean }>(`/properties/wa-inbox/${encodeURIComponent(phone)}/send-media`, form)
+  },
+
   logContact: (phone: string, body: { log_type: string; body: string; duration_mins?: number; enquiry_id?: string | null; ticket_id?: string | null }) =>
     api.post<Row>(`/properties/wa-inbox/${encodeURIComponent(phone)}/log`, body),
 

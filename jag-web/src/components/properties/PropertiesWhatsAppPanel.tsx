@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { tenancyApi } from '../../api/tenancy'
@@ -57,6 +57,16 @@ export default function PropertiesWhatsAppPanel() {
   const sendMut = useMutation({
     mutationFn: () => tenancyApi.sendWaInboxReply(phone, msgBody),
     onSuccess: () => { setMsgBody(''); qc.invalidateQueries({ queryKey: ['wa-thread', selectedPhone] }) },
+  })
+
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const mediaMut = useMutation({
+    mutationFn: (file: File) => tenancyApi.sendWaInboxMedia(phone, file),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['wa-thread', selectedPhone] })
+      qc.invalidateQueries({ queryKey: ['wa-inbox'] })
+    },
+    onSettled: () => { if (fileInputRef.current) fileInputRef.current.value = '' },
   })
 
   const logMut = useMutation({
@@ -185,7 +195,16 @@ export default function PropertiesWhatsAppPanel() {
             </div>
 
             {/* Compose */}
-            <div className="flex gap-2">
+            <div className="flex gap-2 items-center">
+              <input ref={fileInputRef} type="file" className="hidden"
+                accept="image/jpeg,image/png,image/webp,application/pdf,.doc,.docx"
+                onChange={e => { const f = e.target.files?.[0]; if (f) mediaMut.mutate(f) }} />
+              <button type="button" onClick={() => fileInputRef.current?.click()}
+                disabled={mediaMut.isPending}
+                title={t('tenancy.attachFile', 'Attach file')}
+                className="px-3 py-1.5 text-sm border border-slate-600 text-slate-300 hover:bg-slate-700 rounded disabled:opacity-40">
+                {mediaMut.isPending ? '…' : '📎'}
+              </button>
               <input className={cls} placeholder={t('tenancy.typeMessage', 'WhatsApp message...')}
                 value={msgBody} onChange={e => setMsgBody(e.target.value)}
                 onKeyDown={e => { if (e.key === 'Enter' && msgBody.trim()) sendMut.mutate() }} />
@@ -194,6 +213,9 @@ export default function PropertiesWhatsAppPanel() {
                 {t('common.send', 'Send')}
               </button>
             </div>
+            {mediaMut.isError && (
+              <p className="text-xs text-red-400 mt-1">{t('tenancy.attachFailed', 'Attachment failed to send.')}</p>
+            )}
           </>
         )}
       </div>

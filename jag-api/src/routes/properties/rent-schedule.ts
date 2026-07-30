@@ -480,10 +480,16 @@ rentScheduleRouter.post('/:id/record-payment', async (req: Request, res: Respons
       const receiptNumber = `RNT-${new Date().getFullYear()}-${String(parseInt(cnt.count)).padStart(6, '0')}`;
 
       const { rows } = await client.query(
-        `UPDATE prop_rent_schedule
-         SET status = $1, paid_amount_ttd = $2, paid_date = $3, payment_method = $4,
-             payment_reference = $5, account_received = $6, receipt_number = $7
-         WHERE id = $8 AND owner_id = $9 RETURNING *`,
+        `WITH updated AS (
+           UPDATE prop_rent_schedule
+           SET status = $1, paid_amount_ttd = $2, paid_date = $3, payment_method = $4,
+               payment_reference = $5, account_received = $6, receipt_number = $7
+           WHERE id = $8 AND owner_id = $9 RETURNING *
+         )
+         SELECT updated.*, u.unit_number, p.name AS property_name
+         FROM updated
+         JOIN prop_units u ON u.id = updated.unit_id
+         LEFT JOIN prop_properties p ON p.id = u.property_id`,
         [newStatus, body.paid_amount_ttd, body.paid_date, body.payment_method,
          body.payment_reference ?? null, body.account_received ?? null, receiptNumber,
          id, ownerId],
