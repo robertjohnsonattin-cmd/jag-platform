@@ -7,6 +7,7 @@
 // GET    /api/v1/properties/applications/:id/documents
 // POST   /api/v1/properties/applications/:id/create-tenant
 // GET    /api/v1/properties/applications/form.pdf
+// DELETE /api/v1/properties/applications/:id
 
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import { z } from 'zod';
@@ -15,7 +16,7 @@ import { withOwnerRLS } from '../../middleware/rls';
 import { propertiesPool } from '../../db/index';
 import { logger } from '../../lib/logger';
 import { ok, err } from '../../lib/response';
-import { minioClient, getObjectStream, getObjectStat, ensureBucket, mediaObjectKey, BUCKET_DOCUMENTS } from '../../lib/minio';
+import { minioClient, getObjectStream, getObjectStat, ensureBucket, mediaObjectKey, deleteObject, BUCKET_DOCUMENTS } from '../../lib/minio';
 import { sendTemplate } from '../../lib/whatsapp';
 import { generateApplicationFormPDF } from '../../lib/application-form-pdf';
 
@@ -418,6 +419,57 @@ applicationsRouter.post('/:id/create-tenant', async (req: Request, res: Response
     });
 
     res.status(201).json(ok(result));
+  } catch (e: unknown) {
+    const ex = e as { status?: number; code?: string; message: string };
+    if (ex.status === 404) return void res.status(404).json(err(ex.message, 'NOT_FOUND'));
+    if (ex.status === 409) return void res.status(409).json(err(ex.message, ex.code ?? 'CONFLICT'));
+    next(e);
+  }
+});
+
+// DELETE /api/v1/properties/applications/:id — Owner only, hard delete.
+// There was previously no way to remove an application at all — Approve/Reject
+// only ever set status and only show while PENDING/UNDER_REVIEW, so a bad or
+// test application that reached APPROVED had no path out of the system.
+// Blocked if a tenant or deposit has already been created from it — those are
+// real downstream records; deleting the application out from under them would
+// leave prop_property_tenants/prop_deposits rows with a dangling reference and
+// no way to see where they came from. prop_application_documents cascades via
+// FK (ON DELETE CASCADE, migration 033); the MinIO objects it pointed at do not
+// auto-delete with the DB row, so those are cleaned up explicitly, best-effort.
+applicationsRouter.delete('/:id', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const ownerId = req.rlsCtx.userId;
+    if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
+    if (!req.rlsCtx.isOwner) return void res.status(403).json(err('Owner only', 'FORBIDDEN'));
+    const { id } = IdParam.parse(req.params);
+
+    const result = await withOwnerRLS(propertiesPool, ownerId, async client => {
+      const { rows: [app] } = await client.query(
+        `SELECT id, tenant_id FROM prop_applications WHERE id = $1 AND owner_id = $2`,
+        [id, ownerId],
+      );
+      if (!app) throw Object.assign(new Error('Application not found'), { status: 404, code: 'NOT_FOUND' });
+      if (app.tenant_id) throw Object.assign(new Error('This application already produced a tenant record — cannot delete.'), { status: 409, code: 'HAS_TENANT' });
+
+      const { rows: deposits } = await client.query(
+        `SELECT id FROM prop_deposits WHERE application_id = $1 LIMIT 1`, [id],
+      );
+      if (deposits.length > 0) throw Object.assign(new Error('A deposit is linked to this application — cannot delete.'), { status: 409, code: 'HAS_DEPOSIT' });
+
+      const { rows: docs } = await client.query(
+        `SELECT minio_object_key FROM prop_application_documents WHERE application_id = $1`, [id],
+      );
+      await client.query(`DELETE FROM prop_applications WHERE id = $1 AND owner_id = $2`, [id, ownerId]);
+      return { docs };
+    });
+
+    for (const doc of result.docs) {
+      try { await deleteObject(BUCKET_DOCUMENTS, doc.minio_object_key); } catch { /* best effort */ }
+    }
+
+    logger.info({ entity: 'PROPERTIES', action: 'APPLICATION_DELETED', record_id: id, user_id: ownerId });
+    res.json(ok({ deleted: true }));
   } catch (e: unknown) {
     const ex = e as { status?: number; code?: string; message: string };
     if (ex.status === 404) return void res.status(404).json(err(ex.message, 'NOT_FOUND'));

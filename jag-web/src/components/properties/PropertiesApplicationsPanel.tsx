@@ -156,6 +156,7 @@ export default function PropertiesApplicationsPanel({ focusId }: { focusId?: str
   useEffect(() => { if (focusId) setSelected(focusId) }, [focusId])
   const [decisionModal, setDecisionModal] = useState<'APPROVED' | 'REJECTED' | null>(null)
   const [rejectionReason, setRejectionReason] = useState('')
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [showCreateTenant, setShowCreateTenant] = useState(false)
   const [uploadDocType, setUploadDocType] = useState<typeof APPLICATION_DOC_TYPES[number]>('national_id')
   const [uploading, setUploading] = useState(false)
@@ -185,6 +186,15 @@ export default function PropertiesApplicationsPanel({ focusId }: { focusId?: str
       setDecisionModal(null)
       void qc.invalidateQueries({ queryKey: ['applications'] })
       void qc.invalidateQueries({ queryKey: ['application', selected] })
+    },
+  })
+
+  const deleteMut = useMutation({
+    mutationFn: () => tenancyApi.deleteApplication(selected!),
+    onSuccess: () => {
+      setShowDeleteConfirm(false)
+      setSelected(null)
+      void qc.invalidateQueries({ queryKey: ['applications'] })
     },
   })
 
@@ -303,6 +313,22 @@ export default function PropertiesApplicationsPanel({ focusId }: { focusId?: str
                   <p className="text-xs text-slate-500 mt-1">{t('tenancy.createTenantNote', 'Creates a tenant and copies all uploaded documents to their vault.')}</p>
                 </div>
               )}
+
+              {/* Delete — Owner only (enforced server-side); blocked if a tenant or
+                  deposit already links to this application (409, message shown below). */}
+              <div className="pt-2 border-t border-slate-700">
+                <button
+                  onClick={() => setShowDeleteConfirm(true)}
+                  className="text-xs text-red-400 hover:text-red-300"
+                >
+                  {t('tenancy.deleteApplication', 'Delete Application')}
+                </button>
+                {deleteMut.isError && (
+                  <p className="text-xs text-red-400 mt-1">
+                    {(deleteMut.error as Error & { code?: string })?.message ?? t('tenancy.deleteApplicationError', 'Could not delete this application.')}
+                  </p>
+                )}
+              </div>
             </div>
 
             {/* Documents section */}
@@ -382,6 +408,26 @@ export default function PropertiesApplicationsPanel({ focusId }: { focusId?: str
                 className={`px-4 py-2 text-sm text-white rounded disabled:opacity-40 ${decisionModal === 'APPROVED' ? 'bg-green-700 hover:bg-green-600' : 'bg-red-800 hover:bg-red-700'}`}
               >
                 {decideMut.isPending ? t('common.saving', 'Saving...') : t('common.confirm', 'Confirm')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete confirm modal */}
+      {showDeleteConfirm && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-slate-800 rounded-lg p-6 w-full max-w-sm">
+            <h3 className="text-base font-semibold mb-2">{t('tenancy.confirmDeleteApplication', 'Delete this application?')}</h3>
+            <p className="text-sm text-slate-400">{t('tenancy.confirmDeleteApplicationNote', 'This permanently removes the application and its uploaded documents. This cannot be undone.')}</p>
+            <div className="flex gap-2 justify-end mt-4">
+              <button onClick={() => setShowDeleteConfirm(false)} className="px-4 py-2 text-sm text-slate-400 hover:text-slate-200">{t('common.cancel', 'Cancel')}</button>
+              <button
+                onClick={() => deleteMut.mutate()}
+                disabled={deleteMut.isPending}
+                className="px-4 py-2 text-sm text-white rounded disabled:opacity-40 bg-red-800 hover:bg-red-700"
+              >
+                {deleteMut.isPending ? t('common.saving', 'Deleting...') : t('tenancy.deleteApplication', 'Delete Application')}
               </button>
             </div>
           </div>

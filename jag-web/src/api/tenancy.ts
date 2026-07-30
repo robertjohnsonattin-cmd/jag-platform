@@ -85,6 +85,10 @@ export const tenancyApi = {
   createTenantFromApplication: (id: string, body: { first_name?: string; last_name?: string }) =>
     api.post<{ tenant: Record<string, unknown>; docs_copied: number }>(`/properties/applications/${id}/create-tenant`, body),
 
+  /** Owner only. Blocked (409) if a tenant or deposit already links to this application. */
+  deleteApplication: (id: string) =>
+    api.delete<{ deleted: boolean }>(`/properties/applications/${id}`),
+
   // ── Rent Schedule ─────────────────────────────────────────
   getRentSchedule: (params?: { lease_id?: string; status?: string; unit_id?: string; year?: string; tenant_id?: string }) =>
     api.get<Row[]>(`/properties/rent-schedule${qs(params)}`),
