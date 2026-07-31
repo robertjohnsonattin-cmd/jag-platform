@@ -8,7 +8,7 @@ import { fitnessApi } from '../api/fitness'
 import { familyApi, type FamilyMember } from '../api/family'
 import type {
   Exercise, ExerciseCategory, MuscleGroup, TrackingType,
-  WorkoutProgram, WorkoutProgramDetail, ProgramGoal, ProgramStatus,
+  WorkoutProgram, WorkoutProgramDetail, ProgramGoal, ProgramStatus, ProgramWorkoutWithExercises,
   WorkoutSession, WorkoutSessionDetail, WeightUnit,
   PersonalRecord, ProgressMetric,
   FitnessProfile, FitnessLevel, ActivityLevel, EquipmentAccess, BiologicalSex, AiSuggestionResult,
@@ -527,8 +527,8 @@ function AddSetForm({ sessionId, exercises, onLogged }: { sessionId: string; exe
   )
 }
 
-function ActiveSessionPanel({ sessionId, exercises, onCompleted }: {
-  sessionId: string; exercises: Exercise[]; onCompleted: () => void
+function ActiveSessionPanel({ sessionId, exercises, plannedWorkout, onCompleted }: {
+  sessionId: string; exercises: Exercise[]; plannedWorkout?: ProgramWorkoutWithExercises; onCompleted: () => void
 }) {
   const qc = useQueryClient()
   const { data: session } = useQuery<WorkoutSessionDetail>({
@@ -552,6 +552,21 @@ function ActiveSessionPanel({ sessionId, exercises, onCompleted }: {
         <h3 className="text-lg font-semibold">Session in progress · {fmtDate(session.session_date)}</h3>
         <button onClick={complete} className="px-4 py-2 text-sm rounded bg-emerald-600 hover:bg-emerald-500">✓ Complete Session</button>
       </div>
+
+      {plannedWorkout && plannedWorkout.exercises.length > 0 && (
+        <div className="space-y-1 mb-4">
+          <p className="text-xs text-slate-400 uppercase tracking-wide mb-1">Planned — {plannedWorkout.name}</p>
+          {plannedWorkout.exercises.map(pe => (
+            <div key={pe.id} className="flex items-center gap-3 text-sm bg-slate-900 rounded px-3 py-2">
+              <span className="flex-1">{pe.exercise_name}</span>
+              <span className="text-slate-400 text-xs">
+                {pe.target_sets ?? '–'} sets × {pe.target_reps_min && pe.target_reps_max ? `${pe.target_reps_min}-${pe.target_reps_max}` : '–'} reps
+                {pe.rest_seconds ? ` · ${pe.rest_seconds}s rest` : ''}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
 
       {session.logs.length > 0 && (
         <div className="space-y-1 mb-4">
@@ -577,7 +592,9 @@ function ActiveSessionPanel({ sessionId, exercises, onCompleted }: {
   )
 }
 
-function LogWorkoutTab({ initialMemberId, initialSessionId }: { initialMemberId?: string; initialSessionId?: string }) {
+function LogWorkoutTab({ initialMemberId, initialSessionId, initialPlannedWorkout }: {
+  initialMemberId?: string; initialSessionId?: string; initialPlannedWorkout?: ProgramWorkoutWithExercises
+}) {
   const qc = useQueryClient()
   const [memberId, setMemberId] = useState(initialMemberId ?? '')
   const [activeSessionId, setActiveSessionId] = useState<string | null>(initialSessionId ?? null)
@@ -616,6 +633,7 @@ function LogWorkoutTab({ initialMemberId, initialSessionId }: { initialMemberId?
 
       {currentSessionId && (
         <ActiveSessionPanel sessionId={currentSessionId} exercises={exercises}
+          plannedWorkout={currentSessionId === initialSessionId ? initialPlannedWorkout : undefined}
           onCompleted={() => setActiveSessionId(null)} />
       )}
     </div>
@@ -1127,7 +1145,8 @@ function FitnessProfileModal({ familyMemberId, profile, onClose, onSaved }: {
 }
 
 function SuggestedWorkoutCard({ result, onStarted, onRegenerate, regenerating }: {
-  result: AiSuggestionResult; onStarted: (memberId: string, sessionId: string) => void; onRegenerate: () => void; regenerating: boolean
+  result: AiSuggestionResult; onStarted: (memberId: string, sessionId: string, workout: ProgramWorkoutWithExercises) => void
+  onRegenerate: () => void; regenerating: boolean
 }) {
   const [starting, setStarting] = useState(false)
   const workout = result.program.workouts[0]
@@ -1140,7 +1159,7 @@ function SuggestedWorkoutCard({ result, onStarted, onRegenerate, regenerating }:
         program_workout_id: workout.id,
         session_date: new Date().toISOString().slice(0, 10),
       })
-      onStarted(result.program.family_member_id, s.id)
+      onStarted(result.program.family_member_id, s.id, workout)
     } catch (e) { alert((e as Error).message); setStarting(false) }
   }
 
@@ -1180,7 +1199,9 @@ function SuggestedWorkoutCard({ result, onStarted, onRegenerate, regenerating }:
   )
 }
 
-function AiCoachTab({ onWorkoutStarted }: { onWorkoutStarted: (memberId: string, sessionId: string) => void }) {
+function AiCoachTab({ onWorkoutStarted }: {
+  onWorkoutStarted: (memberId: string, sessionId: string, workout: ProgramWorkoutWithExercises) => void
+}) {
   const qc = useQueryClient()
   const [memberId, setMemberId] = useState('')
   const [showProfileModal, setShowProfileModal] = useState(false)
@@ -1304,6 +1325,7 @@ export default function Fitness() {
   const [tab, setTab] = useState<Tab>('ai')
   const [startedMemberId, setStartedMemberId] = useState<string | undefined>()
   const [startedSessionId, setStartedSessionId] = useState<string | undefined>()
+  const [startedWorkout, setStartedWorkout] = useState<ProgramWorkoutWithExercises | undefined>()
 
   return (
     <div>
@@ -1333,12 +1355,12 @@ export default function Fitness() {
         ))}
       </div>
 
-      {tab === 'ai' && <AiCoachTab onWorkoutStarted={(memberId, sessionId) => {
-        setStartedMemberId(memberId); setStartedSessionId(sessionId); setTab('log')
+      {tab === 'ai' && <AiCoachTab onWorkoutStarted={(memberId, sessionId, workout) => {
+        setStartedMemberId(memberId); setStartedSessionId(sessionId); setStartedWorkout(workout); setTab('log')
       }} />}
       {tab === 'exercises' && <ExercisesTab />}
       {tab === 'programs' && <ProgramsTab />}
-      {tab === 'log' && <LogWorkoutTab initialMemberId={startedMemberId} initialSessionId={startedSessionId} />}
+      {tab === 'log' && <LogWorkoutTab initialMemberId={startedMemberId} initialSessionId={startedSessionId} initialPlannedWorkout={startedWorkout} />}
       {tab === 'history' && <HistoryTab />}
       {tab === 'progress' && <ProgressTab />}
       {tab === 'records' && <RecordsTab />}
