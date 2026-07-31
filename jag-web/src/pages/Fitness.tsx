@@ -577,10 +577,10 @@ function ActiveSessionPanel({ sessionId, exercises, onCompleted }: {
   )
 }
 
-function LogWorkoutTab() {
+function LogWorkoutTab({ initialMemberId, initialSessionId }: { initialMemberId?: string; initialSessionId?: string }) {
   const qc = useQueryClient()
-  const [memberId, setMemberId] = useState('')
-  const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
+  const [memberId, setMemberId] = useState(initialMemberId ?? '')
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(initialSessionId ?? null)
 
   const { data: exercises = [] } = useQuery<Exercise[]>({
     queryKey: ['fitness-exercises'],
@@ -1127,7 +1127,7 @@ function FitnessProfileModal({ familyMemberId, profile, onClose, onSaved }: {
 }
 
 function SuggestedWorkoutCard({ result, onStarted, onRegenerate, regenerating }: {
-  result: AiSuggestionResult; onStarted: () => void; onRegenerate: () => void; regenerating: boolean
+  result: AiSuggestionResult; onStarted: (memberId: string, sessionId: string) => void; onRegenerate: () => void; regenerating: boolean
 }) {
   const [starting, setStarting] = useState(false)
   const workout = result.program.workouts[0]
@@ -1135,12 +1135,12 @@ function SuggestedWorkoutCard({ result, onStarted, onRegenerate, regenerating }:
   const start = async () => {
     setStarting(true)
     try {
-      await fitnessApi.startSession({
+      const s = await fitnessApi.startSession({
         family_member_id: result.program.family_member_id,
         program_workout_id: workout.id,
         session_date: new Date().toISOString().slice(0, 10),
       })
-      onStarted()
+      onStarted(result.program.family_member_id, s.id)
     } catch (e) { alert((e as Error).message); setStarting(false) }
   }
 
@@ -1180,7 +1180,7 @@ function SuggestedWorkoutCard({ result, onStarted, onRegenerate, regenerating }:
   )
 }
 
-function AiCoachTab({ onWorkoutStarted }: { onWorkoutStarted: () => void }) {
+function AiCoachTab({ onWorkoutStarted }: { onWorkoutStarted: (memberId: string, sessionId: string) => void }) {
   const qc = useQueryClient()
   const [memberId, setMemberId] = useState('')
   const [showProfileModal, setShowProfileModal] = useState(false)
@@ -1302,6 +1302,8 @@ type Tab = 'ai' | 'programs' | 'log' | 'history' | 'progress' | 'records' | 'exe
 export default function Fitness() {
   const { t } = useTranslation()
   const [tab, setTab] = useState<Tab>('ai')
+  const [startedMemberId, setStartedMemberId] = useState<string | undefined>()
+  const [startedSessionId, setStartedSessionId] = useState<string | undefined>()
 
   return (
     <div>
@@ -1331,10 +1333,12 @@ export default function Fitness() {
         ))}
       </div>
 
-      {tab === 'ai' && <AiCoachTab onWorkoutStarted={() => setTab('log')} />}
+      {tab === 'ai' && <AiCoachTab onWorkoutStarted={(memberId, sessionId) => {
+        setStartedMemberId(memberId); setStartedSessionId(sessionId); setTab('log')
+      }} />}
       {tab === 'exercises' && <ExercisesTab />}
       {tab === 'programs' && <ProgramsTab />}
-      {tab === 'log' && <LogWorkoutTab />}
+      {tab === 'log' && <LogWorkoutTab initialMemberId={startedMemberId} initialSessionId={startedSessionId} />}
       {tab === 'history' && <HistoryTab />}
       {tab === 'progress' && <ProgressTab />}
       {tab === 'records' && <RecordsTab />}
