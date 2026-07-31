@@ -120,6 +120,33 @@ const SuggestSchema = z.object({
   notes:                    z.string().max(500).optional(),
 }).strict();
 
+/**
+ * PRIVACY BOUNDARY, not just a formatting map. Whatever is listed here is read
+ * out of `fam_lifestyle_tracker` and sent to the Gemini API in the coach prompt.
+ * Everything else in that table stays on our own infrastructure.
+ *
+ * Lab-derived values (total/LDL/HDL cholesterol, triglycerides, blood glucose)
+ * were REMOVED on 2026-07-31 at Robert's instruction. They reach this table via
+ * medical-record extraction, so including them meant clinical results off a
+ * family member's lab report were leaving for a third-party API in order to
+ * generate a workout. The coach reasons mainly from weight, sleep, resting heart
+ * rate and blood pressure, so little is lost.
+ *
+ * Before adding a metric, ask whether it is fitness telemetry or a clinical
+ * result — clinical results do not belong here. `fam_lifestyle_tracker` is
+ * SHARED with Medical Records (see the extract-medical-records workflow), so new
+ * clinical metric types will keep appearing in that table over time; they must
+ * not be added to this map. The keys are also used to scope the SQL query, so a
+ * value omitted here is never even loaded into this process.
+ */
+const COACH_HEALTH_METRIC_LABELS: Record<string, string> = {
+  WEIGHT_KG: 'Weight (latest tracker entry)', STEPS: 'Steps (latest)', SLEEP_HOURS: 'Sleep last night',
+  CALORIES: 'Calories (latest)', EXERCISE_MINUTES: 'Exercise minutes (latest)',
+  BLOOD_PRESSURE_SYSTOLIC: 'Blood pressure — systolic', BLOOD_PRESSURE_DIASTOLIC: 'Blood pressure — diastolic',
+  RESTING_HEART_RATE: 'Resting heart rate',
+};
+const COACH_HEALTH_METRIC_TYPES = Object.keys(COACH_HEALTH_METRIC_LABELS);
+
 interface LibraryExercise {
   id: string; name: string; category: string; muscle_group: string;
   tracking_type: string; equipment: string | null;
@@ -188,12 +215,16 @@ aiCoachRouter.post('/suggest', async (req: Request, res: Response, next: NextFun
         // Most recent Health Tracker reading per metric (Lifestyle module) — gives
         // the coach real physiological context (resting HR, BP, sleep, weight trend,
         // daily activity) instead of only the static profile fields.
+        // Scoped to COACH_HEALTH_METRIC_TYPES at the QUERY, not just when building
+        // the prompt: this table also holds clinical lab values, and those must
+        // never be loaded into a request that ends in a third-party API call.
         const healthMetrics = await c.query<{ metric_type: string; value: string; unit: string; entry_date: string }>(
           `SELECT DISTINCT ON (metric_type) metric_type, value, unit, entry_date::text
            FROM fam_lifestyle_tracker
            WHERE family_member_id = $1 AND entry_date >= CURRENT_DATE - INTERVAL '30 days'
+             AND metric_type = ANY($2)
            ORDER BY metric_type, entry_date DESC`,
-          [body.family_member_id],
+          [body.family_member_id, COACH_HEALTH_METRIC_TYPES],
         );
 
         const library = await c.query<LibraryExercise>(
@@ -221,17 +252,9 @@ aiCoachRouter.post('/suggest', async (req: Request, res: Response, next: NextFun
         profile.body_fat_pct ? `Body fat: ${profile.body_fat_pct}%` : null,
       ].filter(Boolean).join('\n- ');
 
-      const HEALTH_METRIC_LABELS: Record<string, string> = {
-        WEIGHT_KG: 'Weight (latest tracker entry)', STEPS: 'Steps (latest)', SLEEP_HOURS: 'Sleep last night',
-        CALORIES: 'Calories (latest)', EXERCISE_MINUTES: 'Exercise minutes (latest)',
-        BLOOD_PRESSURE_SYSTOLIC: 'Blood pressure — systolic', BLOOD_PRESSURE_DIASTOLIC: 'Blood pressure — diastolic',
-        RESTING_HEART_RATE: 'Resting heart rate',
-        CHOLESTEROL_TOTAL: 'Total cholesterol', CHOLESTEROL_LDL: 'LDL cholesterol', CHOLESTEROL_HDL: 'HDL cholesterol',
-        TRIGLYCERIDES: 'Triglycerides', BLOOD_GLUCOSE: 'Blood glucose',
-      };
       const healthLines = healthMetrics
-        .filter(m => HEALTH_METRIC_LABELS[m.metric_type])
-        .map(m => `${HEALTH_METRIC_LABELS[m.metric_type]}: ${m.value} ${m.unit} (logged ${m.entry_date})`)
+        .filter(m => COACH_HEALTH_METRIC_LABELS[m.metric_type])
+        .map(m => `${COACH_HEALTH_METRIC_LABELS[m.metric_type]}: ${m.value} ${m.unit} (logged ${m.entry_date})`)
         .join('\n- ');
 
       const exerciseListText = library
