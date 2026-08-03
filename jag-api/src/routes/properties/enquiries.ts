@@ -16,6 +16,7 @@ import { logger } from '../../lib/logger';
 import { ok, err } from '../../lib/response';
 import { sendText, sendTemplate } from '../../lib/whatsapp';
 import { enqueueNotification } from '../../lib/notifications';
+import { phoneKey } from '../../lib/phone';
 
 export const enquiriesRouter = Router();
 
@@ -122,7 +123,40 @@ enquiriesRouter.post('/', async (req: Request, res: Response, next: NextFunction
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
     const body = CreateEnquirySchema.parse(req.body);
 
-    const row = await withOwnerRLS(propertiesPool, ownerId, async client => {
+    // The same prospect can already have an enquiry whose phone was typed in a
+    // different format ('18687871973' vs '8687871973'). Creating a second
+    // record splits their thread across two enquiries, so look up an open
+    // enquiry by the last-7 digit key and merge the new input into it instead.
+    const result = await withOwnerRLS(propertiesPool, ownerId, async client => {
+      const key = phoneKey(body.prospect_phone);
+      if (key) {
+        const { rows } = await client.query<Record<string, unknown>>(
+          `SELECT id FROM prop_enquiries
+           WHERE owner_id = $1 AND right(regexp_replace(prospect_phone, '\\D', '', 'g'), 7) = $2
+             AND stage NOT IN ('REJECTED','WITHDRAWN','CONVERTED')
+           ORDER BY created_at DESC LIMIT 1`,
+          [ownerId, key],
+        );
+        const existing = rows[0];
+        if (existing) {
+          const { rows: merged } = await client.query(
+            `UPDATE prop_enquiries SET
+               prospect_name   = COALESCE($1, prospect_name),
+               prospect_email  = COALESCE(NULLIF($2,''), prospect_email),
+               unit_id         = COALESCE($3, unit_id),
+               property_id     = COALESCE($4, property_id),
+               initial_message = COALESCE($5, initial_message),
+               notes           = COALESCE($6, notes),
+               last_contact_at = NOW()
+             WHERE id = $7 AND owner_id = $8 RETURNING *`,
+            [body.prospect_name ?? null, body.prospect_email || null,
+             body.unit_id ?? null, body.property_id ?? null,
+             body.initial_message ?? null, body.notes ?? null,
+             existing.id, ownerId],
+          );
+          return { row: merged[0], merged: true };
+        }
+      }
       const { rows } = await client.query(
         `INSERT INTO prop_enquiries (owner_id, unit_id, property_id, prospect_name, prospect_phone,
            prospect_email, channel, initial_message, notes)
@@ -131,8 +165,15 @@ enquiriesRouter.post('/', async (req: Request, res: Response, next: NextFunction
          body.prospect_phone ?? null, body.prospect_email || null, body.channel,
          body.initial_message ?? null, body.notes ?? null],
       );
-      return rows[0];
+      return { row: rows[0], merged: false };
     });
+
+    const row = result.row;
+    if (result.merged) {
+      logger.info({ entity: 'PROPERTIES', action: 'ENQUIRY_MERGED', record_id: row.id, user_id: ownerId });
+      return void res.status(200).json(ok({ ...row, merged: true }));
+    }
+
     logger.info({ entity: 'PROPERTIES', action: 'ENQUIRY_CREATED', record_id: row.id, user_id: ownerId });
 
     // Owner in-app notification — new tenancy lead (non-blocking).

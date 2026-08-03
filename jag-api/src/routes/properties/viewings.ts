@@ -393,13 +393,35 @@ publicBookingRouter.post('/:slug', async (req: Request, res: Response, next: Nex
     const ownerId: string = unit.owner_id;
 
     const enquiry = await withOwnerRLS(propertiesPool, ownerId, async client => {
+      // A prospect can submit a second screening form for the same unit while
+      // the first is still open — reuse that enquiry (updating its answers)
+      // rather than creating a second record that splits their thread.
+      const { rows } = await client.query<Record<string, unknown>>(
+        `SELECT id FROM prop_enquiries
+         WHERE owner_id = $1 AND unit_id = $2
+           AND right(regexp_replace(prospect_phone, '\\D', '', 'g'), 7) = $3
+           AND stage NOT IN ('REJECTED','WITHDRAWN','CONVERTED')
+         ORDER BY created_at DESC LIMIT 1`,
+        [ownerId, unit.id, body.prospect_phone.replace(/\D/g, '').slice(-7)],
+      );
+      const existing = rows[0];
+      if (existing) {
+        await client.query(
+          `UPDATE prop_enquiries
+           SET prospect_name = $1, prospect_email = COALESCE(NULLIF($2,''), prospect_email),
+               screening_answers = $3, last_contact_at = NOW()
+           WHERE id = $4`,
+          [body.prospect_name, body.prospect_email ?? null, JSON.stringify(body.screening_answers), existing.id],
+        );
+        return { id: existing.id as string, merged: true };
+      }
       const { rows: [row] } = await client.query(
         `INSERT INTO prop_enquiries (owner_id, unit_id, property_id, prospect_name, prospect_phone, prospect_email, channel, stage, screening_answers)
          VALUES ($1,$2,$3,$4,$5,$6,'WHATSAPP','SCREENING',$7) RETURNING id`,
         [ownerId, unit.id, unit.property_id, body.prospect_name, body.prospect_phone, body.prospect_email ?? null,
          JSON.stringify(body.screening_answers)],
       );
-      return row;
+      return { id: row.id as string, merged: false };
     });
 
     logger.info({ entity: 'PROPERTIES', action: 'PUBLIC_SCREENING_SUBMITTED', record_id: enquiry.id });

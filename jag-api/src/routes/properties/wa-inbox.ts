@@ -17,6 +17,7 @@ import { logger } from '../../lib/logger';
 import { ok, err } from '../../lib/response';
 import { sendText, uploadMedia, sendMedia, mimeToWaMediaType } from '../../lib/whatsapp';
 import { minioClient, ensureBucket, mediaObjectKey, getObjectStream, getObjectStat, BUCKET_DOCUMENTS } from '../../lib/minio';
+import { phoneKey } from '../../lib/phone';
 
 export const waInboxRouter = Router();
 
@@ -46,27 +47,48 @@ waInboxRouter.get('/', async (req: Request, res: Response, next: NextFunction) =
     const ownerId = req.rlsCtx.userId;
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
 
+    const businessKey = phoneKey(process.env.WHATSAPP_PHONE_NUMBER_ID ?? 'JAG');
+
     const rows = await withOwnerRLS(propertiesPool, ownerId, async client => {
       const { rows: r } = await client.query<Record<string, unknown>>(
+        // A "conversation" is one person, not one phone string: inbound rows
+        // carry the customer as from_number, outbound rows carry the BUSINESS
+        // number as from_number and the customer as to_number. Group on the
+        // customer side of each row, keyed by the last-7 digit key (so
+        // '18687871973' and '8687871973' are the same person), and surface the
+        // most recent full number string for display. The business number
+        // itself is excluded so a thread of outbound messages can never appear
+        // as its own contact.
         `WITH thread_summary AS (
-           SELECT from_number AS phone, MAX(created_at) AS last_at,
-                  COUNT(*) FILTER (WHERE direction = 'INBOUND' AND read_at IS NULL) AS unread
+           SELECT CASE WHEN direction = 'INBOUND' THEN from_number ELSE to_number END AS phone,
+                  created_at AS last_at,
+                  (direction = 'INBOUND' AND read_at IS NULL)::int AS unread
            FROM prop_whatsapp_messages
            WHERE owner_id = $1
-           GROUP BY from_number
            UNION ALL
-           SELECT contact_phone AS phone, MAX(created_at) AS last_at, 0 AS unread
+           SELECT contact_phone AS phone, created_at AS last_at, 0 AS unread
            FROM prop_contact_log
            WHERE owner_id = $1
-           GROUP BY contact_phone
+         ),
+         keyed AS (
+           SELECT right(regexp_replace(phone, '\\D', '', 'g'), 7) AS phone_key,
+                  phone, last_at, unread
+           FROM thread_summary
+           WHERE phone IS NOT NULL
+         ),
+         ranked AS (
+           SELECT phone_key, phone, last_at, unread,
+                  row_number() OVER (PARTITION BY phone_key ORDER BY last_at DESC, phone) AS rn,
+                  max(last_at)   OVER (PARTITION BY phone_key) AS key_last_at,
+                  sum(unread)    OVER (PARTITION BY phone_key) AS key_unread
+           FROM keyed
          )
-         SELECT phone, MAX(last_at) AS last_at, SUM(unread) AS unread
-         FROM thread_summary
-         WHERE phone IS NOT NULL
-         GROUP BY phone
-         ORDER BY last_at DESC
+         SELECT phone, key_last_at AS last_at, key_unread AS unread
+         FROM ranked
+         WHERE rn = 1 AND phone_key IS DISTINCT FROM $2
+         ORDER BY key_last_at DESC
          LIMIT 200`,
-        [ownerId],
+        [ownerId, businessKey],
       );
       return r;
     });
@@ -109,16 +131,24 @@ waInboxRouter.get('/:phone', async (req: Request, res: Response, next: NextFunct
     const ownerId = req.rlsCtx.userId;
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
     const { phone } = PhoneParam.parse(req.params);
+    const key = phoneKey(phone);
+    if (!key) return void res.status(400).json(err('Invalid phone number', 'VALIDATION_ERROR'));
 
     const data = await withOwnerRLS(propertiesPool, ownerId, async client => {
+      // The thread belongs to one person, matched on the last-7 digit key so a
+      // message logged under a different formatting of the same number still
+      // lands in the same conversation. Every message from or to the customer
+      // carries the customer's number on one side or the other.
       const { rows: messages } = await client.query<Record<string, unknown>>(
         `SELECT id, direction, message_type, body, template_name, delivery_status,
                 created_at, sent_at, read_at, (media_url IS NOT NULL) AS has_media,
                 'WA_MESSAGE' AS entry_type
          FROM prop_whatsapp_messages
-         WHERE owner_id = $1 AND (from_number = $2 OR to_number = $2)
+         WHERE owner_id = $1
+           AND right(regexp_replace(coalesce(from_number,''), '\\D', '', 'g'), 7) = $2
+           AND right(regexp_replace(coalesce(to_number,''),   '\\D', '', 'g'), 7) = $2
          ORDER BY created_at DESC LIMIT 200`,
-        [ownerId, phone],
+        [ownerId, key],
       );
 
       const { rows: log } = await client.query<Record<string, unknown>>(
@@ -126,9 +156,9 @@ waInboxRouter.get('/:phone', async (req: Request, res: Response, next: NextFunct
                 created_at, created_by,
                 'CONTACT_LOG' AS entry_type
          FROM prop_contact_log
-         WHERE owner_id = $1 AND contact_phone = $2
+         WHERE owner_id = $1 AND right(regexp_replace(contact_phone, '\\D', '', 'g'), 7) = $2
          ORDER BY created_at DESC LIMIT 200`,
-        [ownerId, phone],
+        [ownerId, key],
       );
 
       const { rows: enquiries } = await client.query<Record<string, unknown>>(
@@ -137,16 +167,17 @@ waInboxRouter.get('/:phone', async (req: Request, res: Response, next: NextFunct
          FROM prop_enquiries e
          LEFT JOIN prop_units u ON u.id = e.unit_id
          LEFT JOIN prop_properties p ON p.id = e.property_id
-         WHERE e.owner_id = $1 AND e.prospect_phone = $2
+         WHERE e.owner_id = $1 AND right(regexp_replace(e.prospect_phone, '\\D', '', 'g'), 7) = $2
          ORDER BY e.created_at DESC LIMIT 10`,
-        [ownerId, phone],
+        [ownerId, key],
       );
 
       // Mark unread inbound messages as read
       await client.query(
         `UPDATE prop_whatsapp_messages SET read_at = NOW()
-         WHERE owner_id = $1 AND from_number = $2 AND direction = 'INBOUND' AND read_at IS NULL`,
-        [ownerId, phone],
+         WHERE owner_id = $1 AND direction = 'INBOUND' AND read_at IS NULL
+           AND right(regexp_replace(coalesce(from_number,''), '\\D', '', 'g'), 7) = $2`,
+        [ownerId, key],
       );
 
       return { phone, messages, log, enquiries };

@@ -17,6 +17,18 @@ Newest entries are roughly at the top, matching the original ordering.
 
 ---
 
+- **Same person split into multiple chats / duplicate enquiries — FIXED (code) 2026-08-03, deploy pending STD-12**: Robert noticed one customer (18687871973, Brijhan Lopez) appeared as 3 different conversations with different content. Root cause was two independent fragmentation bugs, both from treating the exact phone string as the identity link:
+  1. **The WA inbox sidebar grouped messages by `from_number`.** Outbound messages store the **business** number (`1184193838112120`) as `from_number` and the customer as `to_number` — so every outbound reply across all customers lumped into one giant "conversation" under the business number, separate from the customer's own `18687871973` thread. Same thread, two sidebar entries.
+  2. **The same person had multiple `prop_enquiries` records because the phone was typed differently.** Brijhan had `18687871973` (webhook-created NEW_LEAD) and `8687871973` — 10 digits, no country code — (manual APPLICATION_SENT). Enquiry threads filter by `enquiry_id`, so each enquiry showed a *different subset* of the same 7-message thread; the 7th message had `enquiry_id = NULL` so no enquiry showed it. Same pattern repeated across the list (Hugh Smith ×3, Ashante Charles ×2, etc.).
+  - **Fix — one canonical phone key everywhere.** New `src/lib/phone.ts` exports `phoneKey()` (strip non-digits, keep last 7 — the TT subscriber number; the same convention the enquiries routes already used for the `?phone=` filter). Applied to all four linkage points:
+    - `wa-inbox.ts` sidebar: groups on the **customer** side of each row (INBOUND → `from_number`, OUTBOUND → `to_number`) keyed by last-7, surface the most recent full number string, unread summed across the key, and the **business number excluded** so it can never render as its own contact. Thread/log/enquiry/unread-mark queries all match on the last-7 key instead of exact string.
+    - `enquiries.ts` POST: looks up an open enquiry by phone key first and **merges** the new input into it (COALESCE name/email/unit/property/message/notes) instead of blind-inserting a duplicate; returns `merged: true` on that path.
+    - `whatsapp-webhook.ts`: the open-enquiry reuse lookup now matches on the phone key, so a sender's full number finds a manually-typed 10-digit enquiry (and vice versa) instead of creating a new NEW_LEAD.
+    - `viewings.ts` public booking: reuses the open enquiry for the **same unit + phone key** (updating screening answers/name/email) instead of inserting a second SCREENING record.
+  - Typecheck clean. No migration — application code only. Full deploy (API `dist/` + `prod_modules/` + web `dist/`) awaiting Robert's STD-12 "Type YES".
+
+---
+
 - **Enquiry conversation threads showed no date or time — FIXED + DEPLOYED 2026-08-03**: Follow-up to the WhatsApp inbox fix above — the same gap existed in the conversation thread inside each enquiry's detail pane (`Properties → Leasing → Enquiries`, `PropertiesEnquiriesPanel.tsx`): message bubbles rendered body text only, no timestamp at all. The API already returned `sent_at`/`created_at` for these (`GET /properties/enquiries/:id` does `SELECT * FROM prop_whatsapp_messages`), so no backend change was needed. Fix: each bubble now shows the time (`sent_at ?? created_at` fallback, `en-TT` HH:mm, same format as the inbox) and a WhatsApp-style date divider chip marks the first message of each calendar day (`_showDate` flag, `toLocaleDateString('en-TT')`). Frontend-only, deployed via `deploy.sh --frontend-only`.
 
 ---

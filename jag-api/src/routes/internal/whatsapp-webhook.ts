@@ -13,6 +13,7 @@ import { sendTemplate, sendList, sendText, verifyWebhookSignature, downloadMedia
 import { enqueueNotification } from '../../lib/notifications';
 import { minioClient, ensureBucket, mediaObjectKey, BUCKET_DOCUMENTS } from '../../lib/minio';
 import { extractPaymentSlip, type PaymentSlipExtract } from '../../lib/rent-payment-ocr';
+import { phoneKey } from '../../lib/phone';
 import type { PoolClient } from 'pg';
 
 export const whatsappWebhookRouter = Router();
@@ -368,12 +369,15 @@ async function processInboundMessage(msg: Record<string, unknown>): Promise<void
       // no linked WA message row, so that lookup missed them and every reply
       // spawned a brand-new duplicate enquiry for the same prospect. Reuse
       // the most recent still-open enquiry for this phone instead of creating
-      // a new one, unless it's already closed out.
+      // a new one, unless it's already closed out. Matched on the last-7 digit
+      // key so a manually-typed enquiry ('8687871973') is found from the
+      // sender's full number ('18687871973') and vice versa.
       const { rows: [openEnquiry] } = await client.query(
         `SELECT id FROM prop_enquiries
-         WHERE prospect_phone = $1 AND stage NOT IN ('REJECTED','WITHDRAWN','CONVERTED')
+         WHERE right(regexp_replace(prospect_phone, '\\D', '', 'g'), 7) = $1
+           AND stage NOT IN ('REJECTED','WITHDRAWN','CONVERTED')
          ORDER BY created_at DESC LIMIT 1`,
-        [from],
+        [phoneKey(from)],
       );
       enquiryId = openEnquiry?.id ?? null;
     }
