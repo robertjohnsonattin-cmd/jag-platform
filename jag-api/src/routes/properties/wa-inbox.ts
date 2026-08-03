@@ -145,8 +145,8 @@ waInboxRouter.get('/:phone', async (req: Request, res: Response, next: NextFunct
                 'WA_MESSAGE' AS entry_type
          FROM prop_whatsapp_messages
          WHERE owner_id = $1
-           AND right(regexp_replace(coalesce(from_number,''), '\\D', '', 'g'), 7) = $2
-           AND right(regexp_replace(coalesce(to_number,''),   '\\D', '', 'g'), 7) = $2
+           AND ( right(regexp_replace(coalesce(from_number,''), '\\D', '', 'g'), 7) = $2
+              OR right(regexp_replace(coalesce(to_number,''),   '\\D', '', 'g'), 7) = $2 )
          ORDER BY created_at DESC LIMIT 200`,
         [ownerId, key],
       );

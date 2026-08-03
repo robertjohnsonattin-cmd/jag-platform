@@ -134,14 +134,24 @@ compares the last 7 digits of each side
 number, specific enough to identify a person and short enough to survive a missing country
 or area code. A shorter input matches nothing rather than everything.
 
-WhatsApp is the other direction of the same problem: `prop_whatsapp_messages` stores the
-E.164 digits Meta sent (`18682912786`) and `GET /wa-inbox/:phone` matches
-`from_number`/`to_number` **exactly**, so a tenant phone must be normalised before it is
-used as a thread key — see `waNumber()` in `components/properties/TenantDetail.tsx`
-(7 digits → prefix `1868`, 10 → prefix `1`, 11 already E.164). Without it every tenant's
-Messages tab renders an empty thread that looks like "no messages" rather than "wrong key".
-That empty state deliberately prints the number it searched, so a future mismatch is
-diagnosable instead of silent.
+WhatsApp is the same problem with a server-side answer. `prop_whatsapp_messages` stores
+the E.164 digits Meta sent (`18682912786`), outbound rows store the business number
+(phone-number-id `1184193838112120`) as `from_number` with the customer as `to_number`,
+and a manually-typed enquiry can enter the phone without a country code (`8687871973`).
+Since session 2026-08-03 every linkage point uses **`phoneKey()`** (`src/lib/phone.ts`) —
+strip non-digits, keep the last 7 (the TT subscriber number, same convention as the
+enquiries `?phone=` filter above) — instead of matching the exact phone string. A "chat"
+or "thread" is one person, keyed on the last-7 of the customer number, whatever format the
+number was entered in. `phoneKey()` is a grouping/dedupe aid only, never something we dial
+or display. (`waNumber()` in `TenantDetail.tsx` still exists for the frontend's display
+side.) The WA inbox sidebar groups each row on the **customer** side (INBOUND →
+`from_number`, OUTBOUND → `to_number`) keyed by last-7, surfaces the most recent full
+number string, sums unread across the key, and excludes the business number so an
+outbound-only thread can never render as its own contact. New enquiries are **merged into
+an open enquiry** for the same last-7 key rather than blind-inserting a second record
+(`enquiries.ts` POST returns `merged: true`; `whatsapp-webhook.ts` NEW_LEAD reuse and
+`viewings.ts` public screening reuse the same key) — this only prevents *future* splits;
+existing duplicate `prop_enquiries` rows are not auto-merged.
 
 ### Two intake paths into prop_property_tenants, only one links the application (session 2026-07-30)
 `POST /applications/:id/create-tenant` creates a tenant and backfills `prop_applications.tenant_id`.
