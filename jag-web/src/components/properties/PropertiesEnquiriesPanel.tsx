@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { tenancyApi } from '../../api/tenancy'
@@ -68,6 +68,16 @@ export default function PropertiesEnquiriesPanel({ focusId }: { focusId?: string
     mutationFn: (body: string) => tenancyApi.sendEnquiryReply(selected!, body),
     onSuccess: () => { setReplyBody(''); qc.invalidateQueries({ queryKey: ['enquiry', selected] }) },
   })
+
+  // Auto-scroll the thread to the newest message whenever it changes. Without
+  // this, a reply you just sent lands at the bottom of a fixed-height box that
+  // isn't scrolled, so it looks like it "disappeared" (it is there, just below
+  // the fold) — same class of bug as the WA inbox thread had.
+  const threadRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const el = threadRef.current
+    if (el) el.scrollTop = el.scrollHeight
+  }, [detail])
 
   const [createPending, setCreatePending] = useState(false)
   const [createError, setCreateError] = useState('')
@@ -266,7 +276,7 @@ export default function PropertiesEnquiriesPanel({ focusId }: { focusId?: string
             {/* WA thread */}
             <div className="flex-1">
               <p className="text-xs text-slate-500 mb-1">{t('tenancy.messages', 'Messages')}</p>
-              <div className="bg-slate-900 rounded p-2 h-48 overflow-y-auto flex flex-col gap-2">
+              <div ref={threadRef} className="bg-slate-900 rounded p-2 h-48 overflow-y-auto flex flex-col gap-2">
                 {(() => {
                   // WhatsApp-style day chips + per-message time, same as the inbox
                   // thread: first message of each calendar day gets a date divider.
