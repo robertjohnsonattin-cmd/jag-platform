@@ -6,6 +6,7 @@
 // POST   /api/v1/properties/enquiries/:id/send-reply
 // POST   /api/v1/properties/enquiries/:id/send-app-link
 // POST   /api/v1/properties/enquiries/:id/screening-decision
+// POST   /api/v1/properties/enquiries/merge — merge duplicate enquiries for one person
 
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import { z } from 'zod';
@@ -17,13 +18,19 @@ import { ok, err } from '../../lib/response';
 import { sendText, sendTemplate } from '../../lib/whatsapp';
 import { enqueueNotification } from '../../lib/notifications';
 import { phoneKey } from '../../lib/phone';
+import type { PoolClient } from 'pg';
 
 export const enquiriesRouter = Router();
 
 const IdParam = z.object({ id: z.string().uuid() });
 
 const ChannelEnum = z.enum(['WHATSAPP','SMS','EMAIL','PHONE','WALK_IN','FACEBOOK']);
-const StageEnum   = z.enum(['NEW_LEAD','VIEWING_SCHEDULED','VIEWED','APPLICATION_SENT','APPLICATION_RECEIVED','SCREENING','APPROVED','REJECTED','WITHDRAWN','CONVERTED']);
+const StageEnum   = z.enum(['NEW_LEAD','VIEWING_SCHEDULED','VIEWED','APPLICATION_SENT','APPLICATION_RECEIVED','SCREENING','APPROVED','REJECTED','WITHDRAWN','CONVERTED','MERGED']);
+
+const MergeEnquiriesSchema = z.object({
+  keeper_id: z.string().uuid(),
+  merge_ids: z.array(z.string().uuid()).min(1).max(50),
+}).strict();
 
 const CreateEnquirySchema = z.object({
   unit_id:          z.string().uuid().optional(),
@@ -214,6 +221,181 @@ enquiriesRouter.post('/', async (req: Request, res: Response, next: NextFunction
 
     res.status(201).json(ok(row));
   } catch (e) { next(e); }
+});
+
+// ── Merge duplicate enquiries for the same prospect ──────────────────────────
+// The phone-key fix (session 2026-08-03) stopped NEW splits, but enquiries that
+// already existed when the number was typed two different ways (Brijhan ×2,
+// Hugh Smith ×3, etc.) still list separately. This merges a group into one
+// "keeper": every child record (WA messages, contact log, viewings, applications)
+// is repointed to the keeper, blank fields on the keeper are filled from the
+// merged rows, and the merged-away rows are KEPT and marked stage='MERGED' with
+// merged_into_id = keeper — nothing is deleted, so the audit trail survives.
+// Guard rails: all rows must share the same last-7 phone key AND the same unit
+// (all-NULL counts as equal), and none may already be merged. This is deliberately
+// conservative — merging across units would collapse two genuinely different leads.
+class MergeError extends Error {
+  constructor(message: string, public code: string, public status: number) {
+    super(message);
+    this.name = 'MergeError';
+  }
+}
+
+export async function mergeEnquiriesTx(
+  client: PoolClient,
+  ownerId: string,
+  keeperId: string,
+  mergeIds: string[],
+): Promise<{
+  keeper_id: string;
+  messages_moved: number;
+  logs_moved: number;
+  viewings_moved: number;
+  applications_moved: number;
+  merged_rows: number;
+}> {
+  const mergeSet = [...new Set(mergeIds)].filter(id => id !== keeperId);
+  if (mergeSet.length === 0) {
+    throw new MergeError('Nothing to merge — no duplicates selected.', 'VALIDATION_ERROR', 400);
+  }
+
+  const allIds = [keeperId, ...mergeSet];
+  const { rows: found } = await client.query<Record<string, unknown>>(
+    `SELECT * FROM prop_enquiries WHERE id = ANY($1::uuid[]) AND owner_id = $2`,
+    [allIds, ownerId],
+  );
+  if (found.length !== allIds.length) {
+    const got = new Set(found.map(r => String(r.id)));
+    const missing = allIds.filter(id => !got.has(id));
+    throw new MergeError(`Enquiry not found or not yours: ${missing.join(', ')}`, 'NOT_FOUND', 404);
+  }
+
+  const byId = new Map(found.map(r => [String(r.id), r]));
+  const keeper = byId.get(keeperId);
+  if (!keeper) throw new MergeError('Keeper enquiry not found.', 'NOT_FOUND', 404);
+  if (keeper['stage'] === 'MERGED' || keeper['merged_into_id'] != null) {
+    throw new MergeError('The keeper enquiry is itself already merged.', 'VALIDATION_ERROR', 400);
+  }
+
+  for (const id of mergeSet) {
+    const r = byId.get(id);
+    if (!r) throw new MergeError(`Enquiry not found: ${id}`, 'NOT_FOUND', 404);
+    if (r['stage'] === 'MERGED' || r['merged_into_id'] != null) {
+      throw new MergeError('One of the selected enquiries is already merged.', 'VALIDATION_ERROR', 400);
+    }
+  }
+
+  // Same person: identical last-7 phone key, and every row must carry a phone.
+  const key = phoneKey(String(keeper['prospect_phone'] ?? ''));
+  if (!key) {
+    throw new MergeError('Keeper enquiry has no phone number — cannot verify it is the same person.', 'VALIDATION_ERROR', 400);
+  }
+  for (const id of mergeSet) {
+    const k = phoneKey(String(byId.get(id)!.prospect_phone ?? ''));
+    if (!k || k !== key) {
+      throw new MergeError('Selected enquiries have different phone numbers (or one has none). Only same-number enquiries can be merged.', 'VALIDATION_ERROR', 400);
+    }
+  }
+
+  // Same lead: identical unit (all-NULL counts as equal). Refuse cross-unit merges.
+  const unit = keeper['unit_id'] ?? null;
+  for (const id of mergeSet) {
+    if ((byId.get(id)!['unit_id'] ?? null) !== unit) {
+      throw new MergeError('Selected enquiries are for different units. Only same-unit duplicates should be merged — set the unit on the duplicates first, or merge manually.', 'VALIDATION_ERROR', 400);
+    }
+  }
+
+  // Coalesce: keep the keeper's own value where present, else fill from the
+  // merged rows in order (never overwrite the keeper's real data).
+  const fill = (field: string, current: unknown): unknown => {
+    if (current !== null && current !== undefined && current !== '') return current;
+    for (const id of mergeSet) {
+      const v = byId.get(id)![field];
+      if (v !== null && v !== undefined && v !== '') return v;
+    }
+    return current;
+  };
+
+  const lastContact = [keeper, ...mergeSet.map(id => byId.get(id)!)]
+    .map(r => new Date(String(r['last_contact_at'] ?? r['created_at'])))
+    .filter(d => !isNaN(d.getTime()))
+    .map(d => d.getTime())
+    .sort((a, b) => b - a)[0];
+  const lastContactIso = lastContact ? new Date(lastContact).toISOString() : null;
+
+  await client.query(
+    `UPDATE prop_enquiries SET
+       prospect_name = $1, prospect_email = $2, initial_message = $3, notes = $4,
+       screening_answers = $5, last_contact_at = $6
+     WHERE id = $7 AND owner_id = $8`,
+    [fill('prospect_name', keeper['prospect_name']),
+     fill('prospect_email', keeper['prospect_email']),
+     fill('initial_message', keeper['initial_message']),
+     fill('notes', keeper['notes']),
+     fill('screening_answers', keeper['screening_answers']),
+     lastContactIso ?? keeper['last_contact_at'], keeperId, ownerId],
+  );
+
+  // Reassign every child record to the keeper. RLS (withOwnerRLS transaction)
+  // scopes all four by owner; the explicit owner filter is belt-and-braces.
+  const moved = async (sql: string): Promise<number> => {
+    const { rows: [r] } = await client.query<{ n: string }>(sql, [keeperId, mergeSet, ownerId]);
+    return Number(r?.n ?? 0);
+  };
+
+  const messages_moved  = await moved(
+    `WITH m AS (UPDATE prop_whatsapp_messages SET enquiry_id = $1
+                WHERE enquiry_id = ANY($2::uuid[]) AND owner_id = $3 RETURNING id)
+     SELECT count(*)::int AS n FROM m`);
+  const logs_moved      = await moved(
+    `WITH m AS (UPDATE prop_contact_log SET enquiry_id = $1
+                WHERE enquiry_id = ANY($2::uuid[]) AND owner_id = $3 RETURNING id)
+     SELECT count(*)::int AS n FROM m`);
+  const viewings_moved  = await moved(
+    `WITH m AS (UPDATE prop_viewings SET enquiry_id = $1
+                WHERE enquiry_id = ANY($2::uuid[]) AND owner_id = $3 RETURNING id)
+     SELECT count(*)::int AS n FROM m`);
+  const applications_moved = await moved(
+    `WITH m AS (UPDATE prop_applications SET enquiry_id = $1
+                WHERE enquiry_id = ANY($2::uuid[]) AND owner_id = $3 RETURNING id)
+     SELECT count(*)::int AS n FROM m`);
+
+  // Keep the merged-away rows, marked MERGED with a pointer to the keeper.
+  const { rows: [merged] } = await client.query<{ n: string }>(
+    `WITH m AS (UPDATE prop_enquiries SET stage = 'MERGED', merged_into_id = $1, last_contact_at = NOW()
+                WHERE id = ANY($2::uuid[]) AND owner_id = $3 RETURNING id)
+     SELECT count(*)::int AS n FROM m`,
+    [keeperId, mergeSet, ownerId],
+  );
+
+  return {
+    keeper_id: keeperId,
+    messages_moved,
+    logs_moved,
+    viewings_moved,
+    applications_moved,
+    merged_rows: Number(merged?.n ?? 0),
+  };
+}
+
+enquiriesRouter.post('/merge', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const ownerId = req.rlsCtx.userId;
+    if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
+    const body = MergeEnquiriesSchema.parse(req.body);
+
+    const result = await withOwnerRLS(propertiesPool, ownerId, client =>
+      mergeEnquiriesTx(client, ownerId, body.keeper_id, body.merge_ids));
+
+    logger.info({
+      entity: 'PROPERTIES', action: 'ENQUIRIES_MERGED', keeper_id: body.keeper_id,
+      merged_rows: result.merged_rows, messages_moved: result.messages_moved, user_id: ownerId,
+    });
+    res.json(ok(result));
+  } catch (e) {
+    if (e instanceof MergeError) return void res.status(e.status).json(err(e.message, e.code));
+    next(e);
+  }
 });
 
 enquiriesRouter.get('/:id', async (req: Request, res: Response, next: NextFunction) => {

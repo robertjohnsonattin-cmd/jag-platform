@@ -48,6 +48,15 @@ export const tenancyApi = {
   screeningDecision: (id: string, decision: 'APPROVE' | 'REJECT') =>
     api.post<Row>(`/properties/enquiries/${id}/screening-decision`, { decision }),
 
+  /** Merge duplicate enquiries for one person into a single keeper enquiry.
+   *  `keeperId` keeps the conversation; the rest are repointed to it and marked
+   *  MERGED with `merged_into_id = keeperId` (never deleted). */
+  mergeEnquiries: (keeperId: string, mergeIds: string[]) =>
+    api.post<{
+      keeper_id: string; messages_moved: number; logs_moved: number;
+      viewings_moved: number; applications_moved: number; merged_rows: number;
+    }>('/properties/enquiries/merge', { keeper_id: keeperId, merge_ids: mergeIds }),
+
   // ── Viewings ─────────────────────────────────────────────
   getViewings: (params?: { status?: string }) =>
     api.get<Row[]>(`/properties/viewings${qs(params)}`),

@@ -1,11 +1,11 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { tenancyApi } from '../../api/tenancy'
 import { propertiesApi } from '../../api/properties'
 import type { Property, Unit } from '../../types/properties'
 
-const STAGE_ORDER = ['NEW_LEAD','VIEWING_SCHEDULED','VIEWED','APPLICATION_SENT','APPLICATION_RECEIVED','SCREENING','APPROVED','REJECTED','WITHDRAWN','CONVERTED'] as const
+const STAGE_ORDER = ['NEW_LEAD','VIEWING_SCHEDULED','VIEWED','APPLICATION_SENT','APPLICATION_RECEIVED','SCREENING','APPROVED','REJECTED','WITHDRAWN','CONVERTED','MERGED'] as const
 const STAGE_COLORS: Record<string, string> = {
   NEW_LEAD: 'bg-slate-700 text-slate-300 border-slate-600',
   VIEWING_SCHEDULED: 'bg-blue-900/50 text-blue-300 border-blue-700',
@@ -17,6 +17,7 @@ const STAGE_COLORS: Record<string, string> = {
   REJECTED: 'bg-red-900/50 text-red-300 border-red-700',
   WITHDRAWN: 'bg-slate-700 text-slate-500 border-slate-600',
   CONVERTED: 'bg-teal-900/50 text-teal-300 border-teal-700',
+  MERGED: 'bg-slate-800 text-slate-500 border-slate-700',
 }
 
 const cls = 'w-full bg-slate-700 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500'
@@ -94,6 +95,57 @@ export default function PropertiesEnquiriesPanel({ focusId }: { focusId?: string
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['enquiries'] }); qc.invalidateQueries({ queryKey: ['enquiry', selected] }) },
   })
 
+  // ── Merge duplicates ────────────────────────────────────────────────────────
+  // Groups the loaded enquiries by last-7 phone key (same convention as the API's
+  // phoneKey()); a group is mergeable only if ≥2 rows are not already MERGED.
+  const mergeGroups = useMemo(() => {
+    const byKey = new Map<string, Array<Record<string, unknown>>>()
+    for (const e of enquiries as Array<Record<string, unknown>>) {
+      if (e['stage'] === 'MERGED' || e['merged_into_id'] != null) continue
+      const digits = String(e['prospect_phone'] ?? '').replace(/\D/g, '')
+      if (!digits) continue
+      const key = digits.slice(-7)
+      if (!byKey.has(key)) byKey.set(key, [])
+      byKey.get(key)!.push(e)
+    }
+    return [...byKey.entries()].filter(([, rows]) => rows.length >= 2).map(([key, rows]) => ({ key, rows }))
+  }, [enquiries])
+
+  const [showMerge, setShowMerge] = useState(false)
+  const [mergeSel, setMergeSel] = useState<Record<string, { keeper: string; merge: string[] }>>({})
+  const [mergeError, setMergeError] = useState('')
+
+  const openMerge = () => {
+    const sel: Record<string, { keeper: string; merge: string[] }> = {}
+    for (const g of mergeGroups) {
+      const sorted = [...g.rows].sort((a, b) =>
+        new Date(String(b['created_at'])).getTime() - new Date(String(a['created_at'])).getTime())
+      const keeper = String(sorted[0]['id'])
+      sel[g.key] = { keeper, merge: sorted.slice(1).map(r => String(r['id'])) }
+    }
+    setMergeSel(sel)
+    setMergeError('')
+    setShowMerge(true)
+  }
+
+  const mergeMut = useMutation({
+    mutationFn: ({ keeperId, mergeIds }: { keeperId: string; mergeIds: string[] }) =>
+      tenancyApi.mergeEnquiries(keeperId, mergeIds),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['enquiries'] })
+      qc.invalidateQueries({ queryKey: ['enquiry'] })
+    },
+  })
+
+  const doMerge = (key: string) => {
+    const sel = mergeSel[key]
+    if (!sel || sel.merge.length === 0) return
+    mergeMut.mutate({ keeperId: sel.keeper, mergeIds: sel.merge }, {
+      onError: e => setMergeError(e instanceof Error ? e.message : 'Merge failed'),
+      onSuccess: () => { setMergeError(''); setMergeSel(s => ({ ...s, [key]: { ...s[key], merge: [] } })) },
+    })
+  }
+
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
     setForm(f => ({ ...f, [k]: e.target.value }))
 
@@ -106,8 +158,14 @@ export default function PropertiesEnquiriesPanel({ focusId }: { focusId?: string
             <option value="">{t('tenancy.allStages', 'All stages')}</option>
             {STAGE_ORDER.map(s => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}
           </select>
+          {mergeGroups.length > 0 && (
+            <button onClick={openMerge}
+              className="ml-auto px-3 py-1.5 text-sm border border-emerald-700 text-emerald-300 hover:bg-emerald-900/40 rounded">
+              {t('tenancy.mergeDuplicates', 'Merge duplicates')}
+            </button>
+          )}
           <button onClick={() => setShowAdd(true)}
-            className="ml-auto px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded">
+            className={mergeGroups.length > 0 ? 'ml-2 px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded' : 'ml-auto px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded'}>
             + {t('tenancy.addEnquiry', 'Add Enquiry')}
           </button>
         </div>
@@ -304,6 +362,79 @@ export default function PropertiesEnquiriesPanel({ focusId }: { focusId?: string
               <button onClick={saveEnquiry} disabled={createPending}
                 className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded disabled:opacity-40">
                 {createPending ? t('common.saving', 'Saving...') : t('common.save', 'Save')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Merge duplicates modal */}
+      {showMerge && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-slate-800 rounded-lg p-6 w-full max-w-2xl max-h-[85vh] overflow-y-auto">
+            <h2 className="text-lg font-semibold mb-1">{t('tenancy.mergeDuplicates', 'Merge duplicate enquiries')}</h2>
+            <p className="text-xs text-slate-400 mb-4">
+              {t('tenancy.mergeHint', 'Groups with the same phone number. Pick which record keeps the conversation, then merge the rest into it. The merged-away records are kept and marked MERGED.')}
+            </p>
+            <div className="text-[11px] text-slate-500 mb-3">○ {t('tenancy.mergeKeeper', 'keeper (kept)')} · ☑ {t('tenancy.mergeTarget', 'merged into keeper')}</div>
+
+            {mergeGroups.length === 0 && (
+              <p className="text-sm text-slate-500">{t('tenancy.mergeNone', 'No duplicate groups to merge.')}</p>
+            )}
+
+            {mergeGroups.map(g => {
+              const sel = mergeSel[g.key]
+              return (
+                <div key={g.key} className="border border-slate-600 rounded p-3 mb-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-xs font-medium text-slate-300">
+                      {String(g.rows[0]['prospect_phone'] ?? '')} · {g.rows.length} {t('tenancy.records', 'records')}
+                    </p>
+                    {sel && (
+                      <button onClick={() => doMerge(g.key)}
+                        disabled={mergeMut.isPending || sel.merge.length === 0}
+                        className="px-3 py-1 text-xs bg-emerald-700 hover:bg-emerald-600 text-white rounded disabled:opacity-40">
+                        {mergeMut.isPending ? t('common.saving', 'Merging...') : t('tenancy.mergeGroup', 'Merge →')}
+                      </button>
+                    )}
+                  </div>
+                  {g.rows.map(r => {
+                    const id = String(r['id'])
+                    const isKeeper = sel?.keeper === id
+                    const isMerged = sel?.merge.includes(id)
+                    return (
+                      <div key={id} className="flex items-center gap-2 py-1 text-sm">
+                        <input type="radio" name={`keeper-${g.key}`} checked={!!isKeeper}
+                          onChange={() => setMergeSel(s => ({
+                            ...s,
+                            [g.key]: { keeper: id, merge: (s[g.key]?.merge ?? []).filter(x => x !== id) },
+                          }))}
+                          title={t('tenancy.mergeKeeper', 'Keep this one')} />
+                        <input type="checkbox" checked={!!isMerged} disabled={isKeeper}
+                          onChange={() => setMergeSel(s => {
+                            const cur = s[g.key]
+                            if (!cur) return s
+                            const has = cur.merge.includes(id)
+                            const next = has ? cur.merge.filter(x => x !== id) : [...cur.merge, id]
+                            return { ...s, [g.key]: { ...cur, merge: next } }
+                          })} />
+                        <span className="flex-1 text-slate-200 truncate">{String(r['prospect_name'] ?? '—')}</span>
+                        <span className="text-xs text-slate-500">{String(r['prospect_phone'] ?? '')}</span>
+                        {Boolean(r['unit_number']) && <span className="text-xs text-slate-500">Unit {String(r['unit_number'])}</span>}
+                        <span className={`text-xs px-1.5 py-0.5 rounded border ${STAGE_COLORS[String(r['stage'])] ?? 'bg-slate-700 text-slate-400 border-slate-600'}`}>
+                          {String(r['stage']).replace(/_/g, ' ')}
+                        </span>
+                      </div>
+                    )
+                  })}
+                </div>
+              )
+            })}
+
+            {mergeError && <p className="text-xs text-red-400 mb-2">{mergeError}</p>}
+            <div className="flex gap-2 justify-end mt-2">
+              <button onClick={() => setShowMerge(false)} className="px-4 py-2 text-sm text-slate-400 hover:text-slate-200">
+                {t('common.close', 'Close')}
               </button>
             </div>
           </div>
