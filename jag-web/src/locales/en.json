@@ -2940,6 +2940,8 @@
     "mergeGroup": "Merge",
     "mergeKeeper": "keeper (kept)",
     "mergeTarget": "merged into keeper",
+    "mergedBanner": "This enquiry was merged into another record — its messages live on the kept conversation.",
+    "mergedOpenKeeper": "Open the kept conversation →",
     "records": "records",
     "screeningAnswers": "Pre-Screening Answers",
     "stage": "Stage",

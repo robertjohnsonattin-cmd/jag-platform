@@ -183,7 +183,7 @@ export default function PropertiesEnquiriesPanel({ focusId }: { focusId?: string
         {enquiries.length === 0 && <p className="text-sm text-slate-500 py-6 text-center">{t('tenancy.noEnquiries', 'No enquiries yet.')}</p>}
         {enquiries.map((eq: Record<string, unknown>) => (
           <div key={String(eq['id'])}
-            onClick={() => setSelected(String(eq['id']))}
+            onClick={() => setSelected(String(eq['merged_into_id'] ?? eq['id']))}
             className={`p-3 rounded border mb-2 cursor-pointer transition-colors ${selected === String(eq['id']) ? 'border-blue-500 bg-slate-700' : 'border-slate-700 bg-slate-800 hover:bg-slate-750'}`}>
             <div className="flex items-center justify-between">
               <p className="text-sm font-medium text-slate-200">{String(eq['prospect_name'] ?? '—')}</p>
@@ -210,6 +210,16 @@ export default function PropertiesEnquiriesPanel({ focusId }: { focusId?: string
               <p className="text-sm text-slate-400">{String(detail['prospect_phone'] ?? '')} · {String(detail['prospect_email'] ?? '')}</p>
               <p className="text-xs text-slate-500 mt-1">{String(detail['channel'])} · {String(detail['initial_message'] ?? '').slice(0, 80)}</p>
             </div>
+
+            {detail['merged_into_id'] != null && (
+              <div className="bg-amber-900/30 border border-amber-700 rounded p-2 text-xs text-amber-200">
+                {t('tenancy.mergedBanner', 'This enquiry was merged into another record — its messages live on the kept conversation.')}
+                <button onClick={() => setSelected(String(detail['merged_into_id']))}
+                  className="ml-2 text-amber-300 underline hover:text-amber-100">
+                  {t('tenancy.mergedOpenKeeper', 'Open the kept conversation →')}
+                </button>
+              </div>
+            )}
 
             <div>
               <p className="text-xs text-slate-500 mb-1">{t('tenancy.stage', 'Stage')}</p>
