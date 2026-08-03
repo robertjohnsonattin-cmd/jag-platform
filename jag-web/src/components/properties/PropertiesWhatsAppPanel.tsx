@@ -46,12 +46,20 @@ export default function PropertiesWhatsAppPanel() {
 
   const phone = selectedPhone ?? newPhone
 
-  // Merge WA messages + contact log into a unified timeline sorted by time
+  // Merge WA messages + contact log into a unified timeline sorted by time,
+  // flagging the first entry of each calendar day for a date divider
   const timeline = (() => {
     if (!threadData) return []
     const msgs = (threadData.messages ?? []).map((m: Record<string, unknown>) => ({ ...m, _type: 'WA', _time: String(m['created_at']) }))
     const log  = (threadData.log ?? []).map((l: Record<string, unknown>) => ({ ...l, _type: 'LOG', _time: String(l['created_at']) }))
-    return [...msgs, ...log].sort((a, b) => new Date(a._time).getTime() - new Date(b._time).getTime())
+    const sorted: Array<Record<string, unknown>> = [...msgs, ...log].sort((a, b) => new Date(a._time).getTime() - new Date(b._time).getTime())
+    let prevDay = ''
+    for (const e of sorted) {
+      const day = new Date(String(e['sent_at'] ?? e['created_at'])).toDateString()
+      e['_showDate'] = day !== prevDay
+      prevDay = day
+    }
+    return sorted
   })()
 
   const sendMut = useMutation({
@@ -141,6 +149,15 @@ export default function PropertiesWhatsAppPanel() {
                 <p className="text-xs text-slate-600 text-center mt-4">{t('tenancy.noMessages', 'No messages yet.')}</p>
               )}
               {timeline.map((entry: Record<string, unknown>) => {
+                if (entry['_showDate']) {
+                  return (
+                    <div key={`day-${String(entry['id'])}`} className="flex justify-center my-1.5">
+                      <span className="text-[11px] text-slate-500 bg-slate-800 rounded-full px-2 py-0.5">
+                        {new Date(String(entry['sent_at'] ?? entry['created_at'])).toLocaleDateString('en-TT')}
+                      </span>
+                    </div>
+                  )
+                }
                 if (entry['_type'] === 'WA') {
                   const isOut = entry['direction'] === 'OUTBOUND'
                   const hasMedia = Boolean(entry['has_media'])
