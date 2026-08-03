@@ -209,16 +209,40 @@ export default function PropertiesEnquiriesPanel({ focusId }: { focusId?: string
             <div className="flex-1">
               <p className="text-xs text-slate-500 mb-1">{t('tenancy.messages', 'Messages')}</p>
               <div className="bg-slate-900 rounded p-2 h-48 overflow-y-auto flex flex-col gap-2">
-                {((detail['messages'] as unknown[]) ?? []).map((msg: unknown) => {
-                  const m = msg as Record<string, unknown>
-                  return (
-                    <div key={String(m['id'])} className={`flex ${m['direction'] === 'OUTBOUND' ? 'justify-end' : 'justify-start'}`}>
-                      <div className={`max-w-[80%] rounded p-2 text-xs ${m['direction'] === 'OUTBOUND' ? 'bg-blue-700 text-white' : 'bg-slate-700 text-slate-200'}`}>
-                        {m['template_name'] ? `[${m['template_name']}]` : String(m['body'] ?? '')}
+                {(() => {
+                  // WhatsApp-style day chips + per-message time, same as the inbox
+                  // thread: first message of each calendar day gets a date divider.
+                  const msgs: Array<Record<string, unknown>> = ((detail['messages'] as unknown[]) ?? []).map(m => ({ ...(m as Record<string, unknown>) }))
+                  const sorted = msgs.sort((a, b) =>
+                    new Date(String(a['sent_at'] ?? a['created_at'])).getTime() - new Date(String(b['sent_at'] ?? b['created_at'])).getTime())
+                  let prevDay = ''
+                  for (const e of sorted) {
+                    const day = new Date(String(e['sent_at'] ?? e['created_at'])).toDateString()
+                    e['_showDate'] = day !== prevDay
+                    prevDay = day
+                  }
+                  return sorted.map((m: Record<string, unknown>) => {
+                    if (m['_showDate']) {
+                      return (
+                        <div key={`day-${String(m['id'])}`} className="flex justify-center">
+                          <span className="text-[10px] text-slate-500 bg-slate-800 rounded-full px-2 py-0.5">
+                            {new Date(String(m['sent_at'] ?? m['created_at'])).toLocaleDateString('en-TT')}
+                          </span>
+                        </div>
+                      )
+                    }
+                    return (
+                      <div key={String(m['id'])} className={`flex ${m['direction'] === 'OUTBOUND' ? 'justify-end' : 'justify-start'}`}>
+                        <div className={`max-w-[80%] rounded p-2 text-xs ${m['direction'] === 'OUTBOUND' ? 'bg-blue-700 text-white' : 'bg-slate-700 text-slate-200'}`}>
+                          {m['template_name'] ? `[${m['template_name']}]` : String(m['body'] ?? '')}
+                          <p className="text-[10px] opacity-60 mt-0.5 text-right">
+                            {new Date(String(m['sent_at'] ?? m['created_at'])).toLocaleTimeString('en-TT', { hour: '2-digit', minute: '2-digit' })}
+                          </p>
+                        </div>
                       </div>
-                    </div>
-                  )
-                })}
+                    )
+                  })
+                })()}
               </div>
               <div className="flex gap-2 mt-2">
                 <input className={cls} placeholder={t('tenancy.typeMessage', 'Type a reply...')}
