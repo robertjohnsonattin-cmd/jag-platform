@@ -171,7 +171,7 @@ export default function PropertiesWhatsAppPanel() {
                           ? <span className="italic text-xs opacity-80">[{String(entry['template_name'])}]</span>
                           : String(entry['body'] ?? '')}
                         <p className="text-xs opacity-60 mt-0.5">
-                          {entry['sent_at'] ? new Date(String(entry['sent_at'])).toLocaleTimeString('en-TT', { hour: '2-digit', minute: '2-digit' }) : ''}
+                          {new Date(String(entry['sent_at'] ?? entry['created_at'])).toLocaleTimeString('en-TT', { hour: '2-digit', minute: '2-digit' })}
                           {isOut && Boolean(entry['delivery_status']) && <span className="ml-1">· {entry['delivery_status'] as string}</span>}
                         </p>
                       </div>

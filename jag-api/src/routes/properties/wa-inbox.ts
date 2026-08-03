@@ -113,7 +113,7 @@ waInboxRouter.get('/:phone', async (req: Request, res: Response, next: NextFunct
     const data = await withOwnerRLS(propertiesPool, ownerId, async client => {
       const { rows: messages } = await client.query<Record<string, unknown>>(
         `SELECT id, direction, message_type, body, template_name, delivery_status,
-                created_at, read_at, (media_url IS NOT NULL) AS has_media,
+                created_at, sent_at, read_at, (media_url IS NOT NULL) AS has_media,
                 'WA_MESSAGE' AS entry_type
          FROM prop_whatsapp_messages
          WHERE owner_id = $1 AND (from_number = $2 OR to_number = $2)
