@@ -21,6 +21,7 @@
 import { Pool } from 'pg';
 import { withOwnerRLS, type RLSContext } from '../middleware/rls';
 import { mergeEnquiriesTx } from '../routes/properties/enquiries';
+import { phoneKey } from '../lib/phone';
 
 const DB_URL = process.env.DATABASE_URL_PROPERTIES;
 const describe_ = DB_URL ? describe : describe.skip;
@@ -112,6 +113,43 @@ describe_('enquiry merge — jag_properties (STD-03)', () => {
         withOwnerRLS(client, ctx, c => mergeEnquiriesTx(c, OWNER, OTHER, [DUPE])),
       ).rejects.toThrow('already merged');
     } finally { client.release(); }
+  });
+
+  it('detail thread includes messages with no enquiry_id (phone-key match)', async () => {
+    // Regression: the enquiry detail endpoint used to filter messages by
+    // enquiry_id, so a message sent from the WA inbox (enquiry_id = NULL) was
+    // visible in the Inbox but never in the Leasing thread. It must be found by
+    // the last-7 phone key instead, exactly like the inbox thread query.
+    const ORPHAN = 'e0000000-0000-0000-0004-000000000002'; // same key as KEEPER, no enquiry_id
+    const client = await pool.connect();
+    try {
+      await withOwnerRLS(client, ctx, async cl => {
+        await cl.query(
+          `INSERT INTO prop_whatsapp_messages
+             (id, owner_id, direction, from_number, to_number, enquiry_id, message_type, body, delivery_status, sent_at)
+           VALUES ($1, $2, 'OUTBOUND', '1184193838112120', '18687871973', NULL, 'TEXT', 'sent from inbox', 'SENT', NOW())
+           ON CONFLICT (id) DO NOTHING`,
+          [ORPHAN, OWNER],
+        );
+      });
+      const { rows: [row] } = await withOwnerRLS(client, ctx, async cl => {
+        const { rows: [enquiry] } = await cl.query('SELECT * FROM prop_enquiries WHERE id = $1', [KEEPER]);
+        const { rows: msgs } = await cl.query(
+          `SELECT * FROM prop_whatsapp_messages
+           WHERE right(regexp_replace(coalesce(from_number, ''), '\D', '', 'g'), 7) = $1
+              OR right(regexp_replace(coalesce(to_number, ''),   '\D', '', 'g'), 7) = $1
+           ORDER BY created_at ASC`,
+          [phoneKey(String(enquiry.prospect_phone))],
+        );
+        return { ...enquiry, messages: msgs };
+      });
+      expect(row.messages.some((m: { id: string }) => String(m.id) === ORPHAN)).toBe(true);
+    } finally {
+      await withOwnerRLS(client, ctx, async cl => {
+        await cl.query('DELETE FROM prop_whatsapp_messages WHERE id = $1', [ORPHAN]);
+      });
+      client.release();
+    }
   });
 
   afterAll(async () => {

@@ -414,10 +414,27 @@ enquiriesRouter.get('/:id', async (req: Request, res: Response, next: NextFuncti
         [id, ownerId],
       );
       if (!enquiry) return null;
-      const { rows: messages } = await client.query(
-        `SELECT * FROM prop_whatsapp_messages WHERE enquiry_id = $1 ORDER BY created_at ASC`,
-        [id],
-      );
+      // The thread belongs to the *person*, not the row: the WA inbox groups
+      // messages by the last-7 phone key (from_number OR to_number), and some
+      // messages were sent from the inbox panel or predate the enquiry, so they
+      // carry no enquiry_id. Match the same way here or the Leasing thread
+      // silently drops messages the Inbox shows — e.g. Brijhan's "Yes.
+      // Confirmed. i tried calling you..." (2026-07-28) had enquiry_id = NULL
+      // and was invisible in Enquiries. Fall back to enquiry_id only when the
+      // enquiry has no phone to key on.
+      const key = phoneKey(String(enquiry.prospect_phone ?? ''));
+      const { rows: messages } = key
+        ? await client.query(
+            `SELECT * FROM prop_whatsapp_messages
+             WHERE right(regexp_replace(coalesce(from_number, ''), '\D', '', 'g'), 7) = $1
+                OR right(regexp_replace(coalesce(to_number, ''),   '\D', '', 'g'), 7) = $1
+             ORDER BY created_at ASC`,
+            [key],
+          )
+        : await client.query(
+            `SELECT * FROM prop_whatsapp_messages WHERE enquiry_id = $1 ORDER BY created_at ASC`,
+            [id],
+          );
       return { ...enquiry, messages };
     });
 
