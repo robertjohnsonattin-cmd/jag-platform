@@ -435,6 +435,11 @@ enquiriesRouter.get('/:id', async (req: Request, res: Response, next: NextFuncti
             `SELECT * FROM prop_whatsapp_messages WHERE enquiry_id = $1 ORDER BY created_at ASC`,
             [id],
           );
+      logger.info({
+        entity: 'PROPERTIES', action: 'ENQUIRY_DETAIL_DEBUG',
+        enquiry_id: id, owner_id: ownerId, phone_key: key ?? null,
+        messages_returned: messages.length, enquiry_stage: enquiry.stage,
+      });
       return { ...enquiry, messages };
     });
 
