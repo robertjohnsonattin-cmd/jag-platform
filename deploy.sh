@@ -71,6 +71,33 @@ tar_upload() {
   " || fail "Remote extract of $label failed."
 }
 
+# Same transfer as tar_upload (tar+scp, not scp -r — see the comment above)
+# but never removes/recreates $remote_dir itself, only its contents. Required
+# for any directory a running container has bind-mounted (e.g. jag-caddy's
+# /opt/jag/jag-web/dist): Docker binds to the directory's inode at container
+# start, not its path, so rm-then-recreate (or an mv-based swap) silently
+# detaches the mount — the container keeps serving the old inode under its
+# new name (e.g. dist.old) forever, with no error, until the container is
+# restarted. Found session 2026-08-04: a manual mv-swap deploy passed every
+# health check and still served yesterday's JS bundle. Clearing contents
+# in place keeps the same inode, so the running container sees the update
+# immediately with no restart needed.
+tar_upload_inplace() {
+  local local_dir="$1" remote_dir="$2" label="$3"
+  local tmp_tar; tmp_tar="$(mktemp -u).tar.gz"
+  local remote_tar="/tmp/deploy_$(basename "$remote_dir")_$(date +%s).tar.gz"
+  tar -czf "$tmp_tar" -C "$local_dir" . || { rm -f "$tmp_tar"; fail "tar of $label failed."; }
+  $SCP_CMD "$tmp_tar" "$VM_HOST:$remote_tar" || { rm -f "$tmp_tar"; fail "SCP of $label archive failed."; }
+  rm -f "$tmp_tar"
+  $SSH_CMD "$VM_HOST" "
+    set -e
+    find '$remote_dir' -mindepth 1 -delete
+    mkdir -p '$remote_dir'
+    tar -xzf '$remote_tar' -C '$remote_dir'
+    rm -f '$remote_tar'
+  " || fail "Remote extract of $label failed."
+}
+
 # ── Robert sign-off ───────────────────────────────────────────────────────────
 echo ""
 echo -e "${YELLOW}┌─────────────────────────────────────────────────────┐${NC}"
@@ -173,9 +200,10 @@ fi
 # ── Step 7: Deploy frontend ───────────────────────────────────────────────────
 if [[ $SKIP_FRONTEND -eq 0 ]]; then
   info "Step 7/7 — Uploading frontend dist to VM…"
-  # Clear old dist and upload fresh build
-  $SSH_CMD "$VM_HOST" "find ${VM_WEB_DIST:?} -mindepth 1 -delete 2>/dev/null; mkdir -p $VM_WEB_DIST"
-  $SCP_CMD -r "$SCRIPT_DIR/jag-web/dist/." "$VM_HOST:$VM_WEB_DIST/" || fail "SCP of frontend dist failed."
+  # In-place (tar_upload_inplace, not tar_upload): jag-caddy has this directory
+  # bind-mounted live, so it must never be removed/recreated or swapped — see
+  # the comment on tar_upload_inplace.
+  tar_upload_inplace "$SCRIPT_DIR/jag-web/dist" "$VM_WEB_DIST" "frontend dist/"
   info "Frontend deployed to $VM_WEB_DIST."
 else
   info "Step 7/7 — Frontend upload SKIPPED."

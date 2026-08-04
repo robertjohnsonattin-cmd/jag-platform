@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from 'react'
+import { useState, useEffect, useMemo, useRef, Fragment } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { tenancyApi } from '../../api/tenancy'
@@ -299,18 +299,16 @@ export default function PropertiesEnquiriesPanel({ focusId }: { focusId?: string
                     e['_showDate'] = day !== prevDay
                     prevDay = day
                   }
-                  return sorted.map((m: Record<string, unknown>) => {
-                    if (m['_showDate']) {
-                      return (
-                        <div key={`day-${String(m['id'])}`} className="flex justify-center">
+                  return sorted.map((m: Record<string, unknown>) => (
+                    <Fragment key={String(m['id'])}>
+                      {Boolean(m['_showDate']) && (
+                        <div className="flex justify-center">
                           <span className="text-[10px] text-slate-500 bg-slate-800 rounded-full px-2 py-0.5">
                             {new Date(String(m['sent_at'] ?? m['created_at'])).toLocaleDateString('en-TT')}
                           </span>
                         </div>
-                      )
-                    }
-                    return (
-                      <div key={String(m['id'])} className={`flex ${m['direction'] === 'OUTBOUND' ? 'justify-end' : 'justify-start'}`}>
+                      )}
+                      <div className={`flex ${m['direction'] === 'OUTBOUND' ? 'justify-end' : 'justify-start'}`}>
                         <div className={`max-w-[80%] rounded p-2 text-xs ${m['direction'] === 'OUTBOUND' ? 'bg-blue-700 text-white' : 'bg-slate-700 text-slate-200'}`}>
                           {m['template_name'] ? `[${m['template_name']}]` : String(m['body'] ?? '')}
                           <p className="text-[10px] opacity-60 mt-0.5 text-right">
@@ -318,8 +316,8 @@ export default function PropertiesEnquiriesPanel({ focusId }: { focusId?: string
                           </p>
                         </div>
                       </div>
-                    )
-                  })
+                    </Fragment>
+                  ))
                 })()}
               </div>
               <div className="flex gap-2 mt-2">

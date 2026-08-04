@@ -12,8 +12,8 @@ The Dockerfile copies `dist/` (pre-compiled TypeScript) — **NOT** `src/`. Uplo
 
 **Correct deploy sequence for frontend changes:**
 1. `npm run build` — Vite build locally
-2. `scp -r dist/ ubuntu@150.136.151.64:/opt/jag/jag-web/`
-3. No container rebuild needed — Caddy serves static files directly
+2. Sync the build **into** `/opt/jag/jag-web/dist` in place (clear contents, then extract/copy — never delete or rename the `dist` directory itself). `deploy.sh`'s `tar_upload_inplace()` does this correctly.
+3. No container rebuild or restart needed — Caddy serves static files directly, *as long as step 2 never touched the directory's identity* (see the bind-mount gotcha below).
 
 **deploy.sh** (repo root) — STD-12 deploy gate script handles both. Flags: `--api-only`, `--frontend-only`, `--skip-typecheck`, `--skip-zap`, `--no-commit`, `--no-push`.
 Deploy runs **8 steps**: TypeScript compile → frontend build → VM check → **dist + prod_modules/node_modules upload (as of 2026-07-21, both via tar_upload())** → health check → ZAP baseline → frontend upload → **git snapshot (commit + push to off-site backup)**.
@@ -48,6 +48,7 @@ Cloudflare's edge intercepts HTTP `502` and `504` responses from the origin and 
 - `docker-compose.yml` Caddy service has volume mount: `/opt/jag/jag-web/dist:/opt/jag/jag-web/dist:ro`
 - If Caddy container needs recreating after docker-compose.yml change: `docker compose up -d --force-recreate caddy`
 - **Docker overlayfs bind-mount masking (2026-06-13):** If frontend deploys successfully (files in `/opt/jag/jag-web/dist` on host) but site serves 404, the Caddy container's overlayfs layer is shadowing the bind mount. Fix: `docker compose up -d --force-recreate caddy`. Root cause was the image not having the mount path pre-declared — fixed by adding `RUN mkdir -p /opt/jag/jag-web/dist` to `jag-infra/caddy/Dockerfile`.
+- **Bind-mount detachment via directory swap/rm-recreate (found 2026-08-04) — different bug, same symptom class:** Docker's bind mount binds to the directory's *inode* at container start, not its path. Any host-side operation that removes-and-recreates or renames the bind-mounted directory (`mv old dist.old && mv new dist`, or `rm -rf dist && mkdir dist`) silently detaches the mount — the container keeps serving the *old* inode forever (now reachable under whatever new name, e.g. `dist.old`), with zero error, zero log, and every health check still passing. A manual deploy that mv-swapped `/opt/jag/jag-web/dist` passed every check but kept serving yesterday's JS bundle indefinitely; only a hard browser refresh looked like it should have fixed it and didn't, because the problem was never the browser. **Fix: `docker restart jag-caddy` (or any container with a bind-mounted directory) after any deploy that replaced the directory itself rather than its contents.** **Prevention: never swap or recreate a bind-mounted directory — always clear its contents in place and write into the same directory** (`find $dir -mindepth 1 -delete` then extract/copy into `$dir`), exactly what `deploy.sh`'s `tar_upload_inplace()` does. This applies to *any* bind-mounted directory, not just `jag-web/dist` — the same trap exists for `/var/www/jabco.tt` and the Google Calendar key file mount below.
 
 ### OWASP ZAP security scanning
 - Scripts: `security/zap-baseline.sh` (passive, ~5 min, deploy gate) and `security/zap-full-scan.sh` (active, ~60 min, manual)

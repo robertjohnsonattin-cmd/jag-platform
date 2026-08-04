@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect, Fragment } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { tenancyApi } from '../../api/tenancy'
@@ -45,6 +45,7 @@ export default function PropertiesWhatsAppPanel() {
   })
 
   const phone = selectedPhone ?? newPhone
+  const timelineEndRef = useRef<HTMLDivElement>(null)
 
   // Merge WA messages + contact log into a unified timeline sorted by time,
   // flagging the first entry of each calendar day for a date divider
@@ -61,6 +62,10 @@ export default function PropertiesWhatsAppPanel() {
     }
     return sorted
   })()
+
+  useEffect(() => {
+    timelineEndRef.current?.scrollIntoView({ block: 'end' })
+  }, [selectedPhone, timeline.length])
 
   const sendMut = useMutation({
     mutationFn: () => tenancyApi.sendWaInboxReply(phone, msgBody),
@@ -149,66 +154,71 @@ export default function PropertiesWhatsAppPanel() {
                 <p className="text-xs text-slate-600 text-center mt-4">{t('tenancy.noMessages', 'No messages yet.')}</p>
               )}
               {timeline.map((entry: Record<string, unknown>) => {
-                if (entry['_showDate']) {
-                  return (
-                    <div key={`day-${String(entry['id'])}`} className="flex justify-center my-1.5">
-                      <span className="text-[11px] text-slate-500 bg-slate-800 rounded-full px-2 py-0.5">
-                        {new Date(String(entry['sent_at'] ?? entry['created_at'])).toLocaleDateString('en-TT')}
-                      </span>
-                    </div>
-                  )
-                }
+                const dateChip = entry['_showDate'] ? (
+                  <div key={`day-${String(entry['id'])}`} className="flex justify-center my-1.5">
+                    <span className="text-[11px] text-slate-500 bg-slate-800 rounded-full px-2 py-0.5">
+                      {new Date(String(entry['sent_at'] ?? entry['created_at'])).toLocaleDateString('en-TT')}
+                    </span>
+                  </div>
+                ) : null
                 if (entry['_type'] === 'WA') {
                   const isOut = entry['direction'] === 'OUTBOUND'
                   const hasMedia = Boolean(entry['has_media'])
                   const messageType = String(entry['message_type'] ?? '')
                   const mediaPath = `/properties/wa-inbox/media/${String(entry['id'])}`
                   return (
-                    <div key={`wa-${entry['id']}`} className={`flex ${isOut ? 'justify-end' : 'justify-start'}`}>
-                      <div className={`max-w-[72%] rounded-lg px-3 py-2 text-sm ${isOut ? 'bg-blue-700 text-white' : 'bg-slate-700 text-slate-200'}`}>
-                        {hasMedia && messageType === 'IMAGE' && (
-                          <button
-                            type="button"
-                            onClick={() => { void api.objectUrl(mediaPath).then(url => window.open(url, '_blank')) }}
-                            className="block mb-1.5"
-                          >
-                            <AuthedImg path={mediaPath} className="max-h-40 rounded object-cover" />
-                          </button>
-                        )}
-                        {hasMedia && messageType !== 'IMAGE' && (
-                          <button
-                            type="button"
-                            onClick={() => { void api.objectUrl(mediaPath).then(url => window.open(url, '_blank')) }}
-                            className="mb-1.5 flex items-center gap-1 text-xs underline opacity-90"
-                          >
-                            📎 {t('tenancy.openAttachment', 'Open attachment')} ({messageType.toLowerCase()})
-                          </button>
-                        )}
-                        {entry['template_name']
-                          ? <span className="italic text-xs opacity-80">[{String(entry['template_name'])}]</span>
-                          : String(entry['body'] ?? '')}
-                        <p className="text-xs opacity-60 mt-0.5">
-                          {new Date(String(entry['sent_at'] ?? entry['created_at'])).toLocaleTimeString('en-TT', { hour: '2-digit', minute: '2-digit' })}
-                          {isOut && Boolean(entry['delivery_status']) && <span className="ml-1">· {entry['delivery_status'] as string}</span>}
-                        </p>
+                    <Fragment key={`wa-${entry['id']}`}>
+                      {dateChip}
+                      <div className={`flex ${isOut ? 'justify-end' : 'justify-start'}`}>
+                        <div className={`max-w-[72%] rounded-lg px-3 py-2 text-sm ${isOut ? 'bg-blue-700 text-white' : 'bg-slate-700 text-slate-200'}`}>
+                          {hasMedia && messageType === 'IMAGE' && (
+                            <button
+                              type="button"
+                              onClick={() => { void api.objectUrl(mediaPath).then(url => window.open(url, '_blank')) }}
+                              className="block mb-1.5"
+                            >
+                              <AuthedImg path={mediaPath} className="max-h-40 rounded object-cover" />
+                            </button>
+                          )}
+                          {hasMedia && messageType !== 'IMAGE' && (
+                            <button
+                              type="button"
+                              onClick={() => { void api.objectUrl(mediaPath).then(url => window.open(url, '_blank')) }}
+                              className="mb-1.5 flex items-center gap-1 text-xs underline opacity-90"
+                            >
+                              📎 {t('tenancy.openAttachment', 'Open attachment')} ({messageType.toLowerCase()})
+                            </button>
+                          )}
+                          {entry['template_name']
+                            ? <span className="italic text-xs opacity-80">[{String(entry['template_name'])}]</span>
+                            : String(entry['body'] ?? '')}
+                          <p className="text-xs opacity-60 mt-0.5">
+                            {new Date(String(entry['sent_at'] ?? entry['created_at'])).toLocaleTimeString('en-TT', { hour: '2-digit', minute: '2-digit' })}
+                            {isOut && Boolean(entry['delivery_status']) && <span className="ml-1">· {entry['delivery_status'] as string}</span>}
+                          </p>
+                        </div>
                       </div>
-                    </div>
+                    </Fragment>
                   )
                 }
                 // Contact log entry
                 return (
-                  <div key={`log-${entry['id']}`} className="flex justify-center">
-                    <div className="text-xs text-slate-500 bg-slate-800 border border-slate-700 rounded px-3 py-1.5 max-w-[80%]">
-                      <span className="mr-1.5">{LOG_ICON[String(entry['log_type'])] ?? '📌'}</span>
-                      <span className="font-medium text-slate-400">{String(entry['log_type']).replace(/_/g,' ')}</span>
-                      {Boolean(entry['duration_mins']) && <span className="ml-1">({String(entry['duration_mins'])}m)</span>}
-                      {' — '}
-                      {String(entry['body'])}
-                      <span className="ml-2 text-slate-600">{new Date(String(entry['created_at'])).toLocaleTimeString('en-TT', { hour: '2-digit', minute: '2-digit' })}</span>
+                  <Fragment key={`log-${entry['id']}`}>
+                    {dateChip}
+                    <div className="flex justify-center">
+                      <div className="text-xs text-slate-500 bg-slate-800 border border-slate-700 rounded px-3 py-1.5 max-w-[80%]">
+                        <span className="mr-1.5">{LOG_ICON[String(entry['log_type'])] ?? '📌'}</span>
+                        <span className="font-medium text-slate-400">{String(entry['log_type']).replace(/_/g,' ')}</span>
+                        {Boolean(entry['duration_mins']) && <span className="ml-1">({String(entry['duration_mins'])}m)</span>}
+                        {' — '}
+                        {String(entry['body'])}
+                        <span className="ml-2 text-slate-600">{new Date(String(entry['created_at'])).toLocaleTimeString('en-TT', { hour: '2-digit', minute: '2-digit' })}</span>
+                      </div>
                     </div>
-                  </div>
+                  </Fragment>
                 )
               })}
+              <div ref={timelineEndRef} />
             </div>
 
             {/* Compose */}
