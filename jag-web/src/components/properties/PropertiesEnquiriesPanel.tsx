@@ -61,8 +61,19 @@ export default function PropertiesEnquiriesPanel({ focusId }: { focusId?: string
 
   const patchMut = useMutation({
     mutationFn: ({ id, body }: { id: string; body: Record<string, unknown> }) => tenancyApi.patchEnquiry(id, body),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['enquiries'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['enquiries'] })
+      qc.invalidateQueries({ queryKey: ['enquiry'] })
+    },
   })
+
+  // Inline phone correction — a bad number (e.g. missing the 868 country code)
+  // otherwise has no fix path from the UI at all; found 2026-08-04 tracing why
+  // a prospect never got her scheduling link.
+  const [editingPhone, setEditingPhone] = useState(false)
+  const [phoneInput, setPhoneInput] = useState('')
+  const [phoneError, setPhoneError] = useState('')
+  useEffect(() => { setEditingPhone(false); setPhoneError('') }, [selected])
 
   const replyMut = useMutation({
     mutationFn: (body: string) => tenancyApi.sendEnquiryReply(selected!, body),
@@ -207,7 +218,35 @@ export default function PropertiesEnquiriesPanel({ focusId }: { focusId?: string
             </button>
             <div>
               <p className="text-lg font-semibold text-slate-200">{String(detail['prospect_name'] ?? '—')}</p>
-              <p className="text-sm text-slate-400">{String(detail['prospect_phone'] ?? '')} · {String(detail['prospect_email'] ?? '')}</p>
+              {editingPhone ? (
+                <div className="flex items-center gap-1.5 mt-0.5">
+                  <input className={cls + ' !w-36 !py-1'} value={phoneInput}
+                    onChange={e => setPhoneInput(e.target.value)} placeholder="8681234567" />
+                  <button
+                    onClick={() => patchMut.mutate({ id: selected!, body: { prospect_phone: phoneInput } }, {
+                      onSuccess: () => { setEditingPhone(false); setPhoneError('') },
+                      onError: e => setPhoneError(e instanceof Error ? e.message : 'Failed to update phone'),
+                    })}
+                    disabled={patchMut.isPending || !phoneInput.trim()}
+                    className="text-xs text-blue-400 hover:text-blue-300 disabled:opacity-40">
+                    {t('common.save', 'Save')}
+                  </button>
+                  <button onClick={() => { setEditingPhone(false); setPhoneError('') }}
+                    className="text-xs text-slate-500 hover:text-slate-300">
+                    {t('common.cancel', 'Cancel')}
+                  </button>
+                </div>
+              ) : (
+                <p className="text-sm text-slate-400">
+                  {String(detail['prospect_phone'] ?? '—')} · {String(detail['prospect_email'] ?? '')}
+                  <button
+                    onClick={() => { setPhoneInput(String(detail['prospect_phone'] ?? '')); setEditingPhone(true) }}
+                    className="ml-2 text-xs text-blue-400 hover:text-blue-300">
+                    {t('common.edit', 'Edit')}
+                  </button>
+                </p>
+              )}
+              {phoneError && <p className="text-xs text-red-400 mt-0.5">{phoneError}</p>}
               <p className="text-xs text-slate-500 mt-1">{String(detail['channel'])} · {String(detail['initial_message'] ?? '').slice(0, 80)}</p>
             </div>
 

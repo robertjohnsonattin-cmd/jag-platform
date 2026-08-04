@@ -17,7 +17,7 @@ import { logger } from '../../lib/logger';
 import { ok, err } from '../../lib/response';
 import { sendText, sendTemplate } from '../../lib/whatsapp';
 import { enqueueNotification } from '../../lib/notifications';
-import { phoneKey } from '../../lib/phone';
+import { phoneKey, normalizePhone } from '../../lib/phone';
 import type { PoolClient } from 'pg';
 
 export const enquiriesRouter = Router();
@@ -50,6 +50,7 @@ const PatchEnquirySchema = z.object({
   notes:            z.string().nullable().optional(),
   last_contact_at:  z.string().optional(),
   wa_thread_id:     z.string().max(100).nullable().optional(),
+  prospect_phone:   z.string().max(30).optional(),
 }).strict();
 
 const SendReplySchema = z.object({
@@ -129,6 +130,12 @@ enquiriesRouter.post('/', async (req: Request, res: Response, next: NextFunction
     const ownerId = req.rlsCtx.userId;
     if (!ownerId) return void res.status(401).json(err('Unauthorised', 'UNAUTHORIZED'));
     const body = CreateEnquirySchema.parse(req.body);
+
+    if (body.prospect_phone) {
+      const normalized = normalizePhone(body.prospect_phone);
+      if (!normalized.ok) return void res.status(400).json(err(normalized.reason, 'VALIDATION_ERROR'));
+      body.prospect_phone = normalized.value;
+    }
 
     // The same prospect can already have an enquiry whose phone was typed in a
     // different format ('18687871973' vs '8687871973'). Creating a second
@@ -455,6 +462,12 @@ enquiriesRouter.patch('/:id', async (req: Request, res: Response, next: NextFunc
     const { id } = IdParam.parse(req.params);
     const body = PatchEnquirySchema.parse(req.body);
     if (Object.keys(body).length === 0) return void res.status(400).json(err('No fields to update', 'VALIDATION_ERROR'));
+
+    if (body.prospect_phone) {
+      const normalized = normalizePhone(body.prospect_phone);
+      if (!normalized.ok) return void res.status(400).json(err(normalized.reason, 'VALIDATION_ERROR'));
+      body.prospect_phone = normalized.value;
+    }
 
     const sets: string[] = [];
     const vals: unknown[] = [];
